@@ -1,0 +1,260 @@
+{
+  "flow_id": "piton_implementation_loop",
+  "name": "Piton Repository Implementation Loop",
+  "description": "Bounded repository engineering loop for Piton mechanical CAD with exact-head Git/CI proof, source-native authority, exact/review separation, human review, and fabrication release blocked.",
+  "status": "draft",
+  "scope": "task",
+  "version": 1,
+  "builtin": false,
+  "default_lane": "hermes",
+  "default_provider": "openai-codex",
+  "default_model": "gpt-5.6-sol",
+  "dispatch_chain": [
+    {
+      "runtime": "hermes",
+      "provider": "openai-codex",
+      "model": "gpt-5.6-sol"
+    }
+  ],
+  "requires_isolated_worktree": true,
+  "max_steps_per_spawn": 1,
+  "continuation_policy": {
+    "mode": "requeue",
+    "max_steps_per_spawn": 1,
+    "record_step_events": true,
+    "stop_on_delegate_failure": true,
+    "stop_step_types": [
+      "review",
+      "human_input"
+    ]
+  },
+  "worktree_policy": {
+    "required": true,
+    "reuse_across_attempts": true,
+    "canonical_clone_mutation_forbidden": true,
+    "force_push_forbidden": true,
+    "destructive_reset_forbidden": true
+  },
+  "github_lifecycle": {
+    "one_branch": true,
+    "one_pull_request": true,
+    "exact_head_ci_required": true,
+    "merge_gate_step": "merge_on_success_or_loop",
+    "publication_requires_explicit_authorization": true
+  },
+  "runtime_contract": {
+    "one_task_one_flow_session": true,
+    "false_completion_guard": "understand/define output is never implementation completion",
+    "product_completion_requires": [
+      "source_artifacts",
+      "tests",
+      "exact_head_verification",
+      "merged_tree_readback",
+      "install_smoke",
+      "immutable_evidence"
+    ]
+  },
+  "loop": {
+    "loop_kind": "bounded_training_attempts",
+    "max_attempts": 10,
+    "restart_step": "implement_minimally",
+    "gate_step": "merge_on_success_or_loop",
+    "inject_previous_errors": true,
+    "error_packet_required_for_retry": true,
+    "clean_reset_required_between_attempts": false,
+    "prohibit_holdout_leakage": false,
+    "loop_decisions": [
+      "restart_loop",
+      "terminal_success",
+      "stop_policy",
+      "stop_max_attempts"
+    ],
+    "gate_output_contract": {
+      "required": [
+        "loop_decision",
+        "attempt_status",
+        "reason"
+      ],
+      "retry_requires": [
+        "error_packet_payload"
+      ],
+      "retry_packet_fields": [
+        "attempt",
+        "failed_step",
+        "head_sha",
+        "commands",
+        "exit_codes",
+        "failed_checks",
+        "diagnosis",
+        "changed_files",
+        "next_fix",
+        "evidence_refs",
+        "sanitized_logs",
+        "terminal_blockers"
+      ],
+      "retryable_classes": [
+        "code_failure",
+        "unit_test_failure",
+        "integration_failure",
+        "geometry_failure",
+        "step_readback_failure",
+        "review_derivative_failure",
+        "ci_failure",
+        "install_smoke_failure"
+      ],
+      "nonretryable_classes": [
+        "forbidden_scope",
+        "secret_exposure",
+        "ambiguous_authority",
+        "unsafe_fabrication_request",
+        "wrong_repository_or_actor",
+        "protection_bypass",
+        "force_push_required",
+        "corrupt_custody",
+        "missing_human_approval"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "step_id": "prepare_feature_worktree",
+      "name": "Prepare one trusted task-owned feature worktree",
+      "type": "execute",
+      "optional": false,
+      "output_field": "prepare_feature_worktree",
+      "description": "Prepare one trusted task-owned feature worktree.",
+      "prompt_template": "Resolve repository, actor, task, exact protected base SHA, branch, and registered task-owned worktree from trusted metadata. Never implement in the canonical clone. Preserve unrelated dirty state. Refuse force/reset/clean/stash/force-push. Record repo, base SHA, branch, worktree, actor, and authorization. If no remote or remote-write authorization exists, keep work local and block before publication steps."
+    },
+    {
+      "step_id": "understand",
+      "name": "Lock the Piton change contract",
+      "type": "define",
+      "optional": false,
+      "output_field": "understand",
+      "description": "Lock the Piton change contract.",
+      "prompt_template": "State objective, acceptance checks, non-goals, constraints, affected authority surfaces, exact/review artifact implications, and rollback. Preserve fabrication_release=false and machine_actuation=false. An Understand result is not implementation completion."
+    },
+    {
+      "step_id": "inspect",
+      "name": "Inspect current source and evidence",
+      "type": "execute",
+      "optional": false,
+      "output_field": "inspect",
+      "description": "Inspect current source and evidence.",
+      "prompt_template": "Read current-base source, tests, schemas, .otoxan rules, architecture docs, prior evidence, and repository status. Reproduce the current condition before editing. Record exact paths and commands."
+    },
+    {
+      "step_id": "trace",
+      "name": "Trace authority and consequence boundaries",
+      "type": "execute",
+      "optional": false,
+      "output_field": "trace",
+      "description": "Trace authority and consequence boundaries.",
+      "prompt_template": "Trace authored source -> immutable revision -> BuildAttempt -> exact B-rep/STEP -> GLB/STL/3MF derivatives -> checks -> human review -> unreleased export. Identify stale-base, identity, topology, worker, credential, filesystem, and fabrication-release boundaries before mutation."
+    },
+    {
+      "step_id": "implement_minimally",
+      "name": "Implement the smallest source-native change",
+      "type": "execute",
+      "optional": false,
+      "output_field": "implement_minimally",
+      "description": "Implement the smallest source-native change.",
+      "prompt_template": "Write or update failing acceptance tests first, then apply the smallest Piton-native change. Keep one writable source authority. Workers may realize geometry/evidence but cannot mutate authored revisions or review/release state. Do not mix unrelated cleanup."
+    },
+    {
+      "step_id": "test_the_behavior",
+      "name": "Run deterministic product verification",
+      "type": "execute",
+      "optional": false,
+      "output_field": "test_the_behavior",
+      "description": "Run deterministic product verification.",
+      "prompt_template": "Run unit, integration, revision-identity, exact-geometry, STEP readback, review-derivative, Z=0/build-plane, failure-path, security, and artifact-closure checks applicable to the change. Record commands, exit codes, artifact hashes, tolerances, warnings, and environment identity. Exact and review representations remain separate."
+    },
+    {
+      "step_id": "diagnose_and_repeat",
+      "name": "Diagnose failures without deciding the loop",
+      "type": "review",
+      "optional": false,
+      "output_field": "diagnose_and_repeat",
+      "description": "Diagnose failures without deciding the loop.",
+      "prompt_template": "Review failures and produce a sanitized candidate error packet: attempt, failed_step, head_sha, commands, exit_codes, failed_checks, diagnosis, changed_files, next_fix, evidence_refs, sanitized_logs, terminal_blockers. Do not emit loop_decision here; only the final gate decides retry/success/stop."
+    },
+    {
+      "step_id": "review_security_boundaries",
+      "name": "Review Piton authority and safety boundaries",
+      "type": "review",
+      "optional": false,
+      "output_field": "review_security_boundaries",
+      "description": "Review Piton authority and safety boundaries.",
+      "prompt_template": "Verify no secret literals, no untrusted ambient filesystem/network/credentials, no caller-minted authority, no stale-base acceptance, no ambiguous release-critical binding, no worker mutation of authored/channel state, no approval/release implication, and fabrication_release=false. Secret exposure, authority ambiguity, policy denial, unsafe fabrication request, or protection bypass is terminal."
+    },
+    {
+      "step_id": "review_launch_assets",
+      "name": "Review repository, schema, evidence, and operator assets",
+      "type": "review",
+      "optional": false,
+      "output_field": "review_launch_assets",
+      "description": "Review repository, schema, evidence, and operator assets.",
+      "prompt_template": "Verify AGENTS.md, .otoxan pack, pyproject and lock decision, schemas/migrations, CI, doctor/build/export/install/rollback scripts, architecture/rollback/fabrication docs, evidence templates, artifact manifests, and reviewer instructions match the implemented head. Missing required assets block publication."
+    },
+    {
+      "step_id": "final_verification",
+      "name": "Verify the exact current candidate head",
+      "type": "review",
+      "optional": false,
+      "output_field": "final_verification",
+      "description": "Verify the exact current candidate head.",
+      "prompt_template": "Refresh the protected base and compare candidate ancestry/merge-base. If base movement changes the candidate, create a new reviewed head and rerun all head-bound proof. Run full verification against exact candidate HEAD and retain immutable evidence. Queue/task/PR state alone is not product completion."
+    },
+    {
+      "step_id": "report_concisely",
+      "name": "Assemble the review and residual-risk packet",
+      "type": "review",
+      "optional": false,
+      "output_field": "report_concisely",
+      "description": "Assemble the review and residual-risk packet.",
+      "prompt_template": "Report changed files, exact base/head, tests and artifacts, review/exact claim scopes, CI/install state, known risks, rollback, human decisions, fabrication_release=false, and machine_actuation=false. Do not overclaim unavailable browser, kernel, remote, or release evidence."
+    },
+    {
+      "step_id": "push_feature_branch",
+      "name": "Publish the authorized branch without force",
+      "type": "execute",
+      "optional": false,
+      "output_field": "push_feature_branch",
+      "description": "Publish the authorized branch without force.",
+      "prompt_template": "Only with explicit repository-write authorization: reverify repo/actor/branch/base/head/diff, commit explicit intended paths, push without force, require remote head equals local HEAD, and create or reuse exactly one PR for the owned head/base. Otherwise return an external authorization blocker; never improvise a remote."
+    },
+    {
+      "step_id": "watch_cicd",
+      "name": "Observe CI for the exact candidate head",
+      "type": "review",
+      "optional": false,
+      "output_field": "watch_cicd",
+      "description": "Observe CI for the exact candidate head.",
+      "prompt_template": "Observe required check/run IDs only for the exact pushed head SHA with bounded polling. Record required status, conclusions, URLs, mergeability, unresolved review threads, and timeout. Never merge from this step and never accept older green evidence."
+    },
+    {
+      "step_id": "merge_on_success_or_loop",
+      "name": "Sole merge, retry, or terminal gate",
+      "type": "review",
+      "optional": false,
+      "output_field": "merge_on_success_or_loop",
+      "description": "Sole merge, retry, or terminal gate.",
+      "prompt_template": "Reread canonical task/flow/repository/PR/human-review state. Emit exactly one generic loop_decision. terminal_success requires exact-head checks green, human review satisfied, safe merge without bypass, merged-tree equivalence, current-base readback, local install/smoke proof, immutable revision/build/artifact evidence, and fabrication_release=false. restart_loop only for recoverable code/geometry/export/derivative/CI/install failures with structured error_packet_payload and the same task/session/worktree/branch/PR. stop_policy for secrets, authority ambiguity, unsafe fabrication, wrong repo/actor, policy/protection bypass, force-push requirement, or corrupt custody. stop_max_attempts when budget is exhausted."
+    }
+  ],
+  "metadata": {
+    "product": "Piton",
+    "consulted_templates": [
+      "xander:aegis_implementation_loop@v5",
+      "valeria-cruz:azueroland_implementation_loop@v1"
+    ],
+    "consultation_session_id": "ags_a6eda0d79de7",
+    "fabrication_release": false,
+    "machine_actuation": false,
+    "repository_contract_status": "active",
+    "runtime_template_status": "draft",
+    "activation_blocker": "taskqueue snapshot_flow_template omits top-level loop contract",
+    "template_sha256": "35213624c8dfcc93688fd6be5eb0246be5636ac13905ae6e35df361992ac7d64"
+  }
+}
