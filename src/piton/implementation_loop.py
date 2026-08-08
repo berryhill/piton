@@ -41,6 +41,8 @@ class FailureClass(StrEnum):
     CORRUPT_CUSTODY = "corrupt_custody"
     MISSING_HUMAN_APPROVAL = "missing_human_approval"
     MISSING_OPERATOR_MERGE_AUTHORIZATION = "missing_operator_merge_authorization"
+    PULL_REQUEST_READY_FOR_OPERATOR = "pull_request_ready_for_operator"
+    BASE_BRANCH_ADVANCED_WHILE_WAITING = "base_branch_advanced_while_waiting"
 
 
 RETRYABLE_FAILURES = frozenset(
@@ -56,7 +58,13 @@ RETRYABLE_FAILURES = frozenset(
     }
 )
 NONRETRYABLE_FAILURES = frozenset(FailureClass) - RETRYABLE_FAILURES
-WAITING_FAILURES = frozenset({FailureClass.MISSING_OPERATOR_MERGE_AUTHORIZATION})
+WAITING_FAILURES = frozenset(
+    {
+        FailureClass.MISSING_OPERATOR_MERGE_AUTHORIZATION,
+        FailureClass.PULL_REQUEST_READY_FOR_OPERATOR,
+        FailureClass.BASE_BRANCH_ADVANCED_WHILE_WAITING,
+    }
+)
 
 _HEAD_PATTERN = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -317,12 +325,39 @@ class LoopStep:
 
 
 @dataclass(frozen=True)
+class PullRequestLifecyclePolicy:
+    """Fail-closed ownership boundary between queue workers and the PR manager."""
+
+    merge_execution: str
+    serialization_key_fields: Tuple[str, ...]
+    automatic_merge_forbidden: bool
+    one_open_pr_per_task: bool
+    base_drift_action: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "serialization_key_fields", tuple(self.serialization_key_fields)
+        )
+        if self.merge_execution != "interactive_operator_pr_manager":
+            raise ValueError("PR merge execution must belong to the interactive operator manager")
+        if self.serialization_key_fields != ("repository", "base_branch"):
+            raise ValueError("PR serialization must bind repository and base branch")
+        if not self.automatic_merge_forbidden:
+            raise ValueError("queue workers must not auto-merge pull requests")
+        if not self.one_open_pr_per_task:
+            raise ValueError("each task must reuse exactly one open pull request")
+        if self.base_drift_action != "wait_for_operator_pr_manager":
+            raise ValueError("base drift must wait for serialized PR management")
+
+
+@dataclass(frozen=True)
 class ImplementationLoop:
     flow_id: str
     version: int
     max_attempts: int
     restart_step: str
     gate_step: str
+    pr_lifecycle: PullRequestLifecyclePolicy
     steps: Tuple[LoopStep, ...]
 
     def __post_init__(self) -> None:
@@ -340,6 +375,8 @@ class ImplementationLoop:
             raise ValueError("exactly one terminal gate is required")
         if not 1 <= self.max_attempts <= 10:
             raise ValueError("retry budget must be bounded to 1..10")
+        if not isinstance(self.pr_lifecycle, PullRequestLifecyclePolicy):
+            raise ValueError("implementation loop requires a PR lifecycle policy")
 
     def decide(
         self,
@@ -396,10 +433,17 @@ class ImplementationLoop:
 
 PITON_IMPLEMENTATION_LOOP = ImplementationLoop(
     flow_id="piton_implementation_loop",
-    version=1,
+    version=2,
     max_attempts=10,
     restart_step="implement_minimally",
     gate_step="merge_on_success_or_loop",
+    pr_lifecycle=PullRequestLifecyclePolicy(
+        merge_execution="interactive_operator_pr_manager",
+        serialization_key_fields=("repository", "base_branch"),
+        automatic_merge_forbidden=True,
+        one_open_pr_per_task=True,
+        base_drift_action="wait_for_operator_pr_manager",
+    ),
     steps=(
         LoopStep("prepare_feature_worktree", "Prepare one trusted task-owned feature worktree"),
         LoopStep("understand", "Lock the Piton change contract"),

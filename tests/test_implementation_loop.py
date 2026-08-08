@@ -1,3 +1,5 @@
+import json
+import pathlib
 import unittest
 
 from piton.implementation_loop import (
@@ -54,6 +56,46 @@ class ImplementationLoopTests(unittest.TestCase):
         self.assertEqual("merge_on_success_or_loop", PITON_IMPLEMENTATION_LOOP.gate_step)
         self.assertEqual(10, PITON_IMPLEMENTATION_LOOP.max_attempts)
         self.assertEqual(14, len(PITON_IMPLEMENTATION_LOOP.steps))
+
+    def test_pr_lifecycle_requires_serialized_interactive_merge_management(self):
+        policy = PITON_IMPLEMENTATION_LOOP.pr_lifecycle
+        self.assertEqual("interactive_operator_pr_manager", policy.merge_execution)
+        self.assertEqual(("repository", "base_branch"), policy.serialization_key_fields)
+        self.assertTrue(policy.automatic_merge_forbidden)
+        self.assertTrue(policy.one_open_pr_per_task)
+        self.assertEqual("wait_for_operator_pr_manager", policy.base_drift_action)
+
+    def test_pr_ready_and_base_drift_wait_without_restarting_implementation(self):
+        for failure in (
+            FailureClass.PULL_REQUEST_READY_FOR_OPERATOR,
+            FailureClass.BASE_BRANCH_ADVANCED_WHILE_WAITING,
+        ):
+            with self.subTest(failure=failure):
+                decision = PITON_IMPLEMENTATION_LOOP.decide(
+                    attempt=1,
+                    attempt_status=AttemptStatus.FAILED,
+                    reason="serialized PR manager action required",
+                    failure_class=failure,
+                    error_packet=packet(),
+                )
+                self.assertEqual(LoopDecision.BLOCK, decision.loop_decision)
+
+    def test_runtime_template_forbids_worker_merge_and_serializes_pr_lane(self):
+        path = pathlib.Path(__file__).parents[1] / "flows/piton_implementation_loop_v1.json"
+        template = json.loads(path.read_text(encoding="utf-8"))
+        lifecycle = template["github_lifecycle"]
+        self.assertTrue(lifecycle["automatic_merge_forbidden"])
+        self.assertEqual("interactive_operator_pr_manager", lifecycle["merge_execution"])
+        self.assertEqual(
+            ["repository", "base_branch"],
+            lifecycle["repository_pr_lane"]["serialization_key_fields"],
+        )
+        gate = next(
+            step for step in template["steps"]
+            if step["step_id"] == "merge_on_success_or_loop"
+        )
+        self.assertIn("Never execute a merge command", gate["prompt_template"])
+        self.assertIn("pull_request_ready_for_operator", gate["prompt_template"])
 
     def test_retry_requires_matching_error_packet(self):
         with self.assertRaisesRegex(ValueError, "require.*error packet"):
