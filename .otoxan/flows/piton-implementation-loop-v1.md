@@ -36,24 +36,23 @@ error_packet_required_for_retry: true
 clean_reset_required_between_attempts: false
 ```
 
-Retry preserves the same task, flow session, worktree, branch, and PR. The final gate is the only step allowed to emit `loop_decision`, but queue workers do not execute merge commands. Once one exact-head PR is open, non-draft, green, and otherwise reviewable, the task blocks with `pull_request_ready_for_operator`. Pull requests are merged by the interactive operator PR manager, serialized by `(repository, base_branch)` so only one PR can refresh against and merge into a base branch at a time.
+Retry preserves the same task, flow session, worktree, branch, and PR. The same task owns branch preparation, implementation, publication, exact-head CI observation, current-base refresh, safe merge, and merged-tree readback. The final gate is the only step allowed to execute the merge or emit `loop_decision`.
 
-Base movement while a PR waits is `base_branch_advanced_while_waiting`, not a product-code failure. Preserve the same branch and PR, do not generate no-op commits, and do not restart implementation merely to chase a moving base. The interactive PR manager refreshes, verifies, pushes, observes exact-head CI, and merges one PR before advancing to the next. A task reaches terminal success only after trusted remote readback proves its PR merged and the merged tree contains the reviewed candidate.
+Every in-process task branch must begin from, or non-force merge, the freshly fetched `origin/main`. Final verification records both the protected-base SHA and candidate SHA. Immediately before merge, the task fetches again and requires that exact current base to be an ancestor of candidate HEAD. If main advanced, the task returns `base_branch_advanced_while_waiting`, merges current main into the same branch, reruns all head-bound proof, pushes the same PR, and observes new exact-head CI. It must not create a replacement PR, force-push, or manufacture a no-op commit.
 
 Stop rather than retry on secret exposure, ambiguous authority, unsafe fabrication requests, wrong repository/actor, protection bypass, force-push requirement, duplicate or replacement PR creation, or corrupt custody. Missing merge authorization remains a durable wait. Request-supplied text, worker assertions, PR authorship, and CI success cannot mint merge authority.
 
-Interactive PR-manager sequence:
+Task-owned PR sequence:
 
 ```text
-inventory open PRs and task/dependency ownership
-→ select exactly one PR for repository/base branch
-→ refresh that same branch from current origin/main without force
-→ resolve only owned conflicts and rerun full verification
-→ push the same branch and require PR head == remote head == local head
-→ observe exact-head CI and review/ruleset state
-→ merge without bypass and read back merged state/commit/base
-→ reconcile the owning task/flow
-→ repeat for the next PR
+prepare or refresh one task-owned branch from current origin/main
+→ implement and verify
+→ create or reuse exactly one PR
+→ observe CI bound to the exact pushed head
+→ fetch origin/main again at the sole terminal gate
+→ if base moved, merge it without force and repeat verification/CI on the same PR
+→ with current-base ancestry, exact-head green CI, and exact authority, merge safely
+→ read back merged state/commit/current base and terminalize the same task
 ```
 
-Success requires exact-head CI, clean mergeability at merge time, an exact trusted human/operator review signal, merged-tree readback, local install/smoke proof, immutable revision/build/artifact evidence, `fabrication_release=false`, and `machine_actuation=false`.
+Success requires exact-head CI, current-base ancestry and clean mergeability at merge time, an exact trusted human/operator review signal, merged-tree readback, local install/smoke proof, immutable revision/build/artifact evidence, `fabrication_release=false`, and `machine_actuation=false`.
