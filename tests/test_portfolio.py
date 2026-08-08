@@ -130,6 +130,25 @@ class PortfolioAdmissionTests(unittest.TestCase):
             Phase.P1,
             predecessor=predecessor,
             predicates={"exact_cad_verified": True},
+            artifacts=(external,),
+        )
+
+        self.assertEqual(ExecutionStatus.COMPLETED, exited.status)
+        self.assertEqual(Disposition.HOLD, exited.disposition)
+        self.assertTrue(exited.execution_complete)
+        self.assertFalse(exited.successor_authorized)
+        self.assertIn("disposition does not advance", exited.authorization_reasons)
+        self.assertIn("repository-native", " ".join(exited.authorization_reasons))
+
+    def test_mixed_repository_native_and_external_evidence_cannot_authorize(self) -> None:
+        external = replace(
+            evidence(),
+            artifact_id="ev-external",
+            source=EvidenceSource.EXTERNAL,
+        )
+        exited = receipt(
+            Phase.P1,
+            predicates={"exact_cad_verified": True},
             artifacts=(evidence(), external),
         )
 
@@ -162,14 +181,40 @@ class PortfolioAdmissionTests(unittest.TestCase):
 
         self.assertEqual(ExecutionStatus.COMPLETED, exited.status)
         self.assertTrue(exited.execution_complete)
-        self.assertEqual(Disposition.HOLD, exited.disposition)
         self.assertFalse(exited.successor_authorized)
         self.assertIn("disposition does not advance", exited.authorization_reasons)
         self.assertIn(
             "evidence ev-external is not repository-native",
             exited.authorization_reasons,
         )
+
         self.assertEqual(exited, type(exited).from_dict(exited.to_dict()))
+
+    def test_successor_verifier_rejects_forged_external_evidence_authorization(self) -> None:
+        predecessor = receipt(Phase.P0, authority=Authority.HUMAN)
+        external = replace(
+            evidence(),
+            artifact_id="ev-external-forged",
+            source=EvidenceSource.EXTERNAL,
+        )
+        denied = receipt(
+            Phase.P1,
+            predecessor=predecessor,
+            predicates={"exact_cad_verified": True},
+            artifacts=(external,),
+        )
+        forged = replace(
+            denied,
+            disposition=Disposition.ADVANCE,
+            successor_authorized=True,
+            authorization_reasons=(),
+        )
+
+        decision = verify_successor_admission(forged, successor=Phase.P2)
+
+        self.assertFalse(decision.admitted)
+        self.assertIn("repository-native", " ".join(decision.reasons))
+        self.assertIn("claimed successor_authorized", " ".join(decision.reasons))
 
     def test_safety_invariants_are_enforced(self) -> None:
         unsafe_states = (
