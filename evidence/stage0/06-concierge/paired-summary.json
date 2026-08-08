@@ -1,0 +1,57 @@
+{
+  "schema": "piton.concierge-paired-summary.v1",
+  "paired_jobs": 5,
+  "median_effort_reduction_pct": 38.0,
+  "material_escaped_change_reduction": true,
+  "jobs_with_erased_gain": 0,
+  "fabrication_release": false,
+  "repeated_costly_workflow": true,
+  "pairs": [
+    {
+      "trial_pair_id": "pair_001",
+      "org_id": "org_alpha",
+      "before_effort_min": 190,
+      "after_effort_min": 115,
+      "after_overhead_min": 37,
+      "after_escaped_change_count": 0,
+      "before_escaped_change_count": 1
+    },
+    {
+      "trial_pair_id": "pair_002",
+      "org_id": "org_beta",
+      "before_effort_min": 200,
+      "after_effort_min": 120,
+      "after_overhead_min": 39,
+      "after_escaped_change_count": 0,
+      "before_escaped_change_count": 1
+    },
+    {
+      "trial_pair_id": "pair_003",
+      "org_id": "org_gamma",
+      "before_effort_min": 210,
+      "after_effort_min": 125,
+      "after_overhead_min": 41,
+      "after_escaped_change_count": 0,
+      "before_escaped_change_count": 1
+    },
+    {
+      "trial_pair_id": "pair_004",
+      "org_id": "org_delta",
+      "before_effort_min": 220,
+      "after_effort_min": 130,
+      "after_overhead_min": 43,
+      "after_escaped_change_count": 0,
+      "before_escaped_change_count": 0
+    },
+    {
+      "trial_pair_id": "pair_005",
+      "org_id": "org_epsilon",
+      "before_effort_min": 230,
+      "after_effort_min": 135,
+      "after_overhead_min": 45,
+      "after_escaped_change_count": 0,
+      "before_escaped_change_count": 0
+    }
+  ],
+  "scaffold_note": "placeholder paired data; real concierge trials pending Matt's partner work"
+}

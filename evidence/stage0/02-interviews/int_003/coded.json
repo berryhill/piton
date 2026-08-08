@@ -1,0 +1,27 @@
+{
+  "schema": "piton.interview-coded.v1",
+  "interview_id": "int_003",
+  "segment_id": "small-mech-product-consultancy-v1",
+  "org_id": "org_gamma",
+  "role": "reviewer",
+  "consent_ref": "protected:consent/int_003.signed",
+  "authority_fit": "accepts_source_native",
+  "jobs_per_month": 4,
+  "last_completed_revision": {
+    "category": "adapter",
+    "exact_artifacts": [
+      "STEP",
+      "PDF_drawing"
+    ],
+    "actor_handoffs": [
+      "author\u2192reviewer",
+      "reviewer\u2192buyer"
+    ],
+    "review_effort_minutes": 75,
+    "failures": [],
+    "source_native_authority_fit": "accepts",
+    "local_custody": "acceptable_cloud",
+    "budget_band_usd": 800
+  },
+  "scaffold_note": "placeholder; real interview transcript pending Matt's outreach (T004)"
+}

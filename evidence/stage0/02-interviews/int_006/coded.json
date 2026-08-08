@@ -1,0 +1,27 @@
+{
+  "schema": "piton.interview-coded.v1",
+  "interview_id": "int_006",
+  "segment_id": "small-mech-product-consultancy-v1",
+  "org_id": "org_zeta",
+  "role": "security",
+  "consent_ref": "protected:consent/int_006.signed",
+  "authority_fit": "accepts_source_native",
+  "jobs_per_month": 4,
+  "last_completed_revision": {
+    "category": "bracket",
+    "exact_artifacts": [
+      "STEP",
+      "PDF_drawing"
+    ],
+    "actor_handoffs": [
+      "author\u2192reviewer",
+      "reviewer\u2192buyer"
+    ],
+    "review_effort_minutes": 90,
+    "failures": [],
+    "source_native_authority_fit": "accepts",
+    "local_custody": "required",
+    "budget_band_usd": 1100
+  },
+  "scaffold_note": "placeholder; real interview transcript pending Matt's outreach (T004)"
+}

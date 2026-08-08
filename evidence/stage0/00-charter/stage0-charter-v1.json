@@ -1,0 +1,20 @@
+{
+  "schema": "piton.stage0-charter.v1",
+  "segment_id": "small-mech-product-consultancy-v1",
+  "segment_definition": "US mechanical product-development teams and consultancies with 2-20 mechanical contributors",
+  "allowed_part_classes": ["mount", "adapter", "bracket", "fixture", "spacer", "simple_enclosure_interface"],
+  "minimum_interviews": 12,
+  "minimum_observed_jobs": 5,
+  "minimum_observed_orgs": 3,
+  "minimum_committed_partners": 3,
+  "minimum_paid_partners": 2,
+  "authority_under_test": "source-native/v0",
+  "review_state": "needs_human_review",
+  "fabrication_release": false,
+  "machine_actuation": false,
+  "segment_change_limit": 1,
+  "discovery_lead": "product-lead",
+  "engineering_observer": "cad-lead",
+  "stop_authority": "sponsor",
+  "signed_by": ["product-lead", "sponsor"]
+}
