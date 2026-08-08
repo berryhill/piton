@@ -17,6 +17,7 @@ class AttemptStatus(StrEnum):
 class LoopDecision(StrEnum):
     RESTART_LOOP = "restart_loop"
     TERMINAL_SUCCESS = "terminal_success"
+    BLOCK = "block"
     STOP_POLICY = "stop_policy"
     STOP_MAX_ATTEMPTS = "stop_max_attempts"
 
@@ -39,6 +40,7 @@ class FailureClass(StrEnum):
     FORCE_PUSH_REQUIRED = "force_push_required"
     CORRUPT_CUSTODY = "corrupt_custody"
     MISSING_HUMAN_APPROVAL = "missing_human_approval"
+    MISSING_OPERATOR_MERGE_AUTHORIZATION = "missing_operator_merge_authorization"
 
 
 RETRYABLE_FAILURES = frozenset(
@@ -54,6 +56,7 @@ RETRYABLE_FAILURES = frozenset(
     }
 )
 NONRETRYABLE_FAILURES = frozenset(FailureClass) - RETRYABLE_FAILURES
+WAITING_FAILURES = frozenset({FailureClass.MISSING_OPERATOR_MERGE_AUTHORIZATION})
 
 _HEAD_PATTERN = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -70,6 +73,30 @@ def _require_digest(name: str, value: str) -> None:
 
 
 @dataclass(frozen=True)
+class OperatorMergeAuthorization:
+    """Trusted operator authority to merge one exact task candidate."""
+
+    actor: str
+    repository: str
+    task_id: str
+    candidate_head: str
+    action: str
+    receipt_digest: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.actor, str) or not self.actor.strip():
+            raise ValueError("operator authorization requires an actor")
+        if not isinstance(self.repository, str) or self.repository.count("/") != 1:
+            raise ValueError("operator authorization requires owner/repository")
+        if not isinstance(self.task_id, str) or not self.task_id.startswith("t_"):
+            raise ValueError("operator authorization requires a task ID")
+        _require_head("candidate_head", self.candidate_head)
+        if self.action != "merge":
+            raise ValueError("operator authorization action must be merge")
+        _require_digest("receipt_digest", self.receipt_digest)
+
+
+@dataclass(frozen=True)
 class SuccessProof:
     """Evidence-bound proof that the exact candidate completed every terminal gate."""
 
@@ -80,10 +107,11 @@ class SuccessProof:
     install_smoke_receipt_digest: str
     safety_review_head: str
     safety_review_receipt_digest: str
-    human_review_head: str
-    human_review_receipt_digest: str
     merged_tree_head: str
     merged_tree_readback_digest: str
+    human_review_head: str | None = None
+    human_review_receipt_digest: str | None = None
+    operator_merge_authorization: OperatorMergeAuthorization | None = None
 
     def __post_init__(self) -> None:
         _require_head("candidate_head", self.candidate_head)
@@ -91,7 +119,6 @@ class SuccessProof:
             "ci_head",
             "install_smoke_head",
             "safety_review_head",
-            "human_review_head",
         ):
             value = getattr(self, name)
             _require_head(name, value)
@@ -104,10 +131,30 @@ class SuccessProof:
             "ci_receipt_digest",
             "install_smoke_receipt_digest",
             "safety_review_receipt_digest",
-            "human_review_receipt_digest",
             "merged_tree_readback_digest",
         ):
             _require_digest(name, getattr(self, name))
+        has_human_review = (
+            self.human_review_head is not None
+            or self.human_review_receipt_digest is not None
+        )
+        if has_human_review:
+            if self.human_review_head is None or self.human_review_receipt_digest is None:
+                raise ValueError("human review head and receipt must be provided together")
+            _require_head("human_review_head", self.human_review_head)
+            if self.human_review_head != self.candidate_head:
+                raise ValueError("human_review_head must bind the exact candidate head")
+            _require_digest("human_review_receipt_digest", self.human_review_receipt_digest)
+        authorization = self.operator_merge_authorization
+        if authorization is not None:
+            if not isinstance(authorization, OperatorMergeAuthorization):
+                raise ValueError("operator merge authorization has the wrong type")
+            if authorization.candidate_head != self.candidate_head:
+                raise ValueError("operator merge authorization must bind the exact candidate head")
+        if not has_human_review and authorization is None:
+            raise ValueError(
+                "success proof requires independent human review or trusted operator merge authorization"
+            )
 
 
 @dataclass(frozen=True)
@@ -300,7 +347,9 @@ class ImplementationLoop:
             raise ValueError("error packet attempt must match the gate attempt")
         payload = error_packet.to_payload()
 
-        if error_packet.terminal_blockers or failure in NONRETRYABLE_FAILURES:
+        if failure in WAITING_FAILURES:
+            decision = LoopDecision.BLOCK
+        elif error_packet.terminal_blockers or failure in NONRETRYABLE_FAILURES:
             decision = LoopDecision.STOP_POLICY
         elif attempt >= self.max_attempts:
             decision = LoopDecision.STOP_MAX_ATTEMPTS

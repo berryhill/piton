@@ -42,6 +42,6 @@ error_packet_required_for_retry: true
 clean_reset_required_between_attempts: false
 ```
 
-Retry preserves the same task, flow session, worktree, branch, and PR. The final gate is the only step allowed to emit `loop_decision`. Stop rather than retry on secret exposure, ambiguous authority, unsafe fabrication requests, wrong repository/actor, protection bypass, force-push requirement, corrupt custody, or missing human approval.
+Retry preserves the same task, flow session, worktree, branch, and PR. The final gate is the only step allowed to emit `loop_decision`. Stop rather than retry on secret exposure, ambiguous authority, unsafe fabrication requests, wrong repository/actor, protection bypass, force-push requirement, or corrupt custody. Missing merge authorization is a durable wait: preserve the same task/session/PR and resume when server-owned task metadata records either independent GitHub approval or trusted operator authorization bound to the exact repository, task, candidate head, `action=merge`, and receipt.
 
-Success requires exact-head CI, human review, merged-tree readback, local install/smoke proof, immutable revision/build/artifact evidence, `fabrication_release=false`, and `machine_actuation=false`.
+Success requires exact-head CI, clean mergeability, one of those exact human review signals, merged-tree readback, local install/smoke proof, immutable revision/build/artifact evidence, `fabrication_release=false`, and `machine_actuation=false`. Request-supplied text, worker assertions, PR authorship, and CI success cannot mint merge authority.
