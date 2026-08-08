@@ -6,6 +6,7 @@ from piton.implementation_loop import (
     GateDecision,
     LoopDecision,
     OperatorMergeAuthorization,
+    OperatorMergeGrant,
     PITON_IMPLEMENTATION_LOOP,
     RetryErrorPacket,
     SuccessProof,
@@ -179,6 +180,31 @@ class ImplementationLoopTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(ValueError, "exact candidate head"):
             SuccessProof(**values)
+
+    def test_task_scoped_operator_grant_binds_the_final_exact_head(self):
+        grant = OperatorMergeGrant(
+            actor="matt",
+            repository="berryhill/piton",
+            task_id="t_14aa994",
+            action="merge",
+            candidate_binding="task_owned_exact_head_after_final_verification",
+            receipt_digest="sha256:" + "e" * 64,
+        )
+        authorization = grant.bind("a" * 40)
+        self.assertEqual("a" * 40, authorization.candidate_head)
+        self.assertEqual("t_14aa994", authorization.task_id)
+        self.assertEqual(grant.receipt_digest, authorization.receipt_digest)
+
+    def test_task_scoped_operator_grant_rejects_unbounded_candidate_policy(self):
+        with self.assertRaisesRegex(ValueError, "candidate binding"):
+            OperatorMergeGrant(
+                actor="matt",
+                repository="berryhill/piton",
+                task_id="t_14aa994",
+                action="merge",
+                candidate_binding="any_future_head",
+                receipt_digest="sha256:" + "f" * 64,
+            )
 
     def test_gate_decision_rejects_inconsistent_direct_construction(self):
         with self.assertRaisesRegex(ValueError, "requires succeeded"):
