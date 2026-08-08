@@ -19,6 +19,11 @@ from .model import (
     TruthBoundary,
     validate_lifecycle,
 )
+from .partner_alpha import (
+    DEFAULT_PARTNER_SCAFFOLD_T002,
+    PartnerAlphaScaffoldT002,
+    validate_partner_scaffold_t002,
+)
 from .portfolio import (
     Authority,
     Disposition,
@@ -51,6 +56,7 @@ __all__ = [
     "BuildAttempt",
     "BuildStatus",
     "ChangeProposal",
+    "DEFAULT_PARTNER_SCAFFOLD_T002",
     "DesignRevision",
     "Disposition",
     "DraftExport",
@@ -62,6 +68,7 @@ __all__ = [
     "ExecutionStatus",
     "Phase",
     "PhaseExitReceipt",
+    "PartnerAlphaScaffoldT002",
     "PitonProject",
     "PortfolioAdmissionDecision",
     "PrincipalContext",
@@ -79,5 +86,6 @@ __all__ = [
     "project_digest",
     "receipt_digest",
     "validate_lifecycle",
+    "validate_partner_scaffold_t002",
     "verify_successor_admission",
 ]
