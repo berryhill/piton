@@ -1,0 +1,13 @@
+{
+  "claim_scope": "fixture-only",
+  "external_thresholds_passed": false,
+  "fabrication_release": false,
+  "fixture_id": "partner-alpha",
+  "machine_actuation": false,
+  "review_state": "needs_human_review",
+  "scaffold_note": "synthetic placeholder only; no external partner, validation, commitment, demand, or successor authorization is claimed",
+  "schema": "piton.partner-alpha-fixture.v1",
+  "successor_authorized": false,
+  "synthetic": true,
+  "task_ref": "T004"
+}
