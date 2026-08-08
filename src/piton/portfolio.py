@@ -175,6 +175,47 @@ def validate_external_evidence_t003(receipt: ExternalEvidenceT003Receipt) -> boo
 
 
 @dataclass(frozen=True, slots=True)
+class ExternalEvidenceT002Receipt:
+    """Synthetic schema fixture recording that T002 evidence is unavailable."""
+
+    disposition: Literal["unavailable"] = "unavailable"
+    synthetic: Literal[True] = True
+    threshold_passed: Literal[False] = False
+    fabrication_release: Literal[False] = False
+    machine_actuation: Literal[False] = False
+    review_state: Literal["needs_human_review"] = "needs_human_review"
+    g2_accepted: Literal[False] = False
+    g7_accepted: Literal[False] = False
+    paid_partner_count: Literal[0] = 0
+    completed_real_job_count: Literal[0] = 0
+    recognized_revenue_usd: Literal[0] = 0
+
+
+def validate_external_evidence_t002(receipt: ExternalEvidenceT002Receipt) -> bool:
+    """Accept only the exact, closed, fail-closed T002 fixture."""
+
+    return (
+        type(receipt) is ExternalEvidenceT002Receipt
+        and type(receipt.disposition) is str
+        and receipt.disposition == "unavailable"
+        and receipt.synthetic is True
+        and receipt.threshold_passed is False
+        and receipt.fabrication_release is False
+        and receipt.machine_actuation is False
+        and type(receipt.review_state) is str
+        and receipt.review_state == "needs_human_review"
+        and receipt.g2_accepted is False
+        and receipt.g7_accepted is False
+        and type(receipt.paid_partner_count) is int
+        and receipt.paid_partner_count == 0
+        and type(receipt.completed_real_job_count) is int
+        and receipt.completed_real_job_count == 0
+        and type(receipt.recognized_revenue_usd) is int
+        and receipt.recognized_revenue_usd == 0
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class EvidenceArtifact:
     artifact_id: str
     repository_path: str
