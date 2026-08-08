@@ -108,6 +108,64 @@ class ChangeProposal:
         object.__setattr__(self, "requirement_ids", requirements)
 
 
+def apply_change_proposal(
+    base_revision: DesignRevision,
+    proposal: ChangeProposal,
+    *,
+    current_revision_id: str,
+) -> DesignRevision:
+    """Derive one immutable candidate from one exact, current source revision.
+
+    ``current_revision_id`` is server-owned concurrency state. The proposal may
+    describe one parameter replacement, but it cannot select a stale base,
+    introduce parameters, or alter source/toolchain authority.
+    """
+    if not isinstance(base_revision, DesignRevision):
+        raise TypeError("base_revision must be a DesignRevision")
+    if not isinstance(proposal, ChangeProposal):
+        raise TypeError("proposal must be a ChangeProposal")
+    _require_revision_id("current_revision_id", current_revision_id)
+
+    if proposal.base_revision_id != base_revision.revision_id:
+        raise ValueError("proposal base_revision_id must match the supplied base revision")
+    if current_revision_id != base_revision.revision_id:
+        raise ValueError("supplied base revision must be the server-owned current revision")
+    if proposal.parameter_id not in base_revision.parameter_values:
+        raise ValueError("proposal names an unknown parameter_id")
+
+    authoritative_old = base_revision.parameter_values[proposal.parameter_id]
+    if proposal.expected_old_quantity != authoritative_old:
+        raise ValueError(
+            "proposal expected_old_quantity must exactly match the authoritative value"
+        )
+    if proposal.new_quantity == authoritative_old:
+        raise ValueError("proposal new_quantity must differ from the authoritative value")
+
+    candidate_parameters = dict(base_revision.parameter_values)
+    candidate_parameters[proposal.parameter_id] = proposal.new_quantity
+    candidate = DesignRevision(
+        parent_revision_id=base_revision.revision_id,
+        source_manifest_digest=base_revision.source_manifest_digest,
+        entrypoint=base_revision.entrypoint,
+        dependency_lock_digest=base_revision.dependency_lock_digest,
+        toolchain_lock_digest=base_revision.toolchain_lock_digest,
+        parameter_values=candidate_parameters,
+        proposal_id=proposal.proposal_id,
+    )
+    changed_parameters = {
+        parameter_id
+        for parameter_id in base_revision.parameter_values
+        if candidate.parameter_values[parameter_id]
+        != base_revision.parameter_values[parameter_id]
+    }
+    if (
+        set(candidate.parameter_values) != set(base_revision.parameter_values)
+        or changed_parameters != {proposal.parameter_id}
+    ):
+        raise RuntimeError("candidate violated the exactly-one-parameter postcondition")
+    return candidate
+
+
 @dataclass(frozen=True)
 class BuildAttempt:
     attempt_id: str

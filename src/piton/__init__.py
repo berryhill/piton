@@ -17,6 +17,7 @@ from .model import (
     EvidenceClosure,
     ReviewDisposition,
     TruthBoundary,
+    apply_change_proposal,
     validate_lifecycle,
 )
 from .partner_alpha import (
@@ -88,6 +89,7 @@ __all__ = [
     "canonical_project_bytes",
     "compute_revision_id",
     "default_partner_alpha_receipt",
+    "apply_change_proposal",
     "issue_phase_exit_receipt",
     "load_project_bytes",
     "load_project_directory",
