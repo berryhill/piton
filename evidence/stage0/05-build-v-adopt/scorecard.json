@@ -1,0 +1,539 @@
+{
+  "claim_scope": "fixture-only",
+  "external_thresholds_passed": false,
+  "fabrication_release": false,
+  "machine_actuation": false,
+  "options": [
+    {
+      "criteria": [
+        {
+          "name": "target_job_fit",
+          "rationale": "scaffold",
+          "score": 5,
+          "weight": 15
+        },
+        {
+          "name": "review_effort_reduction",
+          "rationale": "scaffold",
+          "score": 5,
+          "weight": 15
+        },
+        {
+          "name": "escaped_change_reduction",
+          "rationale": "scaffold",
+          "score": 4,
+          "weight": 10
+        },
+        {
+          "name": "single_authority",
+          "rationale": "scaffold",
+          "score": 5,
+          "weight": 10
+        },
+        {
+          "name": "local_offline_custody",
+          "rationale": "scaffold",
+          "score": 5,
+          "weight": 10
+        },
+        {
+          "name": "exact_brep_step",
+          "rationale": "scaffold",
+          "score": 5,
+          "weight": 10
+        },
+        {
+          "name": "evidence_binding",
+          "rationale": "scaffold",
+          "score": 5,
+          "weight": 10
+        },
+        {
+          "name": "adoption_burden",
+          "rationale": "scaffold",
+          "score": 3,
+          "weight": 8
+        },
+        {
+          "name": "security_distribution",
+          "rationale": "scaffold",
+          "score": 4,
+          "weight": 5
+        },
+        {
+          "name": "support_economics",
+          "rationale": "scaffold",
+          "score": 4,
+          "weight": 5
+        },
+        {
+          "name": "reversibility",
+          "rationale": "scaffold",
+          "score": 5,
+          "weight": 2
+        }
+      ],
+      "label": "Piton greenfield",
+      "option_id": "piton_greenfield"
+    },
+    {
+      "criteria": [
+        {
+          "name": "target_job_fit",
+          "rationale": "scaffold",
+          "score": 4,
+          "weight": 15
+        },
+        {
+          "name": "review_effort_reduction",
+          "rationale": "scaffold",
+          "score": 4,
+          "weight": 15
+        },
+        {
+          "name": "escaped_change_reduction",
+          "rationale": "scaffold",
+          "score": 3,
+          "weight": 10
+        },
+        {
+          "name": "single_authority",
+          "rationale": "scaffold",
+          "score": 4,
+          "weight": 10
+        },
+        {
+          "name": "local_offline_custody",
+          "rationale": "scaffold",
+          "score": 5,
+          "weight": 10
+        },
+        {
+          "name": "exact_brep_step",
+          "rationale": "scaffold",
+          "score": 4,
+          "weight": 10
+        },
+        {
+          "name": "evidence_binding",
+          "rationale": "scaffold",
+          "score": 4,
+          "weight": 10
+        },
+        {
+          "name": "adoption_burden",
+          "rationale": "scaffold",
+          "score": 3,
+          "weight": 8
+        },
+        {
+          "name": "security_distribution",
+          "rationale": "scaffold",
+          "score": 4,
+          "weight": 5
+        },
+        {
+          "name": "support_economics",
+          "rationale": "scaffold",
+          "score": 3,
+          "weight": 5
+        },
+        {
+          "name": "reversibility",
+          "rationale": "scaffold",
+          "score": 4,
+          "weight": 2
+        }
+      ],
+      "label": "Governed build123d/OCCT overlay",
+      "option_id": "build123d_overlay"
+    },
+    {
+      "criteria": [
+        {
+          "name": "target_job_fit",
+          "rationale": "scaffold",
+          "score": 3,
+          "weight": 15
+        },
+        {
+          "name": "review_effort_reduction",
+          "rationale": "scaffold",
+          "score": 2,
+          "weight": 15
+        },
+        {
+          "name": "escaped_change_reduction",
+          "rationale": "scaffold",
+          "score": 2,
+          "weight": 10
+        },
+        {
+          "name": "single_authority",
+          "rationale": "scaffold",
+          "score": 3,
+          "weight": 10
+        },
+        {
+          "name": "local_offline_custody",
+          "rationale": "scaffold",
+          "score": 5,
+          "weight": 10
+        },
+        {
+          "name": "exact_brep_step",
+          "rationale": "scaffold",
+          "score": 3,
+          "weight": 10
+        },
+        {
+          "name": "evidence_binding",
+          "rationale": "scaffold",
+          "score": 2,
+          "weight": 10
+        },
+        {
+          "name": "adoption_burden",
+          "rationale": "scaffold",
+          "score": 4,
+          "weight": 8
+        },
+        {
+          "name": "security_distribution",
+          "rationale": "scaffold",
+          "score": 3,
+          "weight": 5
+        },
+        {
+          "name": "support_economics",
+          "rationale": "scaffold",
+          "score": 3,
+          "weight": 5
+        },
+        {
+          "name": "reversibility",
+          "rationale": "scaffold",
+          "score": 5,
+          "weight": 2
+        }
+      ],
+      "label": "FreeCAD/SolveSpace local companion",
+      "option_id": "freecad_companion"
+    },
+    {
+      "criteria": [
+        {
+          "name": "target_job_fit",
+          "rationale": "scaffold",
+          "score": 2,
+          "weight": 15
+        },
+        {
+          "name": "review_effort_reduction",
+          "rationale": "scaffold",
+          "score": 2,
+          "weight": 15
+        },
+        {
+          "name": "escaped_change_reduction",
+          "rationale": "scaffold",
+          "score": 2,
+          "weight": 10
+        },
+        {
+          "name": "single_authority",
+          "rationale": "scaffold",
+          "score": 2,
+          "weight": 10
+        },
+        {
+          "name": "local_offline_custody",
+          "rationale": "scaffold",
+          "score": 1,
+          "weight": 10
+        },
+        {
+          "name": "exact_brep_step",
+          "rationale": "scaffold",
+          "score": 2,
+          "weight": 10
+        },
+        {
+          "name": "evidence_binding",
+          "rationale": "scaffold",
+          "score": 1,
+          "weight": 10
+        },
+        {
+          "name": "adoption_burden",
+          "rationale": "scaffold",
+          "score": 4,
+          "weight": 8
+        },
+        {
+          "name": "security_distribution",
+          "rationale": "scaffold",
+          "score": 2,
+          "weight": 5
+        },
+        {
+          "name": "support_economics",
+          "rationale": "scaffold",
+          "score": 2,
+          "weight": 5
+        },
+        {
+          "name": "reversibility",
+          "rationale": "scaffold",
+          "score": 4,
+          "weight": 2
+        }
+      ],
+      "label": "Zoo/KittyCAD where access permits",
+      "option_id": "zoo_kittycad"
+    },
+    {
+      "criteria": [
+        {
+          "name": "target_job_fit",
+          "rationale": "scaffold",
+          "score": 3,
+          "weight": 15
+        },
+        {
+          "name": "review_effort_reduction",
+          "rationale": "scaffold",
+          "score": 3,
+          "weight": 15
+        },
+        {
+          "name": "escaped_change_reduction",
+          "rationale": "scaffold",
+          "score": 2,
+          "weight": 10
+        },
+        {
+          "name": "single_authority",
+          "rationale": "scaffold",
+          "score": 1,
+          "weight": 10
+        },
+        {
+          "name": "local_offline_custody",
+          "rationale": "scaffold",
+          "score": 2,
+          "weight": 10
+        },
+        {
+          "name": "exact_brep_step",
+          "rationale": "scaffold",
+          "score": 3,
+          "weight": 10
+        },
+        {
+          "name": "evidence_binding",
+          "rationale": "scaffold",
+          "score": 1,
+          "weight": 10
+        },
+        {
+          "name": "adoption_burden",
+          "rationale": "scaffold",
+          "score": 2,
+          "weight": 8
+        },
+        {
+          "name": "security_distribution",
+          "rationale": "scaffold",
+          "score": 3,
+          "weight": 5
+        },
+        {
+          "name": "support_economics",
+          "rationale": "scaffold",
+          "score": 2,
+          "weight": 5
+        },
+        {
+          "name": "reversibility",
+          "rationale": "scaffold",
+          "score": 1,
+          "weight": 2
+        }
+      ],
+      "label": "Incumbent CAD + scripts/PDM/checklist",
+      "option_id": "incumbent_plus_pdm"
+    },
+    {
+      "criteria": [
+        {
+          "name": "target_job_fit",
+          "rationale": "scaffold",
+          "score": 2,
+          "weight": 15
+        },
+        {
+          "name": "review_effort_reduction",
+          "rationale": "scaffold",
+          "score": 4,
+          "weight": 15
+        },
+        {
+          "name": "escaped_change_reduction",
+          "rationale": "scaffold",
+          "score": 3,
+          "weight": 10
+        },
+        {
+          "name": "single_authority",
+          "rationale": "scaffold",
+          "score": 2,
+          "weight": 10
+        },
+        {
+          "name": "local_offline_custody",
+          "rationale": "scaffold",
+          "score": 3,
+          "weight": 10
+        },
+        {
+          "name": "exact_brep_step",
+          "rationale": "scaffold",
+          "score": 1,
+          "weight": 10
+        },
+        {
+          "name": "evidence_binding",
+          "rationale": "scaffold",
+          "score": 4,
+          "weight": 10
+        },
+        {
+          "name": "adoption_burden",
+          "rationale": "scaffold",
+          "score": 4,
+          "weight": 8
+        },
+        {
+          "name": "security_distribution",
+          "rationale": "scaffold",
+          "score": 3,
+          "weight": 5
+        },
+        {
+          "name": "support_economics",
+          "rationale": "scaffold",
+          "score": 3,
+          "weight": 5
+        },
+        {
+          "name": "reversibility",
+          "rationale": "scaffold",
+          "score": 4,
+          "weight": 2
+        }
+      ],
+      "label": "Governance/review companion",
+      "option_id": "governance_companion"
+    },
+    {
+      "criteria": [
+        {
+          "name": "target_job_fit",
+          "rationale": "scaffold",
+          "score": 3,
+          "weight": 15
+        },
+        {
+          "name": "review_effort_reduction",
+          "rationale": "scaffold",
+          "score": 1,
+          "weight": 15
+        },
+        {
+          "name": "escaped_change_reduction",
+          "rationale": "scaffold",
+          "score": 1,
+          "weight": 10
+        },
+        {
+          "name": "single_authority",
+          "rationale": "scaffold",
+          "score": 0,
+          "weight": 10
+        },
+        {
+          "name": "local_offline_custody",
+          "rationale": "scaffold",
+          "score": 1,
+          "weight": 10
+        },
+        {
+          "name": "exact_brep_step",
+          "rationale": "scaffold",
+          "score": 2,
+          "weight": 10
+        },
+        {
+          "name": "evidence_binding",
+          "rationale": "scaffold",
+          "score": 0,
+          "weight": 10
+        },
+        {
+          "name": "adoption_burden",
+          "rationale": "scaffold",
+          "score": 5,
+          "weight": 8
+        },
+        {
+          "name": "security_distribution",
+          "rationale": "scaffold",
+          "score": 1,
+          "weight": 5
+        },
+        {
+          "name": "support_economics",
+          "rationale": "scaffold",
+          "score": 1,
+          "weight": 5
+        },
+        {
+          "name": "reversibility",
+          "rationale": "scaffold",
+          "score": 5,
+          "weight": 2
+        }
+      ],
+      "label": "Current workflow",
+      "option_id": "current_workflow"
+    }
+  ],
+  "scaffold_note": "placeholder scoring; real trial pending T005 execution by Matt",
+  "schema": "piton.build-vs-adopt-scorecard.v1",
+  "successor_authorized": false,
+  "synthetic": true,
+  "totals": {
+    "build123d_overlay": 77.39999999999999,
+    "current_workflow": 32.0,
+    "freecad_companion": 59.4,
+    "governance_companion": 58.0,
+    "incumbent_plus_pdm": 44.6,
+    "piton_greenfield": 92.8,
+    "zoo_kittycad": 40.0
+  },
+  "trial_job_id": "job_001",
+  "weights": {
+    "adoption_burden": 8,
+    "escaped_change_reduction": 10,
+    "evidence_binding": 10,
+    "exact_brep_step": 10,
+    "local_offline_custody": 10,
+    "reversibility": 2,
+    "review_effort_reduction": 15,
+    "security_distribution": 5,
+    "single_authority": 10,
+    "support_economics": 5,
+    "target_job_fit": 15
+  }
+}

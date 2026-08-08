@@ -1,0 +1,62 @@
+{
+  "claim_scope": "fixture-only",
+  "external_thresholds_passed": false,
+  "fabrication_release": false,
+  "jobs_with_erased_gain": 0,
+  "machine_actuation": false,
+  "material_escaped_change_reduction": true,
+  "median_effort_reduction_pct": 38.0,
+  "paired_jobs": 5,
+  "pairs": [
+    {
+      "after_effort_min": 115,
+      "after_escaped_change_count": 0,
+      "after_overhead_min": 37,
+      "before_effort_min": 190,
+      "before_escaped_change_count": 1,
+      "org_id": "org_alpha",
+      "trial_pair_id": "pair_001"
+    },
+    {
+      "after_effort_min": 120,
+      "after_escaped_change_count": 0,
+      "after_overhead_min": 39,
+      "before_effort_min": 200,
+      "before_escaped_change_count": 1,
+      "org_id": "org_beta",
+      "trial_pair_id": "pair_002"
+    },
+    {
+      "after_effort_min": 125,
+      "after_escaped_change_count": 0,
+      "after_overhead_min": 41,
+      "before_effort_min": 210,
+      "before_escaped_change_count": 1,
+      "org_id": "org_gamma",
+      "trial_pair_id": "pair_003"
+    },
+    {
+      "after_effort_min": 130,
+      "after_escaped_change_count": 0,
+      "after_overhead_min": 43,
+      "before_effort_min": 220,
+      "before_escaped_change_count": 0,
+      "org_id": "org_delta",
+      "trial_pair_id": "pair_004"
+    },
+    {
+      "after_effort_min": 135,
+      "after_escaped_change_count": 0,
+      "after_overhead_min": 45,
+      "before_effort_min": 230,
+      "before_escaped_change_count": 0,
+      "org_id": "org_epsilon",
+      "trial_pair_id": "pair_005"
+    }
+  ],
+  "repeated_costly_workflow": true,
+  "scaffold_note": "placeholder paired data; real concierge trials pending Matt's partner work",
+  "schema": "piton.concierge-paired-summary.v1",
+  "successor_authorized": false,
+  "synthetic": true
+}

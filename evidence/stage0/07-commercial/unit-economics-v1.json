@@ -1,0 +1,19 @@
+{
+  "amortized_onboarding_labor_usd": 12000.0,
+  "claim_scope": "fixture-only",
+  "compute_usd": 8000.0,
+  "external_thresholds_passed": false,
+  "fabrication_release": false,
+  "machine_actuation": false,
+  "managed_gross_margin_pct": 65.5,
+  "recognized_revenue_usd": 120000.0,
+  "scaffold_note": "placeholder numbers; real unit economics pending T007 actual commercial work",
+  "scenario": "base",
+  "schema": "piton.unit-economics.v1",
+  "storage_usd": 1500.0,
+  "successor_authorized": false,
+  "support_hours_per_org_month": 1.8,
+  "support_labor_usd": 18000.0,
+  "synthetic": true,
+  "third_party_fees_usd": 4500.0
+}

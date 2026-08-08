@@ -1,0 +1,33 @@
+{
+  "authority_fit": "accepts_source_native",
+  "claim_scope": "fixture-only",
+  "consent_ref": "protected:consent/int_009.signed",
+  "external_thresholds_passed": false,
+  "fabrication_release": false,
+  "interview_id": "int_009",
+  "jobs_per_month": 1,
+  "last_completed_revision": {
+    "actor_handoffs": [
+      "author\u2192reviewer",
+      "reviewer\u2192buyer"
+    ],
+    "budget_band_usd": 1400,
+    "category": "adapter",
+    "exact_artifacts": [
+      "STEP",
+      "PDF_drawing"
+    ],
+    "failures": [],
+    "local_custody": "acceptable_cloud",
+    "review_effort_minutes": 105,
+    "source_native_authority_fit": "accepts"
+  },
+  "machine_actuation": false,
+  "org_id": "org_iota",
+  "role": "buyer",
+  "scaffold_note": "placeholder; real interview transcript pending Matt's outreach (T004)",
+  "schema": "piton.interview-coded.v1",
+  "segment_id": "small-mech-product-consultancy-v1",
+  "successor_authorized": false,
+  "synthetic": true
+}

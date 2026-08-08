@@ -2,6 +2,23 @@
 
 Piton is the local-first Mechanical CAD MVI.
 
+Piton was named after the OpenDesign R14 Bench Clamp Fixture prototype
+that produced the controlling current-verified interaction vocabulary and
+the original Stage 0/Stage 1 design.
+
+- Project: `8da9ea71-1dce-454a-bc4a-7e835eadfdd5`
+- Conversation: `76d3d331-cb2e-4a40-aca7-f6737ea538fe`
+- Authoring revision: `r14-05729d28`
+- Artifact URL: https://silas-workstation.taild7c550.ts.net:8443/api/projects/8da9ea71-1dce-454a-bc4a-7e835eadfdd5/raw/index.html?revision=r14-05729d28
+- Conversation URL: https://silas-workstation.taild7c550.ts.net:8443/api/conversations/76d3d331-cb2e-4a40-aca7-f6737ea538fe/files/index.html
+- Local ancestor mirror: `cad_mvi_opendesign/` (R1..R14 source pins, contracts, reproducer scripts)
+- Source doctrine: `/home/silas/.hermes/profiles/nick-mercer/workspace/reports/mechanical-cad-mvi-exhaustive-final-report-2026-08-06.md`
+
+Canonical MVI doctrine (one writable authority for in-repo text):
+[`docs/mvi-doctrine.md`](docs/mvi-doctrine.md). It is the in-repo mirror of
+the report’s Stage 1 doctrine (sections 9–18). Where text in any plan or
+doc disagrees with `docs/mvi-doctrine.md`, the doctrine wins.
+
 Current repository state: foundation scaffold only. It is not a production CAD system and it does not authorize fabrication.
 
 ```text

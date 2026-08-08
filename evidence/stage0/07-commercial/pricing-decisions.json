@@ -1,0 +1,51 @@
+{
+  "budget_owner_decisions": [
+    {
+      "budget_source": "ops_discretionary",
+      "cancellation_condition": "no_review_reduction_in_2_quarters",
+      "cash_vs_contribution": "cash",
+      "competing_spend_usd": 15000,
+      "decision": "accepted",
+      "decision_id": "bd_001",
+      "next_workflow": "tier-1_sustained_engineering",
+      "offer_variant": "paid_discovery",
+      "org_id": "org_alpha",
+      "procurement_security_dates": "2026-09-15",
+      "role": "budget_owner"
+    },
+    {
+      "budget_source": "eng_procurement",
+      "cancellation_condition": "no_review_reduction_in_2_quarters",
+      "cash_vs_contribution": "cash",
+      "competing_spend_usd": 18000,
+      "decision": "accepted",
+      "decision_id": "bd_002",
+      "next_workflow": "tier-1_sustained_engineering",
+      "offer_variant": "source_native_pilot",
+      "org_id": "org_beta",
+      "procurement_security_dates": "2026-09-22",
+      "role": "budget_owner"
+    },
+    {
+      "budget_source": "eng_procurement",
+      "cancellation_condition": "no_review_reduction_in_2_quarters",
+      "cash_vs_contribution": "cash",
+      "competing_spend_usd": 21000,
+      "decision": "rejected",
+      "decision_id": "bd_003",
+      "next_workflow": "tier-1_sustained_engineering",
+      "offer_variant": "governance_companion",
+      "org_id": "org_gamma",
+      "procurement_security_dates": "2026-09-15",
+      "role": "budget_owner"
+    }
+  ],
+  "claim_scope": "fixture-only",
+  "external_thresholds_passed": false,
+  "fabrication_release": false,
+  "machine_actuation": false,
+  "scaffold_note": "placeholder decisions; real WTP testing pending Matt's budget-owner outreach",
+  "schema": "piton.pricing-decisions.v1",
+  "successor_authorized": false,
+  "synthetic": true
+}
