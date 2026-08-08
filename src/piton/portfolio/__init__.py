@@ -15,7 +15,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, ClassVar, Literal, Mapping, Sequence
 
-from .model import _require_digest, _require_identifier
+from ..model import _require_digest, _require_identifier
 
 
 class Phase(StrEnum):
