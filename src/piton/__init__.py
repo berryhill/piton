@@ -19,6 +19,11 @@ from .model import (
     TruthBoundary,
     validate_lifecycle,
 )
+from .partner_alpha import (
+    PartnerAlphaReceipt,
+    default_partner_alpha_receipt,
+    validate_partner_alpha_receipt,
+)
 from .portfolio import (
     Authority,
     Disposition,
@@ -55,6 +60,7 @@ __all__ = [
     "Phase",
     "PhaseExitReceipt",
     "PortfolioAdmissionDecision",
+    "PartnerAlphaReceipt",
     "PrincipalContext",
     "ReviewDisposition",
     "SafetyState",
@@ -62,8 +68,10 @@ __all__ = [
     "admit_engineering_request",
     "canonical_json_bytes",
     "compute_revision_id",
+    "default_partner_alpha_receipt",
     "issue_phase_exit_receipt",
     "receipt_digest",
     "validate_lifecycle",
+    "validate_partner_alpha_receipt",
     "verify_successor_admission",
 ]
