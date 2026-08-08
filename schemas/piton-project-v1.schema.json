@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "piton.project.v1",
+  "title": "Piton canonical local project manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "canonicalization",
+    "project_id",
+    "units",
+    "authority",
+    "source_files",
+    "records",
+    "safety"
+  ],
+  "properties": {
+    "schema": {"const": "piton.project.v1"},
+    "canonicalization": {"const": "piton.canonical-json.v1"},
+    "project_id": {"$ref": "#/$defs/identifier"},
+    "units": {"enum": ["mm", "inch"]},
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["writable", "entrypoint", "dependency_lock", "toolchain_lock"],
+      "properties": {
+        "writable": {"const": "source-native-python"},
+        "entrypoint": {"$ref": "#/$defs/path"},
+        "dependency_lock": {"$ref": "#/$defs/path"},
+        "toolchain_lock": {"$ref": "#/$defs/path"}
+      }
+    },
+    "source_files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "digest", "media_type", "line_endings"],
+        "properties": {
+          "path": {"$ref": "#/$defs/path"},
+          "digest": {"$ref": "#/$defs/digest"},
+          "media_type": {"enum": ["text/x-python", "text/plain", "application/toml", "application/json"]},
+          "line_endings": {"const": "lf"}
+        }
+      }
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["record_id", "kind", "payload"],
+        "properties": {
+          "record_id": {"$ref": "#/$defs/identifier"},
+          "kind": {"type": "string", "minLength": 1, "maxLength": 128},
+          "payload": {"type": "object"}
+        }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["review_state", "fabrication_release", "machine_actuation"],
+      "properties": {
+        "review_state": {"const": "needs_human_review"},
+        "fabrication_release": {"const": false},
+        "machine_actuation": {"const": false}
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    }
+  }
+}
