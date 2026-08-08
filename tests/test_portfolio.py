@@ -134,6 +134,36 @@ class PortfolioAdmissionTests(unittest.TestCase):
         self.assertIn("disposition does not advance", exited.authorization_reasons)
         self.assertIn("repository-native", " ".join(exited.authorization_reasons))
 
+    def test_external_evidence_forces_requested_advance_to_hold(self) -> None:
+        native = evidence()
+        external = replace(
+            EvidenceArtifact.from_content(
+                artifact_id="ev-external",
+                repository_path="evidence/portfolio/external.json",
+                content={"result": "measured externally"},
+            ),
+            source=EvidenceSource.EXTERNAL,
+        )
+
+        exited = receipt(
+            Phase.P1,
+            status=ExecutionStatus.COMPLETED,
+            disposition=Disposition.ADVANCE,
+            predicates={"exact_cad_verified": True},
+            artifacts=(native, external),
+        )
+
+        self.assertEqual(ExecutionStatus.COMPLETED, exited.status)
+        self.assertTrue(exited.execution_complete)
+        self.assertEqual(Disposition.HOLD, exited.disposition)
+        self.assertFalse(exited.successor_authorized)
+        self.assertIn("disposition does not advance", exited.authorization_reasons)
+        self.assertIn(
+            "evidence ev-external is not repository-native",
+            exited.authorization_reasons,
+        )
+        self.assertEqual(exited, type(exited).from_dict(exited.to_dict()))
+
     def test_safety_invariants_are_enforced(self) -> None:
         unsafe_states = (
             SafetyState(fabrication_release=True),
