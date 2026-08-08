@@ -347,6 +347,10 @@ def issue_phase_exit_receipt(
     authority = _as_enum(Authority, authority, "authority")
     safety.assert_safe()
     artifacts = tuple(evidence)
+    if disposition is Disposition.ADVANCE and any(
+        artifact.source is EvidenceSource.EXTERNAL for artifact in artifacts
+    ):
+        disposition = Disposition.HOLD
     reasons = _authorization_reasons(
         phase=phase,
         status=status,
