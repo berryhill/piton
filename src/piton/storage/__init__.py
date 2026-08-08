@@ -1,4 +1,8 @@
-"""Local custody primitives for Piton's immutable content-addressed objects."""
+"""Local custody primitives for Piton's blobs and SQLite journal metadata.
+
+SQLite is journal/query metadata, not portable design authority. This package
+keeps migration and write-transaction ownership inside the local daemon API.
+"""
 
 from .blobs import (
     ArtifactRef,
@@ -8,6 +12,7 @@ from .blobs import (
     CustodyError,
     StagedBlob,
 )
+from .db import Database, Migration, MigrationError, TransactionOwnershipError
 
 __all__ = [
     "ArtifactRef",
@@ -15,5 +20,9 @@ __all__ = [
     "BlobStore",
     "BlobValidationError",
     "CustodyError",
+    "Database",
+    "Migration",
+    "MigrationError",
     "StagedBlob",
+    "TransactionOwnershipError",
 ]
