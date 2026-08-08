@@ -5,6 +5,7 @@ from piton.implementation_loop import (
     FailureClass,
     GateDecision,
     LoopDecision,
+    OperatorMergeAuthorization,
     PITON_IMPLEMENTATION_LOOP,
     RetryErrorPacket,
     SuccessProof,
@@ -130,6 +131,54 @@ class ImplementationLoopTests(unittest.TestCase):
         proof = SuccessProof(**values)
         self.assertEqual("d" * 40, proof.merged_tree_head)
         self.assertEqual("a" * 40, proof.candidate_head)
+
+    def test_missing_operator_merge_authorization_waits_without_policy_stop(self):
+        decision = PITON_IMPLEMENTATION_LOOP.decide(
+            attempt=1,
+            attempt_status=AttemptStatus.FAILED,
+            reason="waiting for trusted operator merge authorization",
+            failure_class=FailureClass.MISSING_OPERATOR_MERGE_AUTHORIZATION,
+            error_packet=packet(),
+        )
+        self.assertEqual(LoopDecision.BLOCK, decision.loop_decision)
+
+    def test_operator_merge_authorization_can_satisfy_exact_head_review_gate(self):
+        head = "a" * 40
+        proof_values = success_proof(head).__dict__ | {
+            "human_review_head": None,
+            "human_review_receipt_digest": None,
+            "operator_merge_authorization": OperatorMergeAuthorization(
+                actor="matt",
+                repository="berryhill/piton",
+                task_id="t_14aa994",
+                candidate_head=head,
+                action="merge",
+                receipt_digest="sha256:" + "c" * 64,
+            ),
+        }
+        decision = PITON_IMPLEMENTATION_LOOP.decide(
+            attempt=1,
+            attempt_status=AttemptStatus.SUCCEEDED,
+            reason="trusted operator authorized the exact candidate merge",
+            success_proof=SuccessProof(**proof_values),
+        )
+        self.assertEqual(LoopDecision.TERMINAL_SUCCESS, decision.loop_decision)
+
+    def test_operator_merge_authorization_rejects_a_different_candidate_head(self):
+        values = success_proof().__dict__ | {
+            "human_review_head": None,
+            "human_review_receipt_digest": None,
+            "operator_merge_authorization": OperatorMergeAuthorization(
+                actor="matt",
+                repository="berryhill/piton",
+                task_id="t_14aa994",
+                candidate_head="c" * 40,
+                action="merge",
+                receipt_digest="sha256:" + "d" * 64,
+            ),
+        }
+        with self.assertRaisesRegex(ValueError, "exact candidate head"):
+            SuccessProof(**values)
 
     def test_gate_decision_rejects_inconsistent_direct_construction(self):
         with self.assertRaisesRegex(ValueError, "requires succeeded"):
