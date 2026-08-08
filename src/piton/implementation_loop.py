@@ -97,6 +97,42 @@ class OperatorMergeAuthorization:
 
 
 @dataclass(frozen=True)
+class OperatorMergeGrant:
+    """Trusted operator grant that the runtime binds to one verified task head."""
+
+    actor: str
+    repository: str
+    task_id: str
+    action: str
+    candidate_binding: str
+    receipt_digest: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.actor, str) or not self.actor.strip():
+            raise ValueError("operator merge grant requires an actor")
+        if not isinstance(self.repository, str) or self.repository.count("/") != 1:
+            raise ValueError("operator merge grant requires owner/repository")
+        if not isinstance(self.task_id, str) or not self.task_id.startswith("t_"):
+            raise ValueError("operator merge grant requires a task ID")
+        if self.action != "merge":
+            raise ValueError("operator merge grant action must be merge")
+        if self.candidate_binding != "task_owned_exact_head_after_final_verification":
+            raise ValueError("operator merge grant has an unsafe candidate binding")
+        _require_digest("receipt_digest", self.receipt_digest)
+
+    def bind(self, candidate_head: str) -> OperatorMergeAuthorization:
+        """Mechanically bind this server-owned task grant to the verified exact head."""
+        return OperatorMergeAuthorization(
+            actor=self.actor,
+            repository=self.repository,
+            task_id=self.task_id,
+            candidate_head=candidate_head,
+            action=self.action,
+            receipt_digest=self.receipt_digest,
+        )
+
+
+@dataclass(frozen=True)
 class SuccessProof:
     """Evidence-bound proof that the exact candidate completed every terminal gate."""
 
