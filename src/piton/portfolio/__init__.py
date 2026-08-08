@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, ClassVar, Literal, Mapping, Sequence
 
 from ..model import _require_digest, _require_identifier
 
@@ -108,6 +108,84 @@ def _as_enum(enum_type: type[StrEnum], value: Any, name: str) -> Any:
         return enum_type(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"unknown {name}") from exc
+
+
+@dataclass(frozen=True, slots=True)
+class PartnerScaffoldT007Receipt:
+    """Closed, synthetic shape for unperformed T007 partner work.
+
+    This repository fixture is deliberately incapable of representing a real
+    partner result. Validation proves only that all zero-claim fields retain
+    their declared values.
+    """
+
+    schema: Literal["piton.partner-alpha-scaffold.t007.v1"] = (
+        "piton.partner-alpha-scaffold.t007.v1"
+    )
+    disposition: Literal["unavailable"] = "unavailable"
+    synthetic: Literal[True] = True
+    claim_scope: Literal["fixture-only"] = "fixture-only"
+    external_thresholds_passed: Literal[False] = False
+    successor_authorized: Literal[False] = False
+    threshold_passed: Literal[False] = False
+    fabrication_release: Literal[False] = False
+    machine_actuation: Literal[False] = False
+    review_state: Literal["needs_human_review"] = "needs_human_review"
+    g2_accepted: Literal[False] = False
+    g7_accepted: Literal[False] = False
+    paid_partner_count: Literal[0] = 0
+    completed_real_job_count: Literal[0] = 0
+    recognized_revenue_usd: Literal[0] = 0
+
+    FIELD_NAMES: ClassVar[tuple[str, ...]] = (
+        "schema",
+        "disposition",
+        "synthetic",
+        "claim_scope",
+        "external_thresholds_passed",
+        "successor_authorized",
+        "threshold_passed",
+        "fabrication_release",
+        "machine_actuation",
+        "review_state",
+        "g2_accepted",
+        "g7_accepted",
+        "paid_partner_count",
+        "completed_real_job_count",
+        "recognized_revenue_usd",
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {name: getattr(self, name) for name in self.FIELD_NAMES}
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "PartnerScaffoldT007Receipt":
+        if not isinstance(value, Mapping) or set(value) != set(cls.FIELD_NAMES):
+            raise ValueError("fields do not match the closed partner scaffold schema")
+        return cls(**{name: value[name] for name in cls.FIELD_NAMES})
+
+
+def validate_partner_scaffold_t007(receipt: PartnerScaffoldT007Receipt) -> bool:
+    """Return true only for the exact zero-claim T007 fixture state."""
+
+    if type(receipt) is not PartnerScaffoldT007Receipt:
+        return False
+    expected = PartnerScaffoldT007Receipt().to_dict()
+    actual = receipt.to_dict()
+    return all(
+        type(actual[name]) is type(expected_value) and actual[name] == expected_value
+        for name, expected_value in expected.items()
+    )
+
+
+def serialize_partner_scaffold_t007(receipt: PartnerScaffoldT007Receipt) -> str:
+    """Serialize a valid fixture as deterministic UTF-8-compatible JSON text."""
+
+    if not validate_partner_scaffold_t007(receipt):
+        raise ValueError("cannot serialize an invalid partner scaffold")
+    return json.dumps(
+        receipt.to_dict(), sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False
+    ) + "\n"
 
 
 @dataclass(frozen=True, slots=True)
