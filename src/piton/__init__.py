@@ -29,6 +29,7 @@ from .portfolio import (
     Disposition,
     EvidenceArtifact,
     EvidenceSource,
+    ExternalEvidenceT002Receipt,
     ExecutionStatus,
     Phase,
     PhaseExitReceipt,
@@ -36,6 +37,7 @@ from .portfolio import (
     SafetyState,
     issue_phase_exit_receipt,
     receipt_digest,
+    validate_external_evidence_t002,
     verify_successor_admission,
 )
 from .revision import DesignRevision, canonical_json_bytes, compute_revision_id
@@ -57,6 +59,7 @@ __all__ = [
     "EvidenceArtifact",
     "EvidenceClosure",
     "EvidenceSource",
+    "ExternalEvidenceT002Receipt",
     "ExecutionStatus",
     "Phase",
     "PhaseExitReceipt",
@@ -71,6 +74,7 @@ __all__ = [
     "compute_revision_id",
     "issue_phase_exit_receipt",
     "receipt_digest",
+    "validate_external_evidence_t002",
     "validate_lifecycle",
     "validate_partner_scaffold_t002",
     "verify_successor_admission",
