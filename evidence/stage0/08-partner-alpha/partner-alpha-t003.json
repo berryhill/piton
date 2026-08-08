@@ -1,0 +1,16 @@
+{
+  "claim_scope": "fixture-only",
+  "committed": false,
+  "external_thresholds_passed": false,
+  "fabrication_release": false,
+  "machine_actuation": false,
+  "paid": false,
+  "partner_id": "partner-alpha",
+  "real_models_supplied": false,
+  "real_revisions_supplied": false,
+  "review_state": "needs_human_review",
+  "scaffold_note": "placeholder partner record; no external commitment, payment, model, or revision evidence is recorded (T003)",
+  "schema": "piton.partner.v1",
+  "successor_authorized": false,
+  "synthetic": true
+}
