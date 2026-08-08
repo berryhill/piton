@@ -55,15 +55,12 @@ RETRYABLE_FAILURES = frozenset(
         FailureClass.REVIEW_DERIVATIVE_FAILURE,
         FailureClass.CI_FAILURE,
         FailureClass.INSTALL_SMOKE_FAILURE,
+        FailureClass.BASE_BRANCH_ADVANCED_WHILE_WAITING,
     }
 )
 NONRETRYABLE_FAILURES = frozenset(FailureClass) - RETRYABLE_FAILURES
 WAITING_FAILURES = frozenset(
-    {
-        FailureClass.MISSING_OPERATOR_MERGE_AUTHORIZATION,
-        FailureClass.PULL_REQUEST_READY_FOR_OPERATOR,
-        FailureClass.BASE_BRANCH_ADVANCED_WHILE_WAITING,
-    }
+    {FailureClass.MISSING_OPERATOR_MERGE_AUTHORIZATION}
 )
 
 _HEAD_PATTERN = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -326,7 +323,7 @@ class LoopStep:
 
 @dataclass(frozen=True)
 class PullRequestLifecyclePolicy:
-    """Fail-closed ownership boundary between queue workers and the PR manager."""
+    """Fail-closed task ownership contract for one branch and one PR."""
 
     merge_execution: str
     serialization_key_fields: Tuple[str, ...]
@@ -338,16 +335,16 @@ class PullRequestLifecyclePolicy:
         object.__setattr__(
             self, "serialization_key_fields", tuple(self.serialization_key_fields)
         )
-        if self.merge_execution != "interactive_operator_pr_manager":
-            raise ValueError("PR merge execution must belong to the interactive operator manager")
+        if self.merge_execution != "task_owned_terminal_gate":
+            raise ValueError("PR merge execution must remain with the owning task gate")
         if self.serialization_key_fields != ("repository", "base_branch"):
-            raise ValueError("PR serialization must bind repository and base branch")
-        if not self.automatic_merge_forbidden:
-            raise ValueError("queue workers must not auto-merge pull requests")
+            raise ValueError("PR coordination must bind repository and base branch")
+        if self.automatic_merge_forbidden:
+            raise ValueError("the task-owned terminal gate must be allowed to merge")
         if not self.one_open_pr_per_task:
             raise ValueError("each task must reuse exactly one open pull request")
-        if self.base_drift_action != "wait_for_operator_pr_manager":
-            raise ValueError("base drift must wait for serialized PR management")
+        if self.base_drift_action != "refresh_same_branch_and_retry":
+            raise ValueError("base drift must refresh and retry the same task branch and PR")
 
 
 @dataclass(frozen=True)
@@ -433,16 +430,16 @@ class ImplementationLoop:
 
 PITON_IMPLEMENTATION_LOOP = ImplementationLoop(
     flow_id="piton_implementation_loop",
-    version=2,
+    version=3,
     max_attempts=10,
     restart_step="implement_minimally",
     gate_step="merge_on_success_or_loop",
     pr_lifecycle=PullRequestLifecyclePolicy(
-        merge_execution="interactive_operator_pr_manager",
+        merge_execution="task_owned_terminal_gate",
         serialization_key_fields=("repository", "base_branch"),
-        automatic_merge_forbidden=True,
+        automatic_merge_forbidden=False,
         one_open_pr_per_task=True,
-        base_drift_action="wait_for_operator_pr_manager",
+        base_drift_action="refresh_same_branch_and_retry",
     ),
     steps=(
         LoopStep("prepare_feature_worktree", "Prepare one trusted task-owned feature worktree"),
