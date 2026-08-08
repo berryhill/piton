@@ -1,27 +1,33 @@
 {
-  "schema": "piton.interview-coded.v1",
-  "interview_id": "int_003",
-  "segment_id": "small-mech-product-consultancy-v1",
-  "org_id": "org_gamma",
-  "role": "reviewer",
-  "consent_ref": "protected:consent/int_003.signed",
   "authority_fit": "accepts_source_native",
+  "claim_scope": "fixture-only",
+  "consent_ref": "protected:consent/int_003.signed",
+  "external_thresholds_passed": false,
+  "fabrication_release": false,
+  "interview_id": "int_003",
   "jobs_per_month": 4,
   "last_completed_revision": {
+    "actor_handoffs": [
+      "author\u2192reviewer",
+      "reviewer\u2192buyer"
+    ],
+    "budget_band_usd": 800,
     "category": "adapter",
     "exact_artifacts": [
       "STEP",
       "PDF_drawing"
     ],
-    "actor_handoffs": [
-      "author\u2192reviewer",
-      "reviewer\u2192buyer"
-    ],
-    "review_effort_minutes": 75,
     "failures": [],
-    "source_native_authority_fit": "accepts",
     "local_custody": "acceptable_cloud",
-    "budget_band_usd": 800
+    "review_effort_minutes": 75,
+    "source_native_authority_fit": "accepts"
   },
-  "scaffold_note": "placeholder; real interview transcript pending Matt's outreach (T004)"
+  "machine_actuation": false,
+  "org_id": "org_gamma",
+  "role": "reviewer",
+  "scaffold_note": "placeholder; real interview transcript pending Matt's outreach (T004)",
+  "schema": "piton.interview-coded.v1",
+  "segment_id": "small-mech-product-consultancy-v1",
+  "successor_authorized": false,
+  "synthetic": true
 }
