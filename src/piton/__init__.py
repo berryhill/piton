@@ -33,6 +33,14 @@ from .portfolio import (
     receipt_digest,
     verify_successor_admission,
 )
+from .project_format import (
+    PitonProject,
+    ProjectFormatError,
+    canonical_project_bytes,
+    load_project_bytes,
+    load_project_directory,
+    project_digest,
+)
 from .revision import DesignRevision, canonical_json_bytes, compute_revision_id
 
 __all__ = [
@@ -54,15 +62,21 @@ __all__ = [
     "ExecutionStatus",
     "Phase",
     "PhaseExitReceipt",
+    "PitonProject",
     "PortfolioAdmissionDecision",
     "PrincipalContext",
+    "ProjectFormatError",
     "ReviewDisposition",
     "SafetyState",
     "TruthBoundary",
     "admit_engineering_request",
     "canonical_json_bytes",
+    "canonical_project_bytes",
     "compute_revision_id",
     "issue_phase_exit_receipt",
+    "load_project_bytes",
+    "load_project_directory",
+    "project_digest",
     "receipt_digest",
     "validate_lifecycle",
     "verify_successor_admission",
