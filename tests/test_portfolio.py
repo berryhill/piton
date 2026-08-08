@@ -119,19 +119,25 @@ class PortfolioAdmissionTests(unittest.TestCase):
                 self.assertFalse(exited.successor_authorized)
                 self.assertIn("scaffold", " ".join(exited.authorization_reasons).lower())
 
-    def test_external_evidence_cannot_authorize_successor(self) -> None:
-        external = replace(evidence(), source=EvidenceSource.EXTERNAL)
+    def test_external_evidence_normalizes_advance_to_completed_hold(self) -> None:
+        predecessor = receipt(Phase.P0, authority=Authority.HUMAN)
+        external = replace(
+            evidence({"result": "externally measured"}),
+            artifact_id="ev-external",
+            source=EvidenceSource.EXTERNAL,
+        )
         exited = receipt(
             Phase.P1,
-            disposition=Disposition.ADVANCE,
+            predecessor=predecessor,
             predicates={"exact_cad_verified": True},
             artifacts=(external,),
         )
 
         self.assertEqual(ExecutionStatus.COMPLETED, exited.status)
-        self.assertEqual(Disposition.ADVANCE, exited.disposition)
+        self.assertEqual(Disposition.HOLD, exited.disposition)
         self.assertTrue(exited.execution_complete)
         self.assertFalse(exited.successor_authorized)
+        self.assertIn("disposition does not advance", exited.authorization_reasons)
         self.assertIn("repository-native", " ".join(exited.authorization_reasons))
 
     def test_mixed_repository_native_and_external_evidence_cannot_authorize(self) -> None:
@@ -146,22 +152,60 @@ class PortfolioAdmissionTests(unittest.TestCase):
             artifacts=(evidence(), external),
         )
 
+        self.assertEqual(ExecutionStatus.COMPLETED, exited.status)
+        self.assertTrue(exited.execution_complete)
+        self.assertEqual(Disposition.HOLD, exited.disposition)
+        self.assertFalse(exited.successor_authorized)
+        reasons = " ".join(exited.authorization_reasons)
+        self.assertIn("disposition does not advance", reasons)
+        self.assertIn("not repository-native", reasons)
+
+    def test_external_evidence_forces_requested_advance_to_hold(self) -> None:
+        native = evidence()
+        external = replace(
+            EvidenceArtifact.from_content(
+                artifact_id="ev-external",
+                repository_path="evidence/portfolio/external.json",
+                content={"result": "measured externally"},
+            ),
+            source=EvidenceSource.EXTERNAL,
+        )
+
+        exited = receipt(
+            Phase.P1,
+            status=ExecutionStatus.COMPLETED,
+            disposition=Disposition.ADVANCE,
+            predicates={"exact_cad_verified": True},
+            artifacts=(native, external),
+        )
+
+        self.assertEqual(ExecutionStatus.COMPLETED, exited.status)
         self.assertTrue(exited.execution_complete)
         self.assertFalse(exited.successor_authorized)
+        self.assertIn("disposition does not advance", exited.authorization_reasons)
         self.assertIn(
             "evidence ev-external is not repository-native",
             exited.authorization_reasons,
         )
 
+        self.assertEqual(exited, type(exited).from_dict(exited.to_dict()))
+
     def test_successor_verifier_rejects_forged_external_evidence_authorization(self) -> None:
-        external = replace(evidence(), source=EvidenceSource.EXTERNAL)
+        predecessor = receipt(Phase.P0, authority=Authority.HUMAN)
+        external = replace(
+            evidence(),
+            artifact_id="ev-external-forged",
+            source=EvidenceSource.EXTERNAL,
+        )
         denied = receipt(
             Phase.P1,
+            predecessor=predecessor,
             predicates={"exact_cad_verified": True},
             artifacts=(external,),
         )
         forged = replace(
             denied,
+            disposition=Disposition.ADVANCE,
             successor_authorized=True,
             authorization_reasons=(),
         )
