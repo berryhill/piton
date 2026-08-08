@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from jsonschema import Draft202012Validator, ValidationError
 from piton.implementation_loop import RetryErrorPacket
+from piton.project_format import load_project_directory
 from piton.revision import DesignRevision
 
 REQUIRED = [
@@ -25,6 +26,7 @@ REQUIRED = [
     ROOT / "flows/piton_implementation_loop_v1.json",
     ROOT / "schemas/retry-error-packet-v1.schema.json",
     ROOT / "schemas/design-revision-v1.schema.json",
+    ROOT / "schemas/piton-project-v1.schema.json",
     ROOT / ".github/workflows/ci.yml",
 ]
 
@@ -43,6 +45,7 @@ def load_validator(name: str) -> Draft202012Validator:
 
 design_validator = load_validator("design-revision-v1.schema.json")
 retry_validator = load_validator("retry-error-packet-v1.schema.json")
+project_validator = load_validator("piton-project-v1.schema.json")
 digest = "sha256:" + "0" * 64
 revision = DesignRevision(
     parent_revision_id=None,
@@ -53,6 +56,8 @@ revision = DesignRevision(
     parameter_values={"height": "10 mm"},
 )
 design_validator.validate(revision.to_manifest())
+project = load_project_directory(ROOT / "examples" / "minimal-project")
+project_validator.validate(project.to_primitive())
 
 packet = RetryErrorPacket(
     attempt=1,
