@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from piton.admission import (
@@ -66,6 +67,51 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual((), decision.reasons)
         self.assertEqual("grant_1", decision.grant_id)
         self.assertEqual(DIGEST, decision.policy_digest)
+        self.assertRegex(decision.request_digest, r"^sha256:[0-9a-f]{64}$")
+
+    def test_request_id_is_strictly_bound_to_canonical_request_content(self):
+        first = admit_engineering_request(
+            request=self.request(),
+            principal=self.principal,
+            grant=self.grant,
+            policy=self.policy,
+            current_revision_id=REVISION_ID,
+            now=NOW,
+        )
+        replay = admit_engineering_request(
+            request=self.request(),
+            principal=self.principal,
+            grant=self.grant,
+            policy=self.policy,
+            current_revision_id=REVISION_ID,
+            now=NOW,
+            stored_decision=first,
+        )
+        conflict = admit_engineering_request(
+            request=self.request(budget_units=1),
+            principal=self.principal,
+            grant=self.grant,
+            policy=self.policy,
+            current_revision_id=REVISION_ID,
+            now=NOW,
+            stored_decision=first,
+        )
+        context_conflict = admit_engineering_request(
+            request=self.request(),
+            principal=PrincipalContext("agent.other"),
+            grant=self.grant,
+            policy=self.policy,
+            current_revision_id=REVISION_ID,
+            now=NOW,
+            stored_decision=first,
+        )
+        self.assertIs(first, replay)
+        self.assertFalse(conflict.admitted)
+        self.assertIn("request ID was reused with different content", conflict.reasons)
+        self.assertEqual(
+            ("stored decision does not match server-owned admission context",),
+            context_conflict.reasons,
+        )
 
     def test_request_content_cannot_supply_authority_or_lifecycle_claims(self):
         baseline = {
@@ -81,16 +127,27 @@ class AdmissionTests(unittest.TestCase):
         for forbidden in (
             "actor",
             "principal_id",
+            "grant_id",
             "grant",
             "policy",
             "review_state",
             "approval",
+            "engineering_approval",
+            "export",
+            "release",
             "fabrication_release",
             "machine_actuation",
         ):
             with self.subTest(forbidden=forbidden):
                 with self.assertRaisesRegex(ValueError, "unsupported request fields"):
                     EngineeringRequest.from_untrusted({**baseline, forbidden: "claimed"})
+
+        for missing in baseline:
+            with self.subTest(missing=missing):
+                content = dict(baseline)
+                del content[missing]
+                with self.assertRaisesRegex(ValueError, "unsupported request fields"):
+                    EngineeringRequest.from_untrusted(content)
 
     def test_scope_effect_capability_policy_and_budget_must_all_match(self):
         mismatches = (
@@ -100,6 +157,7 @@ class AdmissionTests(unittest.TestCase):
             ("capability", "part.inspect", "effect capability pair"),
             ("policy_digest", OTHER_DIGEST, "policy digest"),
             ("budget_units", 4, "grant budget"),
+            ("budget_units", 6, "policy budget"),
         )
         for field, value, reason in mismatches:
             with self.subTest(field=field):
@@ -152,10 +210,60 @@ class AdmissionTests(unittest.TestCase):
                 self.assertTrue(any("revision" in item for item in decision.reasons))
 
     def test_release_and_actuation_are_not_representable_effects(self):
-        for effect in ("approve", "export", "release", "machine_actuation"):
+        for effect in (
+            "approve",
+            "export",
+            "release",
+            "fabrication_release",
+            "machine_actuation",
+        ):
             with self.subTest(effect=effect):
                 with self.assertRaisesRegex(ValueError, "unsupported engineering effect"):
                     self.request(effect=effect)
+
+    def test_only_the_two_stage_one_effect_capability_pairs_are_representable(self):
+        allowed = (
+            (Effect.READ, "part.inspect"),
+            (Effect.PROPOSE, "parameter.propose"),
+        )
+        for effect, capability in allowed:
+            with self.subTest(effect=effect, capability=capability):
+                request = self.request(effect=effect, capability=capability)
+                self.assertEqual(effect, request.effect)
+                self.assertEqual(capability, request.capability)
+
+        with self.assertRaisesRegex(ValueError, "unsupported Stage 1 capability"):
+            self.request(capability="revision.commit")
+
+    def test_malformed_trusted_and_untrusted_inputs_fail_closed(self):
+        invalid_requests = (
+            {"request_id": ""},
+            {"base_revision_id": "rev_not-canonical"},
+            {"policy_digest": "sha256:not-canonical"},
+            {"budget_units": 0},
+            {"budget_units": True},
+        )
+        for changes in invalid_requests:
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                self.request(**changes)
+
+        with self.assertRaisesRegex(ValueError, "duplicates"):
+            AdmissionPolicy(DIGEST, (Effect.READ, Effect.READ), ("part.inspect",), 1)
+        with self.assertRaisesRegex(ValueError, "duplicates"):
+            AdmissionPolicy(DIGEST, (Effect.READ,), ("part.inspect", "part.inspect"), 1)
+        with self.assertRaisesRegex(ValueError, "duplicates"):
+            replace(self.grant, resource_ids=("part_1", "part_1"))
+        with self.assertRaisesRegex(ValueError, "timezone-aware"):
+            replace(self.grant, expires_at=self.grant.expires_at.replace(tzinfo=None))
+        with self.assertRaisesRegex(ValueError, "timezone-aware"):
+            admit_engineering_request(
+                request=self.request(),
+                principal=self.principal,
+                grant=self.grant,
+                policy=self.policy,
+                current_revision_id=REVISION_ID,
+                now=NOW.replace(tzinfo=None),
+            )
 
 
 if __name__ == "__main__":
