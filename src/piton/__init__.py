@@ -20,9 +20,12 @@ from .model import (
     validate_lifecycle,
 )
 from .partner_alpha import (
+    DEFAULT_PARTNER_SCAFFOLD_T002,
     PartnerAlphaReceipt,
+    PartnerAlphaScaffoldT002,
     default_partner_alpha_receipt,
     validate_partner_alpha_receipt,
+    validate_partner_scaffold_t002,
 )
 from .portfolio import (
     Authority,
@@ -38,6 +41,14 @@ from .portfolio import (
     receipt_digest,
     verify_successor_admission,
 )
+from .project_format import (
+    PitonProject,
+    ProjectFormatError,
+    canonical_project_bytes,
+    load_project_bytes,
+    load_project_directory,
+    project_digest,
+)
 from .revision import DesignRevision, canonical_json_bytes, compute_revision_id
 
 __all__ = [
@@ -48,6 +59,7 @@ __all__ = [
     "BuildAttempt",
     "BuildStatus",
     "ChangeProposal",
+    "DEFAULT_PARTNER_SCAFFOLD_T002",
     "DesignRevision",
     "Disposition",
     "DraftExport",
@@ -59,19 +71,27 @@ __all__ = [
     "ExecutionStatus",
     "Phase",
     "PhaseExitReceipt",
-    "PortfolioAdmissionDecision",
+    "PartnerAlphaScaffoldT002",
+    "PitonProject",
     "PartnerAlphaReceipt",
+    "PortfolioAdmissionDecision",
     "PrincipalContext",
+    "ProjectFormatError",
     "ReviewDisposition",
     "SafetyState",
     "TruthBoundary",
     "admit_engineering_request",
     "canonical_json_bytes",
+    "canonical_project_bytes",
     "compute_revision_id",
     "default_partner_alpha_receipt",
     "issue_phase_exit_receipt",
+    "load_project_bytes",
+    "load_project_directory",
+    "project_digest",
     "receipt_digest",
     "validate_lifecycle",
     "validate_partner_alpha_receipt",
+    "validate_partner_scaffold_t002",
     "verify_successor_admission",
 ]

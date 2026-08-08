@@ -1,18 +1,64 @@
-"""Zero-claim partner-alpha receipt for the T006 foundation scaffold.
+"""Fail-closed partner-alpha scaffolds for the T002 and T006 slices.
 
-This receipt records only that real partner-alpha evidence is unavailable.  It
-cannot represent commercial threshold passage, portfolio-gate acceptance,
-engineering review, fabrication release, or machine actuation.
+These records only the absence of partner/commercial evidence. They cannot
+satisfy an external threshold, accept G2/G7, authorize a successor, elevate
+review state, release fabrication, or actuate machinery.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Final
+
+
+@dataclass(frozen=True, slots=True)
+class PartnerAlphaScaffoldT002:
+    """Immutable shape for the synthetic T002 zero-claim receipt."""
+
+    disposition: str = "unavailable"
+    synthetic: bool = True
+    threshold_passed: bool = False
+    review_state: str = "needs_human_review"
+    fabrication_release: bool = False
+    machine_actuation: bool = False
+    g2_accepted: bool = False
+    g7_accepted: bool = False
+    paid_partner_count: int = 0
+    completed_real_job_count: int = 0
+    recognized_revenue_usd: int = 0
+
+
+DEFAULT_PARTNER_SCAFFOLD_T002: Final = PartnerAlphaScaffoldT002()
+
+_T002_LOCKED_FIELDS: Final = (
+    ("disposition", str, "unavailable"),
+    ("synthetic", bool, True),
+    ("threshold_passed", bool, False),
+    ("review_state", str, "needs_human_review"),
+    ("fabrication_release", bool, False),
+    ("machine_actuation", bool, False),
+    ("g2_accepted", bool, False),
+    ("g7_accepted", bool, False),
+    ("paid_partner_count", int, 0),
+    ("completed_real_job_count", int, 0),
+    ("recognized_revenue_usd", int, 0),
+)
+
+
+def validate_partner_scaffold_t002(receipt: object) -> bool:
+    """Return true only for the exact, type-strict T002 zero-claim state."""
+    if type(receipt) is not PartnerAlphaScaffoldT002:
+        return False
+    return all(
+        type(getattr(receipt, name)) is expected_type
+        and getattr(receipt, name) == expected_value
+        for name, expected_type, expected_value in _T002_LOCKED_FIELDS
+    )
 
 
 @dataclass(frozen=True, slots=True)
 class PartnerAlphaReceipt:
-    """An inert commercial-gate observation, never admission authority."""
+    """An inert T006 commercial-gate observation, never admission authority."""
 
     synthetic: bool = True
     available: bool = False
