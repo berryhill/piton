@@ -119,14 +119,19 @@ class PortfolioAdmissionTests(unittest.TestCase):
                 self.assertFalse(exited.successor_authorized)
                 self.assertIn("scaffold", " ".join(exited.authorization_reasons).lower())
 
-    def test_external_evidence_cannot_pass_product_gate(self) -> None:
-        artifact = replace(evidence(), source=EvidenceSource.EXTERNAL)
+    def test_external_evidence_forces_advancing_disposition_to_hold(self) -> None:
+        external = replace(evidence(), artifact_id="ev-external", source=EvidenceSource.EXTERNAL)
         exited = receipt(
             Phase.P1,
+            disposition=Disposition.ADVANCE,
             predicates={"exact_cad_verified": True},
-            artifacts=(artifact,),
+            artifacts=(evidence(), external),
         )
+        self.assertEqual(ExecutionStatus.COMPLETED, exited.status)
+        self.assertTrue(exited.execution_complete)
+        self.assertEqual(Disposition.HOLD, exited.disposition)
         self.assertFalse(exited.successor_authorized)
+        self.assertIn("disposition does not advance", exited.authorization_reasons)
         self.assertIn("repository-native", " ".join(exited.authorization_reasons))
 
     def test_safety_invariants_are_enforced(self) -> None:
