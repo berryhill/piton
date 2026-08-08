@@ -348,7 +348,7 @@ def issue_phase_exit_receipt(
     safety.assert_safe()
     artifacts = tuple(evidence)
     if disposition is Disposition.ADVANCE and any(
-        artifact.source is EvidenceSource.EXTERNAL for artifact in artifacts
+        artifact.source is not EvidenceSource.REPOSITORY_NATIVE for artifact in artifacts
     ):
         disposition = Disposition.HOLD
     reasons = _authorization_reasons(

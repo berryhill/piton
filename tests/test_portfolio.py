@@ -119,20 +119,27 @@ class PortfolioAdmissionTests(unittest.TestCase):
                 self.assertFalse(exited.successor_authorized)
                 self.assertIn("scaffold", " ".join(exited.authorization_reasons).lower())
 
-    def test_external_evidence_forces_advancing_disposition_to_hold(self) -> None:
-        external = replace(evidence(), artifact_id="ev-external", source=EvidenceSource.EXTERNAL)
+    def test_external_evidence_normalizes_advance_to_completed_hold(self) -> None:
+        predecessor = receipt(Phase.P0, authority=Authority.HUMAN)
+        external = replace(
+            evidence({"result": "externally measured"}),
+            artifact_id="ev-external",
+            source=EvidenceSource.EXTERNAL,
+        )
         exited = receipt(
             Phase.P1,
-            disposition=Disposition.ADVANCE,
+            predecessor=predecessor,
             predicates={"exact_cad_verified": True},
             artifacts=(evidence(), external),
         )
+
         self.assertEqual(ExecutionStatus.COMPLETED, exited.status)
         self.assertTrue(exited.execution_complete)
         self.assertEqual(Disposition.HOLD, exited.disposition)
         self.assertFalse(exited.successor_authorized)
-        self.assertIn("disposition does not advance", exited.authorization_reasons)
-        self.assertIn("repository-native", " ".join(exited.authorization_reasons))
+        reasons = " ".join(exited.authorization_reasons)
+        self.assertIn("disposition does not advance", reasons)
+        self.assertIn("not repository-native", reasons)
 
     def test_safety_invariants_are_enforced(self) -> None:
         unsafe_states = (
