@@ -8,6 +8,8 @@ actuation authority.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -183,6 +185,27 @@ class EngineeringRequest:
             raise ValueError(f"unsupported request fields: {detail}")
         return cls(**{name: content[name] for name in _REQUEST_FIELDS})
 
+    def canonical_digest(self) -> str:
+        """Bind the idempotency identity to deterministic request content."""
+        content = {
+            "base_revision_id": self.base_revision_id,
+            "budget_units": self.budget_units,
+            "capability": self.capability,
+            "effect": self.effect.value,
+            "policy_digest": self.policy_digest,
+            "project_id": self.project_id,
+            "request_id": self.request_id,
+            "resource_id": self.resource_id,
+        }
+        canonical = json.dumps(
+            content,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+        return "sha256:" + hashlib.sha256(canonical).hexdigest()
+
 
 @dataclass(frozen=True, slots=True)
 class AdmissionDecision:
@@ -192,7 +215,9 @@ class AdmissionDecision:
     admitted: bool
     reasons: Tuple[str, ...]
     grant_id: str
+    principal_id: str
     policy_digest: str
+    request_digest: str
 
 
 def admit_engineering_request(
@@ -203,10 +228,46 @@ def admit_engineering_request(
     policy: AdmissionPolicy,
     current_revision_id: str,
     now: datetime,
+    stored_decision: AdmissionDecision | None = None,
 ) -> AdmissionDecision:
-    """Admit only when every principal, scope, policy, budget, and base gate matches."""
+    """Admit server-owned READ/PROPOSE engineering context only.
+
+    ``stored_decision`` is an optional server-owned idempotency receipt. An
+    exact canonical replay returns that receipt; reuse of the request identity
+    with different content or trusted context fails closed. This function does
+    not persist receipts or consume cumulative budget.
+    """
     _require_revision_id("current_revision_id", current_revision_id)
     _aware_datetime("now", now)
+    request_digest = request.canonical_digest()
+
+    if stored_decision is not None:
+        if not isinstance(stored_decision, AdmissionDecision):
+            raise ValueError("stored_decision must be an AdmissionDecision")
+        if stored_decision.request_id != request.request_id:
+            raise ValueError("stored decision must match request identity")
+        context_matches = (
+            stored_decision.principal_id == principal.principal_id
+            and stored_decision.grant_id == grant.grant_id
+            and stored_decision.policy_digest == policy.policy_digest
+        )
+        if stored_decision.request_digest == request_digest and context_matches:
+            return stored_decision
+        reason = (
+            "request ID was reused with different content"
+            if stored_decision.request_digest != request_digest
+            else "stored decision does not match server-owned admission context"
+        )
+        return AdmissionDecision(
+            request_id=request.request_id,
+            admitted=False,
+            reasons=(reason,),
+            grant_id=grant.grant_id,
+            principal_id=principal.principal_id,
+            policy_digest=policy.policy_digest,
+            request_digest=request_digest,
+        )
+
     reasons: list[str] = []
 
     if principal.principal_id != grant.principal_id:
@@ -244,5 +305,7 @@ def admit_engineering_request(
         admitted=not reasons,
         reasons=tuple(reasons),
         grant_id=grant.grant_id,
+        principal_id=principal.principal_id,
         policy_digest=policy.policy_digest,
+        request_digest=request_digest,
     )
