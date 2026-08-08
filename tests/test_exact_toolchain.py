@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import tomllib
@@ -24,16 +25,29 @@ class ExactToolchainContractTests(unittest.TestCase):
             project["project"]["optional-dependencies"]["cad"],
             ["build123d==0.11.1", "cadquery-ocp-novtk==7.9.3.1"],
         )
-        self.assertEqual(PYTHON_VERSION.read_text(encoding="utf-8").strip(), "3.12.11")
+        self.assertEqual(PYTHON_VERSION.read_text(encoding="utf-8"), "3.12.11")
 
     def test_selected_lock_excludes_vtk_geometry_distributions(self) -> None:
         locked = tomllib.loads(LOCK.read_text(encoding="utf-8"))
-        packages = {package["name"] for package in locked["package"]}
+        packages = {package["name"]: package for package in locked["package"]}
 
+        self.assertEqual(locked["requires-python"], "==3.12.11")
         self.assertIn("build123d", packages)
         self.assertIn("cadquery-ocp-novtk", packages)
         self.assertNotIn("cadquery-ocp", packages)
         self.assertNotIn("vtk", packages)
+
+        for name, expected_version in (
+            ("build123d", "0.11.1"),
+            ("cadquery-ocp-novtk", "7.9.3.1"),
+        ):
+            package = packages[name]
+            self.assertEqual(package["version"], expected_version)
+            artifacts = [*package.get("wheels", []), package.get("sdist")]
+            artifacts = [artifact for artifact in artifacts if artifact is not None]
+            self.assertTrue(artifacts, f"{name} has no locked distributions")
+            for artifact in artifacts:
+                self.assertRegex(artifact["hash"], re.compile(r"^sha256:[0-9a-f]{64}$"))
 
     def test_ci_pins_exact_python_and_uv_and_runs_frozen(self) -> None:
         workflow = CI.read_text(encoding="utf-8")
