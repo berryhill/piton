@@ -5,26 +5,34 @@ from pathlib import Path
 
 
 EVIDENCE_ROOT = Path(__file__).parents[1] / "evidence" / "stage0"
-PARTNER_ALPHA_PATH = EVIDENCE_ROOT / "01-partners" / "partner-alpha.json"
+PARTNER_ALPHA_T003_PATH = (
+    EVIDENCE_ROOT / "08-partner-alpha" / "partner-alpha-t003.json"
+)
+PARTNER_ALPHA_T004_PATH = EVIDENCE_ROOT / "08-partner-alpha" / "partner-alpha.json"
 
 
-def test_partner_alpha_is_a_deterministic_zero_claim_fixture() -> None:
-    raw = PARTNER_ALPHA_PATH.read_text(encoding="utf-8")
-    record = json.loads(raw)
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    record: dict[str, object] = {}
+    for key, value in pairs:
+        if key in record:
+            raise ValueError(f"duplicate JSON key: {key}")
+        record[key] = value
+    return record
 
+
+def _reject_non_finite(value: str) -> None:
+    raise ValueError(f"non-finite JSON value: {value}")
+
+
+def _load_canonical_json(path: Path) -> tuple[str, dict[str, object]]:
+    raw = path.read_text(encoding="utf-8")
+    record = json.loads(
+        raw,
+        object_pairs_hook=_reject_duplicate_keys,
+        parse_constant=_reject_non_finite,
+    )
     assert raw == json.dumps(record, indent=2, sort_keys=True) + "\n"
-    assert record["partner_id"] == "partner-alpha"
-    assert record["synthetic"] is True
-    assert record["claim_scope"] == "fixture-only"
-    assert record["external_thresholds_passed"] is False
-    assert record["successor_authorized"] is False
-    assert record["fabrication_release"] is False
-    assert record["machine_actuation"] is False
-    assert record["review_state"] == "needs_human_review"
-    assert record["committed"] is False
-    assert record["paid"] is False
-    assert record["real_models_supplied"] is False
-    assert record["real_revisions_supplied"] is False
+    return raw, record
 
 
 def test_stage0_scaffold_records_are_explicit_non_evidence_fixtures() -> None:
@@ -42,3 +50,48 @@ def test_stage0_scaffold_records_are_explicit_non_evidence_fixtures() -> None:
             assert record.get("machine_actuation") is False, path
 
     assert scaffold_records, "expected explicit Stage 0 scaffold fixtures"
+
+
+def test_t003_partner_alpha_is_a_deterministic_zero_claim_fixture() -> None:
+    _, record = _load_canonical_json(PARTNER_ALPHA_T003_PATH)
+
+    assert record == {
+        "claim_scope": "fixture-only",
+        "committed": False,
+        "external_thresholds_passed": False,
+        "fabrication_release": False,
+        "machine_actuation": False,
+        "paid": False,
+        "partner_id": "partner-alpha",
+        "real_models_supplied": False,
+        "real_revisions_supplied": False,
+        "review_state": "needs_human_review",
+        "scaffold_note": (
+            "placeholder partner record; no external commitment, payment, model, "
+            "or revision evidence is recorded (T003)"
+        ),
+        "schema": "piton.partner.v1",
+        "successor_authorized": False,
+        "synthetic": True,
+    }
+
+
+def test_t004_partner_alpha_is_a_deterministic_zero_claim_fixture() -> None:
+    _, record = _load_canonical_json(PARTNER_ALPHA_T004_PATH)
+
+    assert record == {
+        "claim_scope": "fixture-only",
+        "external_thresholds_passed": False,
+        "fabrication_release": False,
+        "fixture_id": "partner-alpha",
+        "machine_actuation": False,
+        "review_state": "needs_human_review",
+        "scaffold_note": (
+            "synthetic placeholder only; no external partner, validation, "
+            "commitment, demand, or successor authorization is claimed"
+        ),
+        "schema": "piton.partner-alpha-fixture.v1",
+        "successor_authorized": False,
+        "synthetic": True,
+        "task_ref": "T004",
+    }
