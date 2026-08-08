@@ -21,7 +21,10 @@ from .model import (
 )
 from .partner_alpha import (
     DEFAULT_PARTNER_SCAFFOLD_T002,
+    PartnerAlphaReceipt,
     PartnerAlphaScaffoldT002,
+    default_partner_alpha_receipt,
+    validate_partner_alpha_receipt,
     validate_partner_scaffold_t002,
 )
 from .portfolio import (
@@ -70,6 +73,7 @@ __all__ = [
     "PhaseExitReceipt",
     "PartnerAlphaScaffoldT002",
     "PitonProject",
+    "PartnerAlphaReceipt",
     "PortfolioAdmissionDecision",
     "PrincipalContext",
     "ProjectFormatError",
@@ -80,12 +84,14 @@ __all__ = [
     "canonical_json_bytes",
     "canonical_project_bytes",
     "compute_revision_id",
+    "default_partner_alpha_receipt",
     "issue_phase_exit_receipt",
     "load_project_bytes",
     "load_project_directory",
     "project_digest",
     "receipt_digest",
     "validate_lifecycle",
+    "validate_partner_alpha_receipt",
     "validate_partner_scaffold_t002",
     "verify_successor_admission",
 ]
