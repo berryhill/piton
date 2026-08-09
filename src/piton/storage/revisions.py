@@ -321,6 +321,132 @@ class RevisionRepository:
                 raise PersistenceConflictError("revision identity has conflicting metadata")
         return revision.revision_id
 
+    def _commit_source_tree_revision_to_channel(
+        self,
+        project_id: str,
+        tree: SourceTree,
+        revision: DesignRevision,
+        channel: str,
+        *,
+        expected_revision_id: str | None,
+        expected_generation: int,
+        capability: MutationCapability,
+    ) -> ChannelPointer:
+        """Publish bytes, then atomically claim tree, revision, and channel CAS."""
+        _require_mutation_capability(capability)
+        if not isinstance(tree, SourceTree):
+            raise TypeError("tree must be a SourceTree")
+        if not isinstance(revision, DesignRevision):
+            raise TypeError("revision must be a DesignRevision")
+        if revision.source_manifest_digest != tree.digest:
+            raise PersistenceConflictError("revision does not bind the supplied source tree")
+        if revision.parent_revision_id != expected_revision_id:
+            raise PersistenceConflictError("revision parent must be the exact channel head")
+        if channel not in _CHANNELS:
+            raise ValueError("channel is not a declared Piton channel")
+        if (
+            isinstance(expected_generation, bool)
+            or not isinstance(expected_generation, int)
+            or expected_generation < 0
+        ):
+            raise ValueError("expected_generation must be a non-negative integer")
+
+        scope = "commit-" + revision.revision_id[4:20]
+        file_refs: list[ArtifactRef] = []
+        for index, item in enumerate(sorted(tree.files, key=lambda candidate: candidate.path)):
+            ref = self._publish_bytes(scope, f"file-{index}", item.content, item.media_type)
+            if ref.digest != item.digest or ref.byte_length != item.byte_length:
+                raise PersistenceConflictError("published source bytes changed identity")
+            file_refs.append(ref)
+        tree_ref = self._publish_bytes(
+            scope, "source-manifest", tree.canonical_bytes, "application/json"
+        )
+        revision_ref = self._publish_bytes(
+            scope, "revision-manifest", revision.canonical_bytes, "application/json"
+        )
+        if tree_ref.digest != tree.digest:
+            raise PersistenceConflictError("published source manifest changed identity")
+
+        by_digest = {ref.digest: ref for ref in file_refs}
+        dependency_ref = by_digest[tree.file(tree.dependency_lock).digest]
+        toolchain_ref = by_digest[tree.file(tree.toolchain_lock).digest]
+        now = _now()
+        with self.database.immediate() as connection:
+            current = connection.execute(
+                "SELECT revision_id, generation FROM channel_pointers "
+                "WHERE project_id=? AND channel=?",
+                (project_id, channel),
+            ).fetchone()
+            if current is None or tuple(current) != (
+                expected_revision_id,
+                expected_generation,
+            ):
+                raise ChannelConflictError("channel expected head or generation is stale")
+            parent = connection.execute(
+                "SELECT project_id FROM design_revisions WHERE revision_id=?",
+                (expected_revision_id,),
+            ).fetchone()
+            if parent is None or parent[0] != project_id:
+                raise PersistenceConflictError("exact parent revision is missing")
+            for ref in (*file_refs, tree_ref, revision_ref):
+                self._record_artifact(connection, ref, now)
+            existing_tree = connection.execute(
+                "SELECT project_id, entrypoint, dependency_lock_digest, toolchain_lock_digest "
+                "FROM source_trees WHERE manifest_digest=?",
+                (tree.digest,),
+            ).fetchone()
+            tree_claims = (
+                project_id,
+                tree.entrypoint,
+                dependency_ref.digest,
+                toolchain_ref.digest,
+            )
+            if existing_tree is None:
+                connection.execute(
+                    "INSERT INTO source_trees(manifest_digest, project_id, entrypoint, "
+                    "dependency_lock_digest, toolchain_lock_digest, created_at) "
+                    "VALUES(?, ?, ?, ?, ?, ?)",
+                    (tree.digest, *tree_claims, now),
+                )
+            elif tuple(existing_tree) != tree_claims:
+                raise PersistenceConflictError("source tree identity has conflicting metadata")
+            connection.execute(
+                "INSERT INTO design_revisions(revision_id, project_id, parent_revision_id, "
+                "proposal_id, manifest_digest, source_manifest_digest, authority_profile, created_at) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    revision.revision_id,
+                    project_id,
+                    revision.parent_revision_id,
+                    revision.proposal_id,
+                    revision_ref.digest,
+                    revision.source_manifest_digest,
+                    revision.authority_profile,
+                    now,
+                ),
+            )
+            cursor = connection.execute(
+                "UPDATE channel_pointers SET revision_id=?, generation=generation+1, updated_at=? "
+                "WHERE project_id=? AND channel=? AND generation=? AND revision_id IS ?",
+                (
+                    revision.revision_id,
+                    now,
+                    project_id,
+                    channel,
+                    expected_generation,
+                    expected_revision_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ChannelConflictError("channel compare-and-swap lost a race")
+        return ChannelPointer(
+            project_id,
+            channel,
+            revision.revision_id,
+            expected_generation + 1,
+            now,
+        )
+
     def move_channel(
         self,
         project_id: str,
