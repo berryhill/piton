@@ -105,6 +105,10 @@ def test_qualification_declares_exchange_losses_without_minting_authority(
     }
     assert qualification["review_state"] == "needs_human_review"
     assert qualification["fabrication_release"] is False
+    assert qualification["fabrication_release_issuance"] == "absent"
+    assert json.loads(
+        _qualification_path(tmp_path).read_text(encoding="utf-8")
+    )["fabrication_release_issuance"] == "absent"
     assert qualification["machine_actuation"] is False
 
 
