@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from piton.service.application import (
+    IdempotencyConflictError,
     PitonApplicationService,
+    StaleBaseConflictError,
     StaleDraftBaseError,
     _issue_principal_context,
 )
@@ -61,6 +64,67 @@ class CustodyApplicationServiceTests(unittest.TestCase):
                 for table in ("design_revisions", "channel_pointers", "artifacts", "outbox")
             )
 
+    def receipt_count(self) -> int:
+        database = Database(self.root / ".piton" / "piton.sqlite3")
+        with database.read() as connection:
+            return connection.execute("SELECT count(*) FROM command_receipts").fetchone()[0]
+
+    def test_exact_replay_returns_stored_receipt_without_a_second_effect(self) -> None:
+        command = CreateProject("cmd_create_two", "project_two", "Two")
+
+        first = self.service.execute(command, self.context)
+        counts_after_first = self.counts()
+        receipts_after_first = self.receipt_count()
+        second = self.service.create_project(command, self.context)
+
+        self.assertEqual(second, first)
+        self.assertEqual(self.counts(), counts_after_first)
+        self.assertEqual(self.receipt_count(), receipts_after_first)
+
+    def test_reused_identity_with_changed_request_or_principal_fails_closed(self) -> None:
+        command = CreateProject("cmd_create_two", "project_two", "Two")
+        receipt = self.service.create_project(command, self.context)
+        counts_after_first = self.counts()
+        receipts_after_first = self.receipt_count()
+
+        with self.assertRaises(IdempotencyConflictError):
+            self.service.execute(
+                CreateProject("cmd_create_two", "project_two", "Changed"), self.context
+            )
+        with self.assertRaises(IdempotencyConflictError):
+            self.service.execute(command, _issue_principal_context("operator_two"))
+
+        self.assertEqual(receipt.kind, "create_project")
+        self.assertEqual(self.counts(), counts_after_first)
+        self.assertEqual(self.receipt_count(), receipts_after_first)
+
+    def test_direct_and_generic_adapter_paths_share_typed_stale_conflicts(self) -> None:
+        stale = BeginDraft("cmd_stale", "project_one", self.base.persisted_revision_id, 0)
+
+        for invoke in (self.service.begin_draft, self.service.execute):
+            with self.subTest(adapter=invoke.__name__):
+                with self.assertRaises(StaleBaseConflictError) as caught:
+                    invoke(stale, self.context)
+                self.assertIs(type(caught.exception), StaleDraftBaseError)
+
+        self.assertEqual(self.receipt_count(), 2)
+
+    def test_idempotency_identity_and_receipt_rows_are_immutable(self) -> None:
+        database = Database(self.root / ".piton" / "piton.sqlite3")
+
+        for statement in (
+            "UPDATE command_receipts SET outcome='rejected' WHERE command_id='cmd_create'",
+            "DELETE FROM command_receipts WHERE command_id='cmd_create'",
+            "UPDATE idempotency_keys SET request_digest='changed' WHERE idempotency_key='cmd_create'",
+            "DELETE FROM idempotency_keys WHERE idempotency_key='cmd_create'",
+        ):
+            with self.subTest(statement=statement):
+                with self.assertRaisesRegex(sqlite3.IntegrityError, "immutable"):
+                    with database.immediate() as connection:
+                        connection.execute(statement)
+
+        self.assertEqual(self.receipt_count(), 2)
+
     def test_draft_lifecycle_does_not_claim_committed_work(self) -> None:
         before = self.counts()
         draft = self.service.begin_draft(
@@ -89,17 +153,15 @@ class CustodyApplicationServiceTests(unittest.TestCase):
             UpdateDraft("cmd_update", "project_one", draft.draft_id, changed), self.context
         )
 
-        committed = self.service.commit_draft(
-            CommitDraft(
-                "cmd_commit",
-                "project_one",
-                draft.draft_id,
-                self.base.persisted_revision_id,
-                1,
-                {"height": "11 mm"},
-            ),
-            self.context,
+        command = CommitDraft(
+            "cmd_commit",
+            "project_one",
+            draft.draft_id,
+            self.base.persisted_revision_id,
+            1,
+            {"height": "11 mm"},
         )
+        committed = self.service.commit_draft(command, self.context)
 
         self.assertIsNotNone(committed.persisted_revision_id)
         self.assertEqual(committed.parent_revision_id, self.base.persisted_revision_id)
@@ -119,6 +181,14 @@ class CustodyApplicationServiceTests(unittest.TestCase):
         self.assertEqual(tuple(rows[-1]), (committed.persisted_revision_id, self.base.persisted_revision_id))
         self.assertEqual(tuple(workspace), (committed.persisted_revision_id, 2))
         self.assertFalse((self.root / ".piton" / "staging" / ("draft_" + draft.draft_id)).exists())
+
+        durable_counts = self.counts()
+        durable_receipts = self.receipt_count()
+        reopened = PitonApplicationService.open(self.root)
+        replay = reopened.execute(command, self.context)
+        self.assertEqual(replay, committed)
+        self.assertEqual(self.counts(), durable_counts)
+        self.assertEqual(self.receipt_count(), durable_receipts)
 
     def test_stale_commit_fails_before_publication_and_preserves_history(self) -> None:
         draft = self.service.begin_draft(

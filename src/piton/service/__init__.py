@@ -3,9 +3,11 @@
 from .application import (
     CommandReceipt,
     DraftReceipt,
+    IdempotencyConflictError,
     PitonApplicationService,
     PrincipalAuthorityError,
     PrincipalContext,
+    StaleBaseConflictError,
     StaleDraftBaseError,
 )
 from .commands import (
@@ -38,10 +40,12 @@ __all__ = [
     "DraftReceipt",
     "DraftStore",
     "ImportSourceBase",
+    "IdempotencyConflictError",
     "PitonApplicationService",
     "PrincipalAuthorityError",
     "PrincipalContext",
     "RestoreForward",
+    "StaleBaseConflictError",
     "StaleDraftBaseError",
     "UpdateDraft",
 ]
