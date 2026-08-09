@@ -119,6 +119,11 @@ class DesignRevision:
         manifest["revision_id"] = self.revision_id
         return manifest
 
+    @property
+    def canonical_bytes(self) -> bytes:
+        """Return the immutable manifest bytes stored in object custody."""
+        return canonical_json_bytes(self.to_manifest()) + b"\n"
+
     @classmethod
     def from_manifest(cls, manifest: Mapping[str, Any]) -> "DesignRevision":
         """Validate identity and canonical constants before constructing a revision."""
