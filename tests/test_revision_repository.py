@@ -7,7 +7,12 @@ import pytest
 
 from piton.revision import DesignRevision
 from piton.source_tree import SourceTree, SourceTreeFile
-from piton.storage import ActorAuthorityError, ChannelConflictError, RevisionRepository
+from piton.storage import (
+    ActorAuthorityError,
+    ChannelConflictError,
+    RevisionRepository,
+    StartupRecoveryError,
+)
 from piton.storage.blobs import BlobStore
 from piton.storage.db import Database
 from piton.storage.revisions import MutationCapability, _issue_server_mutation_capability
@@ -110,6 +115,131 @@ def test_publish_source_tree_and_revision_promotes_all_blobs_before_metadata(tmp
         ).fetchone()
     assert tuple(source_row) == (tree.digest, tree.entrypoint)
     assert tuple(revision_row) == (record.revision_id, manifest_digest)
+
+
+def test_source_tree_metadata_stays_invisible_when_final_cas_readback_fails(
+    tmp_path, monkeypatch
+):
+    database, store, repository, authority = make_repository(tmp_path)
+    tree = source_tree()
+    blocked_digest = tree.files[0].digest
+    real_open_verified = repository.blobs.open_verified
+
+    def fail_one_readback(digest, *, expected_size=None):
+        if digest == blocked_digest:
+            raise FileNotFoundError(digest)
+        return real_open_verified(digest, expected_size=expected_size)
+
+    monkeypatch.setattr(repository.blobs, "open_verified", fail_one_readback)
+
+    with pytest.raises(StartupRecoveryError, match="source tree publication"):
+        repository.publish_source_tree("project_one", tree, capability=authority)
+
+    with database.read() as connection:
+        assert connection.execute("SELECT count(*) FROM artifacts").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM source_trees").fetchone()[0] == 0
+
+    monkeypatch.undo()
+    recovered_repository = RevisionRepository(database, BlobStore(tmp_path))
+    assert (
+        recovered_repository.publish_source_tree(
+            "project_one", tree, capability=authority
+        )
+        == tree.digest
+    )
+
+
+def test_revision_metadata_stays_invisible_when_referenced_source_file_is_corrupt(tmp_path):
+    database, store, repository, authority = make_repository(tmp_path)
+    tree = source_tree()
+    record = revision(tree)
+    repository.publish_source_tree("project_one", tree, capability=authority)
+
+    source_path = store.object_path(tree.files[0].digest)
+    source_path.chmod(0o600)
+    source_path.write_bytes(b"corrupt\n")
+
+    with pytest.raises(StartupRecoveryError, match="revision publication"):
+        repository.persist_revision("project_one", record, capability=authority)
+
+    with database.read() as connection:
+        assert connection.execute("SELECT count(*) FROM design_revisions").fetchone()[0] == 0
+
+
+def test_atomic_commit_metadata_stays_invisible_when_final_cas_readback_fails(
+    tmp_path, monkeypatch
+):
+    database, _store, repository, authority = make_repository(tmp_path)
+    base_tree = source_tree()
+    base_revision = revision(base_tree)
+    repository.publish_source_tree("project_one", base_tree, capability=authority)
+    repository.persist_revision("project_one", base_revision, capability=authority)
+    repository.move_channel(
+        "project_one",
+        "workspace",
+        base_revision.revision_id,
+        expected_revision_id=None,
+        expected_generation=0,
+        capability=authority,
+    )
+    changed_tree = source_tree(b"def build():\n    return 1\n")
+    changed_revision = revision(
+        changed_tree, parent_revision_id=base_revision.revision_id, height="11 mm"
+    )
+    blocked_digest = changed_tree.files[0].digest
+    real_open_verified = repository.blobs.open_verified
+
+    def fail_one_readback(digest, *, expected_size=None):
+        if digest == blocked_digest:
+            raise FileNotFoundError(digest)
+        return real_open_verified(digest, expected_size=expected_size)
+
+    monkeypatch.setattr(repository.blobs, "open_verified", fail_one_readback)
+
+    with pytest.raises(StartupRecoveryError, match="atomic revision publication"):
+        repository._commit_source_tree_revision_to_channel(
+            "project_one",
+            changed_tree,
+            changed_revision,
+            "workspace",
+            expected_revision_id=base_revision.revision_id,
+            expected_generation=1,
+            capability=authority,
+        )
+
+    with database.read() as connection:
+        assert connection.execute("SELECT count(*) FROM source_trees").fetchone()[0] == 1
+        assert connection.execute("SELECT count(*) FROM design_revisions").fetchone()[0] == 1
+        assert tuple(
+            connection.execute(
+                "SELECT revision_id, generation FROM channel_pointers "
+                "WHERE project_id='project_one' AND channel='workspace'"
+            ).fetchone()
+        ) == (base_revision.revision_id, 1)
+
+
+def test_startup_recovery_quarantines_incomplete_staging_before_repository_is_ready(tmp_path):
+    database, store, _repository, _authority = make_repository(tmp_path)
+    staged = store.stage_stream(
+        "interrupted", "manifest", (b"{}\n",), media_type="application/json", max_bytes=3
+    )
+
+    RevisionRepository(database, BlobStore(tmp_path))
+
+    assert not staged.path.exists()
+    recovered = list((store.quarantine_root / "startup-incomplete-publication").iterdir())
+    assert len(recovered) == 1
+    assert (recovered[0] / staged.path.name).read_bytes() == b"{}\n"
+
+
+def test_startup_recovery_refuses_committed_metadata_with_missing_cas_object(tmp_path):
+    database, store, repository, authority = make_repository(tmp_path)
+    tree = source_tree()
+    repository.publish_source_tree("project_one", tree, capability=authority)
+    store.object_path(tree.files[0].digest).unlink()
+
+    with pytest.raises(StartupRecoveryError, match="committed artifact"):
+        RevisionRepository(database, BlobStore(tmp_path))
 
 
 def test_missing_source_manifest_fails_closed(tmp_path):

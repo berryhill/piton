@@ -6,8 +6,9 @@ receive database handles, object paths, repositories, or mutation capability.
 
 from __future__ import annotations
 
+import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, fields, is_dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Mapping
@@ -39,7 +40,15 @@ class PrincipalAuthorityError(PermissionError):
     """Caller-supplied labels cannot become an authenticated principal."""
 
 
-class StaleDraftBaseError(RuntimeError):
+class IdempotencyConflictError(RuntimeError):
+    """An idempotency identity was reused for a non-identical admission."""
+
+
+class StaleBaseConflictError(RuntimeError):
+    """The command's exact authored base is no longer current."""
+
+
+class StaleDraftBaseError(StaleBaseConflictError):
     """The workspace is not the exact revision and generation captured by the draft."""
 
 
@@ -116,7 +125,39 @@ class PitonApplicationService:
         drafts.recover_after_crash()
         return cls(database, blobs, drafts)
 
+    def execute(
+        self, command: object, ctx: PrincipalContext
+    ) -> CommandReceipt | DraftReceipt:
+        """Admit every adapter through one typed, idempotent command path."""
+        routes = {
+            CreateProject: ("create_project", self._create_project),
+            ImportSourceBase: ("import_source_base", self._import_source_base),
+            BeginDraft: ("begin_draft", self._begin_draft),
+            UpdateDraft: ("update_draft", self._update_draft),
+            CommitDraft: ("commit_draft", self._commit_draft),
+            DiscardDraft: ("discard_draft", self._discard_draft),
+            RestoreForward: ("restore_forward", self._restore_forward),
+        }
+        route = routes.get(type(command))
+        if route is None:
+            raise TypeError("command must be a supported Piton command")
+        operation, handler = route
+        self._require(command, type(command), ctx)
+        request_digest = self._request_digest(command)
+        replay = self._replay(command, ctx, operation, request_digest)
+        if replay is not None:
+            return replay
+        receipt = handler(command, ctx)
+        self._store_receipt(command, ctx, operation, request_digest, receipt)
+        return receipt
+
     def create_project(self, cmd: CreateProject, ctx: PrincipalContext) -> CommandReceipt:
+        receipt = self.execute(cmd, ctx)
+        if not isinstance(receipt, CommandReceipt):
+            raise TypeError("create_project returned a non-command receipt")
+        return receipt
+
+    def _create_project(self, cmd: CreateProject, ctx: PrincipalContext) -> CommandReceipt:
         self._require(cmd, CreateProject, ctx)
         now = self._now()
         with self.__database.immediate() as connection:
@@ -128,6 +169,14 @@ class PitonApplicationService:
         return CommandReceipt(cmd.command_id, cmd.project_id, "create_project")
 
     def import_source_base(
+        self, cmd: ImportSourceBase, ctx: PrincipalContext
+    ) -> CommandReceipt:
+        receipt = self.execute(cmd, ctx)
+        if not isinstance(receipt, CommandReceipt):
+            raise TypeError("import_source_base returned a non-command receipt")
+        return receipt
+
+    def _import_source_base(
         self, cmd: ImportSourceBase, ctx: PrincipalContext
     ) -> CommandReceipt:
         self._require(cmd, ImportSourceBase, ctx)
@@ -157,6 +206,12 @@ class PitonApplicationService:
         return self._command_receipt(cmd.command_id, cmd.project_id, "import_source_base", revision)
 
     def begin_draft(self, cmd: BeginDraft, ctx: PrincipalContext) -> DraftReceipt:
+        receipt = self.execute(cmd, ctx)
+        if not isinstance(receipt, DraftReceipt):
+            raise TypeError("begin_draft returned a non-draft receipt")
+        return receipt
+
+    def _begin_draft(self, cmd: BeginDraft, ctx: PrincipalContext) -> DraftReceipt:
         self._require(cmd, BeginDraft, ctx)
         self._require_workspace(
             cmd.project_id, cmd.base_revision_id, cmd.expected_generation
@@ -171,6 +226,12 @@ class PitonApplicationService:
         return self._draft_receipt(cmd.command_id, record)
 
     def update_draft(self, cmd: UpdateDraft, ctx: PrincipalContext) -> DraftReceipt:
+        receipt = self.execute(cmd, ctx)
+        if not isinstance(receipt, DraftReceipt):
+            raise TypeError("update_draft returned a non-draft receipt")
+        return receipt
+
+    def _update_draft(self, cmd: UpdateDraft, ctx: PrincipalContext) -> DraftReceipt:
         self._require(cmd, UpdateDraft, ctx)
         current = self.__drafts.load(cmd.draft_id)
         if current.project_id != cmd.project_id:
@@ -179,6 +240,12 @@ class PitonApplicationService:
         return self._draft_receipt(cmd.command_id, updated)
 
     def commit_draft(self, cmd: CommitDraft, ctx: PrincipalContext) -> CommandReceipt:
+        receipt = self.execute(cmd, ctx)
+        if not isinstance(receipt, CommandReceipt):
+            raise TypeError("commit_draft returned a non-command receipt")
+        return receipt
+
+    def _commit_draft(self, cmd: CommitDraft, ctx: PrincipalContext) -> CommandReceipt:
         self._require(cmd, CommitDraft, ctx)
         draft = self.__drafts.load(cmd.draft_id)
         if draft.project_id != cmd.project_id:
@@ -209,6 +276,12 @@ class PitonApplicationService:
         return self._command_receipt(cmd.command_id, cmd.project_id, "commit_draft", revision)
 
     def discard_draft(self, cmd: DiscardDraft, ctx: PrincipalContext) -> DraftReceipt:
+        receipt = self.execute(cmd, ctx)
+        if not isinstance(receipt, DraftReceipt):
+            raise TypeError("discard_draft returned a non-draft receipt")
+        return receipt
+
+    def _discard_draft(self, cmd: DiscardDraft, ctx: PrincipalContext) -> DraftReceipt:
         self._require(cmd, DiscardDraft, ctx)
         record = self.__drafts.load(cmd.draft_id)
         if record.project_id != cmd.project_id:
@@ -217,6 +290,12 @@ class PitonApplicationService:
         return self._draft_receipt(cmd.command_id, discarded)
 
     def restore_forward(self, cmd: RestoreForward, ctx: PrincipalContext) -> CommandReceipt:
+        receipt = self.execute(cmd, ctx)
+        if not isinstance(receipt, CommandReceipt):
+            raise TypeError("restore_forward returned a non-command receipt")
+        return receipt
+
+    def _restore_forward(self, cmd: RestoreForward, ctx: PrincipalContext) -> CommandReceipt:
         self._require(cmd, RestoreForward, ctx)
         self._require_workspace(
             cmd.project_id, cmd.expected_revision_id, cmd.expected_generation
@@ -305,6 +384,131 @@ class PitonApplicationService:
             toolchain_lock_digest=by_path[tree.toolchain_lock].digest,
             parameter_values=parameters,
         )
+
+    @staticmethod
+    def _canonical_value(value: object) -> object:
+        if isinstance(value, SourceTree):
+            return {"source_tree_digest": value.digest}
+        if isinstance(value, Mapping):
+            return {
+                key: PitonApplicationService._canonical_value(value[key])
+                for key in sorted(value)
+            }
+        if isinstance(value, tuple):
+            return [PitonApplicationService._canonical_value(item) for item in value]
+        if is_dataclass(value) and not isinstance(value, type):
+            return {
+                field.name: PitonApplicationService._canonical_value(
+                    getattr(value, field.name)
+                )
+                for field in fields(value)
+            }
+        if value is None or isinstance(value, (str, int, bool)):
+            return value
+        raise TypeError(f"unsupported canonical command value: {type(value).__name__}")
+
+    @classmethod
+    def _request_digest(cls, command: object) -> str:
+        payload = {
+            "command_type": type(command).__name__,
+            "command": cls._canonical_value(command),
+        }
+        encoded = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+    def _replay(
+        self,
+        command: object,
+        ctx: PrincipalContext,
+        operation: str,
+        request_digest: str,
+    ) -> CommandReceipt | DraftReceipt | None:
+        command_id = getattr(command, "command_id")
+        project_id = getattr(command, "project_id")
+        with self.__database.read() as connection:
+            row = connection.execute(
+                "SELECT r.project_id, r.actor_id, r.kind, r.request_digest, "
+                "r.receipt_json, k.operation, k.idempotency_key "
+                "FROM command_receipts AS r "
+                "JOIN idempotency_keys AS k ON k.receipt_id=r.receipt_id "
+                "WHERE r.command_id=?",
+                (command_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        identity = (
+            row[0] == project_id
+            and row[1] == ctx.principal_id
+            and row[3] == request_digest
+            and row[2] == operation
+            and row[5] == operation
+            and row[6] == command_id
+        )
+        if not identity:
+            raise IdempotencyConflictError(
+                "idempotency identity is already bound to a different canonical admission"
+            )
+        payload = json.loads(row[4])
+        receipt_type = payload.pop("receipt_type", None)
+        if receipt_type == "CommandReceipt":
+            receipt: CommandReceipt | DraftReceipt = CommandReceipt(**payload)
+        elif receipt_type == "DraftReceipt":
+            receipt = DraftReceipt(**payload)
+        else:
+            raise RuntimeError("stored command receipt has an unsupported type")
+        return receipt
+
+    def _store_receipt(
+        self,
+        command: object,
+        ctx: PrincipalContext,
+        operation: str,
+        request_digest: str,
+        receipt: CommandReceipt | DraftReceipt,
+    ) -> None:
+        command_id = getattr(command, "command_id")
+        project_id = getattr(command, "project_id")
+        kind = receipt.kind if isinstance(receipt, CommandReceipt) else operation
+        payload = asdict(receipt)
+        payload["receipt_type"] = type(receipt).__name__
+        receipt_json = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        identity = f"{command_id}\0{project_id}\0{ctx.principal_id}".encode("utf-8")
+        receipt_id = "receipt_" + hashlib.sha256(identity).hexdigest()
+        now = self._now()
+        with self.__database.immediate() as connection:
+            connection.execute(
+                "INSERT INTO command_receipts(receipt_id, command_id, project_id, actor_id, "
+                "kind, request_digest, outcome, receipt_json, committed_at) "
+                "VALUES(?, ?, ?, ?, ?, ?, 'applied', ?, ?)",
+                (
+                    receipt_id,
+                    command_id,
+                    project_id,
+                    ctx.principal_id,
+                    kind,
+                    request_digest,
+                    receipt_json,
+                    now,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO idempotency_keys(project_id, actor_id, operation, "
+                "idempotency_key, request_digest, receipt_id, created_at) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?)",
+                (
+                    project_id,
+                    ctx.principal_id,
+                    operation,
+                    command_id,
+                    request_digest,
+                    receipt_id,
+                    now,
+                ),
+            )
 
     @staticmethod
     def _require(command: object, expected_type: type, ctx: PrincipalContext) -> None:

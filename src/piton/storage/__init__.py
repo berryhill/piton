@@ -19,6 +19,7 @@ from .revisions import (
     ChannelPointer,
     PersistenceConflictError,
     RevisionRepository,
+    StartupRecoveryError,
 )
 
 __all__ = [
@@ -35,6 +36,7 @@ __all__ = [
     "MigrationError",
     "PersistenceConflictError",
     "RevisionRepository",
+    "StartupRecoveryError",
     "StagedBlob",
     "TransactionOwnershipError",
 ]
