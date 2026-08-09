@@ -388,6 +388,10 @@ class RevisionRepository:
             ).fetchone()
             if parent is None or parent[0] != project_id:
                 raise PersistenceConflictError("exact parent revision is missing")
+            self._require_refs_verified(
+                [*file_refs, tree_ref, revision_ref],
+                context="atomic revision publication",
+            )
             for ref in (*file_refs, tree_ref, revision_ref):
                 self._record_artifact(connection, ref, now)
             existing_tree = connection.execute(

@@ -166,6 +166,58 @@ def test_revision_metadata_stays_invisible_when_referenced_source_file_is_corrup
         assert connection.execute("SELECT count(*) FROM design_revisions").fetchone()[0] == 0
 
 
+def test_atomic_commit_metadata_stays_invisible_when_final_cas_readback_fails(
+    tmp_path, monkeypatch
+):
+    database, _store, repository, authority = make_repository(tmp_path)
+    base_tree = source_tree()
+    base_revision = revision(base_tree)
+    repository.publish_source_tree("project_one", base_tree, capability=authority)
+    repository.persist_revision("project_one", base_revision, capability=authority)
+    repository.move_channel(
+        "project_one",
+        "workspace",
+        base_revision.revision_id,
+        expected_revision_id=None,
+        expected_generation=0,
+        capability=authority,
+    )
+    changed_tree = source_tree(b"def build():\n    return 1\n")
+    changed_revision = revision(
+        changed_tree, parent_revision_id=base_revision.revision_id, height="11 mm"
+    )
+    blocked_digest = changed_tree.files[0].digest
+    real_open_verified = repository.blobs.open_verified
+
+    def fail_one_readback(digest, *, expected_size=None):
+        if digest == blocked_digest:
+            raise FileNotFoundError(digest)
+        return real_open_verified(digest, expected_size=expected_size)
+
+    monkeypatch.setattr(repository.blobs, "open_verified", fail_one_readback)
+
+    with pytest.raises(StartupRecoveryError, match="atomic revision publication"):
+        repository._commit_source_tree_revision_to_channel(
+            "project_one",
+            changed_tree,
+            changed_revision,
+            "workspace",
+            expected_revision_id=base_revision.revision_id,
+            expected_generation=1,
+            capability=authority,
+        )
+
+    with database.read() as connection:
+        assert connection.execute("SELECT count(*) FROM source_trees").fetchone()[0] == 1
+        assert connection.execute("SELECT count(*) FROM design_revisions").fetchone()[0] == 1
+        assert tuple(
+            connection.execute(
+                "SELECT revision_id, generation FROM channel_pointers "
+                "WHERE project_id='project_one' AND channel='workspace'"
+            ).fetchone()
+        ) == (base_revision.revision_id, 1)
+
+
 def test_startup_recovery_quarantines_incomplete_staging_before_repository_is_ready(tmp_path):
     database, store, _repository, _authority = make_repository(tmp_path)
     staged = store.stage_stream(
