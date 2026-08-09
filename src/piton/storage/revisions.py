@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -50,6 +51,10 @@ class PersistenceConflictError(RuntimeError):
     """An immutable identity is already bound to different metadata."""
 
 
+class StartupRecoveryError(RuntimeError):
+    """Publication custody cannot be proven, so startup or commit must stop."""
+
+
 @dataclass(frozen=True, slots=True)
 class ChannelPointer:
     project_id: str
@@ -81,6 +86,80 @@ class RevisionRepository:
             raise TypeError("blobs must be a BlobStore")
         self.database = database
         self.blobs = blobs
+        self.recover_startup()
+
+    def recover_startup(self) -> tuple[str, ...]:
+        """Discard resumable staging and prove every metadata-visible CAS object."""
+        recovered = self.blobs.recover_incomplete_staging()
+        with self.database.read() as connection:
+            try:
+                artifacts = connection.execute(
+                    "SELECT digest, byte_length, storage_relpath FROM artifacts ORDER BY digest"
+                ).fetchall()
+            except sqlite3.DatabaseError as error:
+                raise StartupRecoveryError(
+                    "startup recovery cannot read committed artifact metadata"
+                ) from error
+            for digest, byte_length, storage_relpath in artifacts:
+                expected_relpath = self.blobs.object_path(digest).relative_to(
+                    self.blobs.project_root
+                ).as_posix()
+                if storage_relpath != expected_relpath or not self._blob_verifies(
+                    digest, byte_length
+                ):
+                    raise StartupRecoveryError(
+                        f"committed artifact is missing, corrupt, or misaddressed: {digest}"
+                    )
+        return tuple(path.as_posix() for path in recovered)
+
+    def _blob_verifies(self, digest: str, expected_size: int) -> bool:
+        try:
+            stream = self.blobs.open_verified(digest, expected_size=expected_size)
+        except (FileNotFoundError, OSError, RuntimeError, ValueError):
+            return False
+        stream.close()
+        return True
+
+    def _require_refs_verified(
+        self, refs: tuple[ArtifactRef, ...] | list[ArtifactRef], *, context: str
+    ) -> None:
+        for ref in refs:
+            if not self._blob_verifies(ref.digest, ref.byte_length):
+                raise StartupRecoveryError(
+                    f"{context} failed final CAS readback for {ref.digest}"
+                )
+
+    def _source_manifest_refs(self, manifest_digest: str) -> tuple[ArtifactRef, ...]:
+        try:
+            with self.blobs.open_verified(manifest_digest) as stream:
+                manifest = json.load(stream)
+            files = manifest["files"]
+            if not isinstance(files, list) or not files:
+                raise ValueError("source manifest files are invalid")
+            refs = tuple(
+                ArtifactRef(
+                    digest=item["digest"],
+                    byte_length=item["byte_length"],
+                    media_type=item["media_type"],
+                    storage_relpath=self.blobs.object_path(item["digest"])
+                    .relative_to(self.blobs.project_root)
+                    .as_posix(),
+                )
+                for item in files
+            )
+        except (
+            FileNotFoundError,
+            OSError,
+            RuntimeError,
+            ValueError,
+            KeyError,
+            TypeError,
+            json.JSONDecodeError,
+        ) as error:
+            raise StartupRecoveryError(
+                "revision publication cannot recover its canonical source manifest"
+            ) from error
+        return refs
 
     def _publish_bytes(
         self,
@@ -147,6 +226,9 @@ class RevisionRepository:
                 "SELECT 1 FROM projects WHERE project_id=?", (project_id,)
             ).fetchone() is None:
                 raise ValueError("project does not exist")
+            self._require_refs_verified(
+                [*refs, manifest_ref], context="source tree publication"
+            )
             for ref in (*refs, manifest_ref):
                 self._record_artifact(connection, ref, now)
             existing = connection.execute(
@@ -209,10 +291,10 @@ class RevisionRepository:
                 ).fetchone()
                 if parent is None or parent[0] != project_id:
                     raise ValueError("parent revision is missing from the exact project")
-            if not self.blobs.exists_verified(revision.source_manifest_digest):
-                raise PersistenceConflictError("source tree blob is missing or corrupt")
-            if not self.blobs.exists_verified(manifest_ref.digest):
-                raise PersistenceConflictError("revision manifest blob is missing or corrupt")
+            source_refs = self._source_manifest_refs(revision.source_manifest_digest)
+            self._require_refs_verified(
+                [*source_refs, manifest_ref], context="revision publication"
+            )
             self._record_artifact(connection, manifest_ref, now)
             existing = connection.execute(
                 "SELECT project_id, parent_revision_id, proposal_id, manifest_digest, "
