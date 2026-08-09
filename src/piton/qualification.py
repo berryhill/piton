@@ -356,6 +356,7 @@ def qualify_step(
         },
         "review_state": "needs_human_review",
         "fabrication_release": False,
+        "fabrication_release_issuance": "absent",
         "machine_actuation": False,
     }
     evidence["evidence_digest"] = _evidence_digest(evidence)
