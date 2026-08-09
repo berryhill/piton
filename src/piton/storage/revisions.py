@@ -12,11 +12,34 @@ from .blobs import ArtifactRef, BlobStore
 from .db import Database
 
 _CHANNELS = frozenset({"workspace", "candidate", "review", "last_good"})
-_MUTATING_ACTORS = frozenset({"author", "operator", "daemon"})
+_CAPABILITY_PROOF = object()
 
 
 class ActorAuthorityError(PermissionError):
     """An execution-only actor attempted to mutate authored state or a channel."""
+
+
+class MutationCapability:
+    """Opaque server-issued authority for authored-state mutations.
+
+    Request content and actor labels must never construct this type. The local
+    daemon composition root issues it once and keeps it outside worker-facing
+    interfaces.
+    """
+
+    __slots__ = ("_proof",)
+
+    def __new__(cls, proof: object = None) -> "MutationCapability":
+        if proof is not _CAPABILITY_PROOF:
+            raise ActorAuthorityError("mutation capability is server-issued only")
+        instance = super().__new__(cls)
+        instance._proof = proof
+        return instance
+
+
+def _issue_server_mutation_capability() -> MutationCapability:
+    """Issue authority at the trusted daemon composition root, never from a request."""
+    return MutationCapability(_CAPABILITY_PROOF)
 
 
 class ChannelConflictError(RuntimeError):
@@ -40,9 +63,12 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
-def _require_mutating_actor(actor_kind: str) -> None:
-    if actor_kind not in _MUTATING_ACTORS:
-        raise ActorAuthorityError("actor is not authorized to mutate authored state or channels")
+def _require_mutation_capability(capability: object) -> None:
+    if (
+        type(capability) is not MutationCapability
+        or getattr(capability, "_proof", None) is not _CAPABILITY_PROOF
+    ):
+        raise ActorAuthorityError("server-issued mutation capability is required")
 
 
 class RevisionRepository:
@@ -94,10 +120,10 @@ class RevisionRepository:
         project_id: str,
         tree: SourceTree,
         *,
-        actor_kind: str,
+        capability: MutationCapability,
     ) -> str:
         """Publish all source bytes and the canonical manifest before one metadata commit."""
-        _require_mutating_actor(actor_kind)
+        _require_mutation_capability(capability)
         if not isinstance(tree, SourceTree):
             raise TypeError("tree must be a SourceTree")
         scope = "tree-" + tree.digest[7:23]
@@ -150,10 +176,10 @@ class RevisionRepository:
         project_id: str,
         revision: DesignRevision,
         *,
-        actor_kind: str,
+        capability: MutationCapability,
     ) -> str:
         """Append one authored revision after its complete source tree is durable."""
-        _require_mutating_actor(actor_kind)
+        _require_mutation_capability(capability)
         if not isinstance(revision, DesignRevision):
             raise TypeError("revision must be a DesignRevision")
         scope = "revision-" + revision.revision_id[4:20]
@@ -221,10 +247,10 @@ class RevisionRepository:
         *,
         expected_revision_id: str | None,
         expected_generation: int,
-        actor_kind: str,
+        capability: MutationCapability,
     ) -> ChannelPointer:
         """Move one mutable ref only when both expected head and generation match."""
-        _require_mutating_actor(actor_kind)
+        _require_mutation_capability(capability)
         if channel not in _CHANNELS:
             raise ValueError("channel is not a declared Piton channel")
         if isinstance(expected_generation, bool) or not isinstance(expected_generation, int) or expected_generation < 0:

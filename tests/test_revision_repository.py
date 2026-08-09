@@ -7,13 +7,10 @@ import pytest
 
 from piton.revision import DesignRevision
 from piton.source_tree import SourceTree, SourceTreeFile
-from piton.storage import (
-    ActorAuthorityError,
-    ChannelConflictError,
-    RevisionRepository,
-)
+from piton.storage import ActorAuthorityError, ChannelConflictError, RevisionRepository
 from piton.storage.blobs import BlobStore
 from piton.storage.db import Database
+from piton.storage.revisions import MutationCapability, _issue_server_mutation_capability
 
 
 def source_tree(source: bytes = b"def build():\n    return None\n") -> SourceTree:
@@ -37,7 +34,12 @@ def make_repository(tmp_path):
             "INSERT INTO projects(project_id, display_name, format_version, state, created_at) "
             "VALUES('project_one', 'One', 1, 'active', '2026-01-01T00:00:00Z')"
         )
-    return database, BlobStore(tmp_path), RevisionRepository(database, BlobStore(tmp_path))
+    return (
+        database,
+        BlobStore(tmp_path),
+        RevisionRepository(database, BlobStore(tmp_path)),
+        _issue_server_mutation_capability(),
+    )
 
 
 def revision(tree: SourceTree, *, parent_revision_id=None, height="10 mm") -> DesignRevision:
@@ -85,12 +87,12 @@ def test_source_tree_rejects_nonportable_paths(path):
 
 
 def test_publish_source_tree_and_revision_promotes_all_blobs_before_metadata(tmp_path):
-    database, store, repository = make_repository(tmp_path)
+    database, store, repository, authority = make_repository(tmp_path)
     tree = source_tree()
     record = revision(tree)
 
-    repository.publish_source_tree("project_one", tree, actor_kind="author")
-    repository.persist_revision("project_one", record, actor_kind="author")
+    repository.publish_source_tree("project_one", tree, capability=authority)
+    repository.persist_revision("project_one", record, capability=authority)
 
     for item in tree.files:
         assert store.exists_verified(item.digest)
@@ -110,26 +112,57 @@ def test_publish_source_tree_and_revision_promotes_all_blobs_before_metadata(tmp
     assert tuple(revision_row) == (record.revision_id, manifest_digest)
 
 
-def test_missing_source_manifest_and_worker_authored_mutation_fail_closed(tmp_path):
-    database, _store, repository = make_repository(tmp_path)
+def test_missing_source_manifest_fails_closed(tmp_path):
+    database, _store, repository, authority = make_repository(tmp_path)
     tree = source_tree()
     record = revision(tree)
 
     with pytest.raises(ValueError, match="source tree"):
-        repository.persist_revision("project_one", record, actor_kind="author")
-    with pytest.raises(ActorAuthorityError):
-        repository.publish_source_tree("project_one", tree, actor_kind="worker")
+        repository.persist_revision("project_one", record, capability=authority)
     with database.read() as connection:
         assert connection.execute("SELECT count(*) FROM design_revisions").fetchone()[0] == 0
 
 
-def test_revision_rows_are_idempotent_but_cannot_be_replaced_or_deleted(tmp_path):
-    database, _store, repository = make_repository(tmp_path)
+@pytest.mark.parametrize("forged_actor", ["author", "operator", "daemon"])
+def test_caller_actor_assertions_cannot_mint_any_mutation_authority(tmp_path, forged_actor):
+    database, _store, repository, _authority = make_repository(tmp_path)
     tree = source_tree()
     record = revision(tree)
-    repository.publish_source_tree("project_one", tree, actor_kind="author")
-    repository.persist_revision("project_one", record, actor_kind="author")
-    repository.persist_revision("project_one", record, actor_kind="author")
+
+    operations = (
+        lambda: repository.publish_source_tree("project_one", tree, capability=forged_actor),
+        lambda: repository.persist_revision("project_one", record, capability=forged_actor),
+        lambda: repository.move_channel(
+            "project_one",
+            "candidate",
+            None,
+            expected_revision_id=None,
+            expected_generation=0,
+            capability=forged_actor,
+        ),
+    )
+    for operation in operations:
+        with pytest.raises(ActorAuthorityError):
+            operation()
+
+    with pytest.raises(ActorAuthorityError):
+        MutationCapability()
+    forged_capability = object.__new__(MutationCapability)
+    with pytest.raises(ActorAuthorityError):
+        repository.publish_source_tree("project_one", tree, capability=forged_capability)
+    with database.read() as connection:
+        assert connection.execute("SELECT count(*) FROM source_trees").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM design_revisions").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM channel_pointers").fetchone()[0] == 0
+
+
+def test_revision_rows_are_idempotent_but_cannot_be_replaced_or_deleted(tmp_path):
+    database, _store, repository, authority = make_repository(tmp_path)
+    tree = source_tree()
+    record = revision(tree)
+    repository.publish_source_tree("project_one", tree, capability=authority)
+    repository.persist_revision("project_one", record, capability=authority)
+    repository.persist_revision("project_one", record, capability=authority)
 
     with pytest.raises(sqlite3.IntegrityError, match="immutable"):
         with database.immediate() as connection:
@@ -143,38 +176,49 @@ def test_revision_rows_are_idempotent_but_cannot_be_replaced_or_deleted(tmp_path
 
 
 def test_channel_move_requires_expected_head_and_generation_cas(tmp_path):
-    _database, _store, repository = make_repository(tmp_path)
+    _database, _store, repository, authority = make_repository(tmp_path)
     tree = source_tree()
     first = revision(tree)
     second = revision(tree, parent_revision_id=first.revision_id, height="11 mm")
-    repository.publish_source_tree("project_one", tree, actor_kind="author")
-    repository.persist_revision("project_one", first, actor_kind="author")
-    repository.persist_revision("project_one", second, actor_kind="author")
+    repository.publish_source_tree("project_one", tree, capability=authority)
+    repository.persist_revision("project_one", first, capability=authority)
+    repository.persist_revision("project_one", second, capability=authority)
 
     pointer = repository.move_channel(
-        "project_one", "candidate", first.revision_id,
-        expected_revision_id=None, expected_generation=0, actor_kind="author",
+        "project_one",
+        "candidate",
+        first.revision_id,
+        expected_revision_id=None,
+        expected_generation=0,
+        capability=authority,
     )
     assert (pointer.revision_id, pointer.generation) == (first.revision_id, 1)
 
     with pytest.raises(ChannelConflictError):
         repository.move_channel(
-            "project_one", "candidate", second.revision_id,
-            expected_revision_id=None, expected_generation=0, actor_kind="author",
+            "project_one",
+            "candidate",
+            second.revision_id,
+            expected_revision_id=None,
+            expected_generation=0,
+            capability=authority,
         )
     with pytest.raises(ChannelConflictError):
         repository.move_channel(
-            "project_one", "candidate", second.revision_id,
-            expected_revision_id=first.revision_id, expected_generation=0, actor_kind="author",
+            "project_one",
+            "candidate",
+            second.revision_id,
+            expected_revision_id=first.revision_id,
+            expected_generation=0,
+            capability=authority,
         )
 
     pointer = repository.move_channel(
-        "project_one", "candidate", second.revision_id,
-        expected_revision_id=first.revision_id, expected_generation=1, actor_kind="author",
+        "project_one",
+        "candidate",
+        second.revision_id,
+        expected_revision_id=first.revision_id,
+        expected_generation=1,
+        capability=authority,
     )
     assert (pointer.revision_id, pointer.generation) == (second.revision_id, 2)
-    with pytest.raises(ActorAuthorityError):
-        repository.move_channel(
-            "project_one", "review", second.revision_id,
-            expected_revision_id=None, expected_generation=0, actor_kind="worker",
-        )
