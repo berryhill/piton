@@ -13,16 +13,28 @@ from .blobs import (
     StagedBlob,
 )
 from .db import Database, Migration, MigrationError, TransactionOwnershipError
+from .revisions import (
+    ActorAuthorityError,
+    ChannelConflictError,
+    ChannelPointer,
+    PersistenceConflictError,
+    RevisionRepository,
+)
 
 __all__ = [
+    "ActorAuthorityError",
     "ArtifactRef",
     "BlobCollisionError",
     "BlobStore",
     "BlobValidationError",
+    "ChannelConflictError",
+    "ChannelPointer",
     "CustodyError",
     "Database",
     "Migration",
     "MigrationError",
+    "PersistenceConflictError",
+    "RevisionRepository",
     "StagedBlob",
     "TransactionOwnershipError",
 ]

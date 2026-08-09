@@ -26,16 +26,18 @@ def write_migration(directory: Path, name: str, body: bytes = MINIMAL_MIGRATION)
 def test_fresh_database_applies_and_records_exact_migrations(tmp_path: Path) -> None:
     database_path = tmp_path / "piton.sqlite3"
     database = Database(database_path)
+    migrations = load_migrations()
 
-    assert database.migrate() == 1
-    assert database.schema_version() == 1
+    assert database.migrate() == len(migrations)
+    assert database.schema_version() == migrations[-1].version
 
     with database.read() as connection:
-        row = connection.execute(
-            "SELECT version, digest FROM schema_migrations"
-        ).fetchone()
-    migration = load_migrations()[0]
-    assert tuple(row) == (migration.version, migration.digest)
+        rows = connection.execute(
+            "SELECT version, digest FROM schema_migrations ORDER BY version"
+        ).fetchall()
+    assert [tuple(row) for row in rows] == [
+        (migration.version, migration.digest) for migration in migrations
+    ]
     assert database.integrity_check() == ()
 
 
@@ -86,10 +88,11 @@ def test_tampered_applied_digest_and_newer_database_fail_closed(tmp_path: Path) 
 
     database_path.unlink()
     database.migrate()
+    future_version = load_migrations()[-1].version + 1
     with sqlite3.connect(database_path) as connection:
         connection.execute(
-            "INSERT INTO schema_migrations(version, digest, applied_at) VALUES(2, ?, ?)",
-            (hashlib.sha256(b"future").hexdigest(), "2026-01-01T00:00:00Z"),
+            "INSERT INTO schema_migrations(version, digest, applied_at) VALUES(?, ?, ?)",
+            (future_version, hashlib.sha256(b"future").hexdigest(), "2026-01-01T00:00:00Z"),
         )
     with pytest.raises(MigrationError, match="newer|unsupported"):
         database.migrate()

@@ -384,9 +384,11 @@ class BlobStore:
         valid = True
         if media_type == "application/octet-stream":
             return
-        if media_type == "text/plain":
+        if media_type.startswith("text/"):
+            os.lseek(fd, 0, os.SEEK_SET)
             try:
-                header.decode("utf-8")
+                with os.fdopen(os.dup(fd), "rb") as stream:
+                    stream.read().decode("utf-8")
             except UnicodeDecodeError:
                 valid = False
         elif media_type == "application/json":

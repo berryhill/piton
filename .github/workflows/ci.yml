@@ -21,7 +21,7 @@ jobs:
       - name: Sync exact locked dependencies
         run: uv sync --frozen --all-extras
       - name: Unit and contract tests
-        run: uv run --frozen python -m unittest discover -s tests -v
+        run: uv run --frozen python -m pytest -q
       - name: Repository proof
         run: uv run --frozen python scripts/verify_repo.py
       - name: Exact-geometry doctor
