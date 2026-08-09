@@ -259,6 +259,32 @@ class BlobStore:
         stream.close()
         return True
 
+    def recover_incomplete_staging(self) -> tuple[Path, ...]:
+        """Quarantine crash-left staging scopes before accepting new work.
+
+        Promoted CAS objects are durable independently of SQLite visibility, so
+        unreferenced objects are safe to retain. Staging bytes have no durable
+        identity claim and must never be resumed implicitly after a restart.
+        """
+        recovered: list[Path] = []
+        for scope in sorted(self.staging_root.iterdir(), key=lambda item: item.name):
+            if scope.is_dir() and not scope.is_symlink():
+                try:
+                    scope.rmdir()
+                except OSError:
+                    recovered.append(
+                        self.quarantine(
+                            scope, reason_code="startup-incomplete-publication"
+                        )
+                    )
+                else:
+                    self.fsync_parent(scope)
+            else:
+                recovered.append(
+                    self.quarantine(scope, reason_code="startup-incomplete-publication")
+                )
+        return tuple(recovered)
+
     def object_path(self, digest: str) -> Path:
         self._require_digest(digest)
         hexadecimal = digest[7:]
