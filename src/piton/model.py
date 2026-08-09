@@ -30,6 +30,11 @@ def _require_digest(name: str, value: str) -> None:
         raise ValueError(f"{name} must be a sha256:<64 lowercase hex> digest")
 
 
+def _require_reason(value: str) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("reason must be a non-empty string")
+
+
 def _immutable_string_tuple(
     name: str, value: Tuple[str, ...], *, required: bool = False
 ) -> Tuple[str, ...]:
@@ -63,6 +68,84 @@ class ReviewDisposition(StrEnum):
     REQUEST_CHANGES = "request_changes"
     ACCEPTED_FOR_MVI_REVIEW = "accepted_for_mvi_review"
     REJECTED = "rejected"
+
+
+class ProposalDispositionState(StrEnum):
+    """The complete proposal-decision vocabulary from the MVI doctrine."""
+
+    SUBMITTED = "submitted"
+    WITHDRAWN = "withdrawn"
+    REJECTED = "rejected"
+    CHANGES_REQUESTED = "changes_requested"
+    ACCEPTED_FOR_BUILD = "accepted_for_build"
+    ACCEPTED_FOR_REVIEW = "accepted_for_review"
+
+
+class ReviewDispositionState(StrEnum):
+    """Engineering-review outcomes that do not issue an approval."""
+
+    CHANGES_REQUESTED = "changes_requested"
+    REJECTED = "rejected"
+
+
+@dataclass(frozen=True)
+class ProposalDisposition:
+    """Immutable proposal lifecycle fact; acceptance is not approval."""
+
+    disposition_id: str
+    proposal_id: str
+    base_revision_id: str
+    state: ProposalDispositionState
+    reason: str
+
+    def __post_init__(self) -> None:
+        _require_identifier("disposition_id", self.disposition_id)
+        _require_identifier("proposal_id", self.proposal_id)
+        _require_revision_id("base_revision_id", self.base_revision_id)
+        try:
+            state = ProposalDispositionState(self.state)
+        except ValueError as exc:
+            raise ValueError("unknown proposal disposition state") from exc
+        _require_reason(self.reason)
+        object.__setattr__(self, "state", state)
+
+    @property
+    def issues_engineering_approval(self) -> bool:
+        return False
+
+    @property
+    def issues_fabrication_release(self) -> bool:
+        return False
+
+
+@dataclass(frozen=True)
+class ReviewDispositionRecord:
+    """Immutable non-approval review outcome over exact evidence bindings."""
+
+    disposition_id: str
+    revision_id: str
+    evidence_closure_id: str
+    state: ReviewDispositionState
+    reason: str
+
+    def __post_init__(self) -> None:
+        _require_identifier("disposition_id", self.disposition_id)
+        _require_revision_id("revision_id", self.revision_id)
+        _require_identifier("evidence_closure_id", self.evidence_closure_id)
+        try:
+            state = ReviewDispositionState(self.state)
+        except ValueError as exc:
+            raise ValueError("unknown review disposition state") from exc
+        _require_reason(self.reason)
+        object.__setattr__(self, "state", state)
+
+    @property
+    def issues_engineering_approval(self) -> bool:
+        return False
+
+    @property
+    def issues_fabrication_release(self) -> bool:
+        return False
 
 
 @dataclass(frozen=True)
