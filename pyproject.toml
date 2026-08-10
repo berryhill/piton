@@ -9,10 +9,10 @@ description = "Local-first, source-native mechanical CAD with governed revisions
 requires-python = "==3.12.11"
 license = "LicenseRef-Proprietary"
 authors = [{name = "Nick Mercer"}]
-dependencies = []
+dependencies = ["jsonschema==4.26.0"]
 
 [project.optional-dependencies]
-verification = ["jsonschema==4.26.0", "pytest==8.4.2"]
+verification = ["pytest==8.4.2"]
 build = ["build==1.3.0"]
 cad = ["build123d==0.11.1", "cadquery-ocp-novtk==7.9.3.1"]
 
@@ -20,6 +20,7 @@ cad = ["build123d==0.11.1", "cadquery-ocp-novtk==7.9.3.1"]
 where = ["src"]
 
 [tool.setuptools.package-data]
+"piton" = ["schemas/*.json"]
 "piton.storage" = ["migrations/*.sql"]
 
 [tool.pytest.ini_options]

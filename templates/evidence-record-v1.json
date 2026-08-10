@@ -1,0 +1,14 @@
+{
+  "schema": "piton.evidence-record.v1",
+  "evidence_id": "replace-with-content-addressed-id",
+  "subject_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "claim_scope": "review_evidence_only",
+  "claim_scope_exclusions": ["approval", "fabrication_release", "machine_actuation"],
+  "observations": [],
+  "limitations": ["Template values must be replaced and independently checked by a human reviewer."],
+  "safety": {
+    "review_state": "needs_human_review",
+    "fabrication_release": false,
+    "machine_actuation": false
+  }
+}

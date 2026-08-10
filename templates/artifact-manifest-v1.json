@@ -1,0 +1,13 @@
+{
+  "schema": "piton.artifact-manifest.v1",
+  "artifact_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "tracked_input_closure_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "claim_scope": "nonauthoritative_review_artifact",
+  "claim_scope_exclusions": ["source_authority", "approval", "fabrication_release", "machine_actuation"],
+  "release_state": "unreleased",
+  "safety": {
+    "review_state": "needs_human_review",
+    "fabrication_release": false,
+    "machine_actuation": false
+  }
+}
