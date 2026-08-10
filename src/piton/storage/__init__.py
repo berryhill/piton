@@ -12,6 +12,13 @@ from .blobs import (
     CustodyError,
     StagedBlob,
 )
+from .build_attempts import (
+    BuildAdmission,
+    BuildAttemptConflictError,
+    BuildAttemptCoordinator,
+    CoordinatorState,
+    DurableBuildAttempt,
+)
 from .db import Database, Migration, MigrationError, TransactionOwnershipError
 from .revisions import (
     ActorAuthorityError,
@@ -28,10 +35,15 @@ __all__ = [
     "BlobCollisionError",
     "BlobStore",
     "BlobValidationError",
+    "BuildAdmission",
+    "BuildAttemptConflictError",
+    "BuildAttemptCoordinator",
     "ChannelConflictError",
     "ChannelPointer",
+    "CoordinatorState",
     "CustodyError",
     "Database",
+    "DurableBuildAttempt",
     "Migration",
     "MigrationError",
     "PersistenceConflictError",

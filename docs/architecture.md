@@ -58,6 +58,31 @@ Receipts name the actual isolation class (`wasm`, `container`,
 `microvm`, or weaker `trusted-local`). Generated/imported/plugin
 geometry code is hostile by default. Cache is acceleration only.
 
+### Durable build admission and coordinator state
+
+The daemon admits an exact-revision build attempt by committing two records in
+one `BEGIN IMMEDIATE` transaction before worker dispatch:
+
+- immutable `build_attempts` facts bind the exact project/revision pair,
+  request and toolchain digests, worker identity, and declared isolation class;
+- mutable `build_coordinator_state` records execution state, generation, fence,
+  and lease fields without changing the immutable attempt.
+
+The dispatch seam receives only the committed immutable attempt. A dispatch
+failure leaves that attempt durably readable for diagnosis and recovery. Retry
+requires a new coordinator-derived UUID (with deterministic factory injection
+only for tests); callers cannot supply an attempt identity. Admission requires
+an opaque daemon-issued capability that cannot be constructed from caller
+assertions or request digests, and the issuance helper is not part of the public
+storage API. Attempt and state reads require the exact project and attempt IDs.
+SQLite enforces exact project/revision custody, lowercase SHA-256 hex digests,
+and rejects duplicate `INSERT`/`INSERT OR REPLACE` before immutable facts can be
+replaced.
+Neither admission nor coordinator state grants authored-revision, channel,
+review, approval, export, fabrication-release, or machine-actuation authority.
+The root truths remain `review_state=needs_human_review`,
+`fabrication_release=false`, and `machine_actuation=false`.
+
 ## Stage 1 custody
 
 Git-friendly local directory of deterministic UTF-8 source/manifests and
