@@ -13,6 +13,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Mapping
 
+from ..feasibility import evaluate_exact_cad_feasibility
+from ..portfolio import (
+    Authority,
+    Disposition,
+    EvidenceArtifact,
+    ExecutionStatus,
+    Phase,
+    PhaseExitReceipt,
+    SafetyState,
+    issue_phase_exit_receipt,
+    receipt_digest,
+    verify_successor_admission,
+)
 from ..revision import DesignRevision
 from ..source_tree import SourceTree, SourceTreeFile
 from ..storage.blobs import BlobStore
@@ -124,6 +137,114 @@ class PitonApplicationService:
         drafts = DraftStore(root)
         drafts.recover_after_crash()
         return cls(database, blobs, drafts)
+
+    def issue_autonomous_p1_engineering_disposition(
+        self,
+        *,
+        receipt_id: str,
+        predecessor_receipt_id: str,
+        revision: DesignRevision,
+        realization_receipt_path: Path,
+        qualification_receipt_path: Path,
+    ) -> PhaseExitReceipt:
+        """Issue P1 only from an authenticated receipt already held by this daemon."""
+        predecessor = self._load_custodied_p0_receipt(predecessor_receipt_id)
+        predecessor_admission = verify_successor_admission(predecessor, successor=Phase.P1)
+        if (
+            predecessor.phase is not Phase.P0
+            or predecessor.authority is not Authority.HUMAN
+            or not predecessor_admission.admitted
+        ):
+            raise ValueError("an authorized human P0 predecessor is required")
+
+        decision = evaluate_exact_cad_feasibility(
+            revision,
+            realization_receipt_path,
+            qualification_receipt_path,
+        )
+        evidence = EvidenceArtifact.from_content(
+            artifact_id="p1-exact-cad-feasibility",
+            repository_path=(
+                f"evidence/p1/{revision.revision_id}/{decision.attempt_scope}/"
+                "exact-cad-feasibility.json"
+            ),
+            content=decision.to_dict(),
+        )
+        receipt = issue_phase_exit_receipt(
+            receipt_id=receipt_id,
+            phase=Phase.P1,
+            status=ExecutionStatus.COMPLETED,
+            disposition=Disposition.ADVANCE,
+            authority=Authority.AUTONOMOUS,
+            predecessor_receipt_id=predecessor.receipt_id,
+            predecessor_receipt_digest=receipt_digest(predecessor),
+            predicates=decision.predicates,
+            evidence=(evidence,),
+            safety=SafetyState(),
+        )
+        receipt_json = json.dumps(
+            receipt.to_dict(), sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        with self.__database.immediate() as connection:
+            connection.execute(
+                "INSERT INTO portfolio_phase_receipts("
+                "receipt_id, phase, authority, receipt_digest, receipt_json, "
+                "authenticated_actor_id, authenticated_at) VALUES(?, ?, ?, ?, ?, ?, ?)",
+                (
+                    receipt.receipt_id,
+                    receipt.phase.value,
+                    receipt.authority.value,
+                    receipt_digest(receipt),
+                    receipt_json,
+                    "piton-daemon:autonomous-p1",
+                    self._now(),
+                ),
+            )
+            connection.execute(
+                "INSERT INTO portfolio_phase_heads(phase, receipt_id, receipt_digest) "
+                "VALUES(?, ?, ?) ON CONFLICT(phase) DO UPDATE SET "
+                "receipt_id=excluded.receipt_id, receipt_digest=excluded.receipt_digest",
+                (receipt.phase.value, receipt.receipt_id, receipt_digest(receipt)),
+            )
+        return receipt
+
+    def _load_custodied_p0_receipt(self, receipt_id: str) -> PhaseExitReceipt:
+        if not isinstance(receipt_id, str) or not receipt_id:
+            raise ValueError("predecessor_receipt_id must not be empty")
+        with self.__database.read() as connection:
+            row = connection.execute(
+                "SELECT receipt.phase, receipt.authority, receipt.receipt_digest, "
+                "receipt.receipt_json, receipt.authenticated_actor_id, "
+                "receipt.authenticated_at "
+                "FROM portfolio_phase_heads AS head "
+                "JOIN portfolio_phase_receipts AS receipt "
+                "ON receipt.receipt_id=head.receipt_id "
+                "AND receipt.receipt_digest=head.receipt_digest "
+                "WHERE head.phase=? AND head.receipt_id=?",
+                (Phase.P0.value, receipt_id),
+            ).fetchone()
+        if row is None:
+            raise LookupError("current daemon-custodied P0 receipt was not found")
+        if row[0] != Phase.P0.value or row[1] != Authority.HUMAN.value:
+            raise ValueError("an authorized human P0 predecessor is required")
+        if not row[4] or not row[5]:
+            raise RuntimeError("custodied P0 receipt lacks authentication provenance")
+
+        raw = row[3]
+        if not isinstance(raw, bytes):
+            raise RuntimeError("custodied P0 receipt payload is not immutable bytes")
+        try:
+            payload = json.loads(raw.decode("utf-8", errors="strict"))
+            predecessor = PhaseExitReceipt.from_dict(payload)
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as error:
+            raise RuntimeError("custodied P0 receipt payload is invalid") from error
+        if predecessor.receipt_id != receipt_id:
+            raise RuntimeError("custodied P0 receipt ID does not bind its payload")
+        if predecessor.phase.value != row[0] or predecessor.authority.value != row[1]:
+            raise RuntimeError("custodied P0 receipt metadata does not bind its payload")
+        if receipt_digest(predecessor) != row[2]:
+            raise RuntimeError("custodied P0 receipt digest does not bind its payload")
+        return predecessor
 
     def execute(
         self, command: object, ctx: PrincipalContext
