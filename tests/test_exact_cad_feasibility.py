@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -12,8 +14,21 @@ from build123d import Box, export_brep, export_step
 
 from piton.feasibility import ExactCadFeasibilityDecision, evaluate_exact_cad_feasibility
 from piton.parts.l_bracket import DEFAULT_PARAMETERS
+from piton.portfolio import (
+    Authority,
+    Disposition,
+    EvidenceArtifact,
+    ExecutionStatus,
+    Phase,
+    PhaseExitReceipt,
+    SafetyState,
+    issue_phase_exit_receipt,
+    receipt_digest,
+)
 from piton.qualification import qualify_step
 from piton.realization import RealizationInputs, realize_exact
+from piton.service.application import PitonApplicationService
+from piton.storage.db import Database
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,6 +67,284 @@ def exact_evidence(tmp_path: Path) -> tuple[RealizationInputs, Path, Path, dict[
     qualification_path = tmp_path / "qualification" / "qualification.json"
     qualify_step(attempt / "receipt.json", qualification_path)
     return inputs, attempt, qualification_path, realization
+
+
+def _authorized_p0_receipt(
+    *,
+    receipt_id: str = "p0-exact-predecessor",
+    disposition: Disposition = Disposition.ADVANCE,
+) -> PhaseExitReceipt:
+    return issue_phase_exit_receipt(
+        receipt_id=receipt_id,
+        phase=Phase.P0,
+        status=ExecutionStatus.COMPLETED,
+        disposition=disposition,
+        authority=Authority.HUMAN,
+        predecessor_receipt_id=None,
+        predecessor_receipt_digest=None,
+        predicates={},
+        evidence=(
+            EvidenceArtifact.from_content(
+                artifact_id="p0-category-decision",
+                repository_path="evidence/p0/category-decision.json",
+                content={"category_decision": "proceed_to_exact_cad_feasibility"},
+            ),
+        ),
+        safety=SafetyState(),
+    )
+
+
+def _open_service_with_custodied_p0(
+    daemon_root: Path,
+    predecessor: PhaseExitReceipt,
+    *,
+    stored_digest: str | None = None,
+) -> tuple[PitonApplicationService, Path]:
+    database_path = daemon_root / ".piton" / "piton.sqlite3"
+    database = Database(database_path)
+    database.migrate()
+    receipt_json = json.dumps(
+        predecessor.to_dict(), sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    with database.immediate() as connection:
+        connection.execute(
+            "INSERT INTO portfolio_phase_receipts("
+            "receipt_id, phase, authority, receipt_digest, receipt_json, "
+            "authenticated_actor_id, authenticated_at) VALUES(?, ?, ?, ?, ?, ?, ?)",
+            (
+                predecessor.receipt_id,
+                predecessor.phase.value,
+                predecessor.authority.value,
+                stored_digest or receipt_digest(predecessor),
+                receipt_json,
+                "authenticated-human-reviewer",
+                "2026-08-10T00:00:00.000000Z",
+            ),
+        )
+        connection.execute(
+            "INSERT INTO portfolio_phase_heads(phase, receipt_id, receipt_digest) "
+            "VALUES(?, ?, ?)",
+            (
+                predecessor.phase.value,
+                predecessor.receipt_id,
+                stored_digest or receipt_digest(predecessor),
+            ),
+        )
+    return PitonApplicationService.open(daemon_root), database_path
+
+
+def test_daemon_custody_issuer_derives_and_binds_the_engineering_disposition(
+    exact_evidence: tuple[RealizationInputs, Path, Path, dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    inputs, attempt, qualification_path, _ = exact_evidence
+    predecessor = _authorized_p0_receipt()
+    service, database_path = _open_service_with_custodied_p0(tmp_path / "daemon", predecessor)
+
+    receipt = service.issue_autonomous_p1_engineering_disposition(
+        receipt_id="p1-engineering-disposition",
+        predecessor_receipt_id=predecessor.receipt_id,
+        revision=inputs.revision,
+        realization_receipt_path=attempt / "receipt.json",
+        qualification_receipt_path=qualification_path,
+    )
+
+    assert receipt.phase is Phase.P1
+    assert receipt.status is ExecutionStatus.COMPLETED
+    assert receipt.disposition is Disposition.ADVANCE
+    assert receipt.authority is Authority.AUTONOMOUS
+    assert receipt.predicates == {"exact_cad_verified": True}
+    assert receipt.predecessor_receipt_id == predecessor.receipt_id
+    assert receipt.predecessor_receipt_digest == receipt_digest(predecessor)
+    assert receipt.successor_authorized is True
+    assert len(receipt.evidence) == 1
+    assert receipt.evidence[0].source.value == "repository_native"
+    assert receipt.evidence[0].content["revision_id"] == inputs.revision.revision_id
+    assert receipt.evidence[0].content["exact_cad_verified"] is True
+    assert receipt.safety == SafetyState()
+
+    with Database(database_path).read() as connection:
+        stored = connection.execute(
+            "SELECT phase, authority, receipt_digest, authenticated_actor_id "
+            "FROM portfolio_phase_receipts WHERE receipt_id=?",
+            (receipt.receipt_id,),
+        ).fetchone()
+        head = connection.execute(
+            "SELECT receipt_id, receipt_digest FROM portfolio_phase_heads WHERE phase=?",
+            (Phase.P1.value,),
+        ).fetchone()
+    assert tuple(stored) == (
+        Phase.P1.value,
+        Authority.AUTONOMOUS.value,
+        receipt_digest(receipt),
+        "piton-daemon:autonomous-p1",
+    )
+    assert tuple(head) == (receipt.receipt_id, receipt_digest(receipt))
+
+
+def test_p1_issuer_accepts_only_a_custodied_reference_not_raw_authority() -> None:
+    parameters = inspect.signature(
+        PitonApplicationService.issue_autonomous_p1_engineering_disposition
+    ).parameters
+    assert "predecessor_receipt_id" in parameters
+    assert "predecessor" not in parameters
+    assert "exact_cad_verified" not in parameters
+    assert "predicates" not in parameters
+    assert "authority" not in parameters
+    assert "safety" not in parameters
+
+
+def test_structurally_valid_caller_minted_human_p0_receipt_is_rejected(
+    exact_evidence: tuple[RealizationInputs, Path, Path, dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    inputs, attempt, qualification_path, _ = exact_evidence
+    caller_minted = _authorized_p0_receipt(receipt_id="caller-minted-human-p0")
+    service = PitonApplicationService.open(tmp_path / "uncustodied-daemon")
+
+    with pytest.raises(LookupError, match="current daemon-custodied P0 receipt"):
+        service.issue_autonomous_p1_engineering_disposition(
+            receipt_id="p1-from-caller-minted-p0",
+            predecessor_receipt_id=caller_minted.receipt_id,
+            revision=inputs.revision,
+            realization_receipt_path=attempt / "receipt.json",
+            qualification_receipt_path=qualification_path,
+        )
+
+    with pytest.raises(TypeError, match="unexpected keyword argument 'predecessor'"):
+        service.issue_autonomous_p1_engineering_disposition(  # type: ignore[call-arg]
+            receipt_id="p1-raw-object-attempt",
+            predecessor=caller_minted,
+            predecessor_receipt_id=caller_minted.receipt_id,
+            revision=inputs.revision,
+            realization_receipt_path=attempt / "receipt.json",
+            qualification_receipt_path=qualification_path,
+        )
+
+
+def test_p1_issuer_rejects_a_custodied_but_noncurrent_p0_head(
+    exact_evidence: tuple[RealizationInputs, Path, Path, dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    inputs, attempt, qualification_path, _ = exact_evidence
+    stale = _authorized_p0_receipt(receipt_id="p0-stale")
+    service, database_path = _open_service_with_custodied_p0(tmp_path / "daemon", stale)
+    current = _authorized_p0_receipt(receipt_id="p0-current")
+    current_json = json.dumps(
+        current.to_dict(), sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    database = Database(database_path)
+    with database.immediate() as connection:
+        connection.execute(
+            "INSERT INTO portfolio_phase_receipts("
+            "receipt_id, phase, authority, receipt_digest, receipt_json, "
+            "authenticated_actor_id, authenticated_at) VALUES(?, ?, ?, ?, ?, ?, ?)",
+            (
+                current.receipt_id,
+                current.phase.value,
+                current.authority.value,
+                receipt_digest(current),
+                current_json,
+                "authenticated-human-reviewer",
+                "2026-08-10T00:01:00.000000Z",
+            ),
+        )
+        connection.execute(
+            "UPDATE portfolio_phase_heads SET receipt_id=?, receipt_digest=? WHERE phase=?",
+            (current.receipt_id, receipt_digest(current), Phase.P0.value),
+        )
+
+    with pytest.raises(LookupError, match="current daemon-custodied P0 receipt"):
+        service.issue_autonomous_p1_engineering_disposition(
+            receipt_id="p1-from-stale-p0",
+            predecessor_receipt_id=stale.receipt_id,
+            revision=inputs.revision,
+            realization_receipt_path=attempt / "receipt.json",
+            qualification_receipt_path=qualification_path,
+        )
+
+
+def test_caller_cannot_bind_an_unselected_custodied_p0_receipt(
+    exact_evidence: tuple[RealizationInputs, Path, Path, dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    inputs, attempt, qualification_path, _ = exact_evidence
+    current = _authorized_p0_receipt(receipt_id="current-human-p0")
+    service, database_path = _open_service_with_custodied_p0(tmp_path / "daemon", current)
+    unselected = _authorized_p0_receipt(receipt_id="unselected-human-p0")
+    unselected_json = json.dumps(
+        unselected.to_dict(), sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    with Database(database_path).immediate() as connection:
+        connection.execute(
+            "INSERT INTO portfolio_phase_receipts("
+            "receipt_id, phase, authority, receipt_digest, receipt_json, "
+            "authenticated_actor_id, authenticated_at) VALUES(?, ?, ?, ?, ?, ?, ?)",
+            (
+                unselected.receipt_id,
+                unselected.phase.value,
+                unselected.authority.value,
+                receipt_digest(unselected),
+                unselected_json,
+                "authenticated-human-reviewer",
+                "2026-08-10T00:00:00.000000Z",
+            ),
+        )
+
+    with pytest.raises(LookupError, match="current daemon-custodied P0 receipt"):
+        service.issue_autonomous_p1_engineering_disposition(
+            receipt_id="p1-from-unselected-p0",
+            predecessor_receipt_id=unselected.receipt_id,
+            revision=inputs.revision,
+            realization_receipt_path=attempt / "receipt.json",
+            qualification_receipt_path=qualification_path,
+        )
+
+
+def test_daemon_custody_rejects_non_authorizing_or_digest_mismatched_p0(
+    exact_evidence: tuple[RealizationInputs, Path, Path, dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    inputs, attempt, qualification_path, _ = exact_evidence
+    held = _authorized_p0_receipt(receipt_id="p0-held", disposition=Disposition.HOLD)
+    held_service, _ = _open_service_with_custodied_p0(tmp_path / "held-daemon", held)
+    with pytest.raises(ValueError, match="authorized human P0 predecessor"):
+        held_service.issue_autonomous_p1_engineering_disposition(
+            receipt_id="p1-held-predecessor",
+            predecessor_receipt_id=held.receipt_id,
+            revision=inputs.revision,
+            realization_receipt_path=attempt / "receipt.json",
+            qualification_receipt_path=qualification_path,
+        )
+
+    valid = _authorized_p0_receipt(receipt_id="p0-digest-mismatch")
+    mismatch_service, _ = _open_service_with_custodied_p0(
+        tmp_path / "mismatch-daemon",
+        valid,
+        stored_digest="sha256:" + "0" * 64,
+    )
+    with pytest.raises(RuntimeError, match="custodied P0 receipt digest"):
+        mismatch_service.issue_autonomous_p1_engineering_disposition(
+            receipt_id="p1-digest-mismatch",
+            predecessor_receipt_id=valid.receipt_id,
+            revision=inputs.revision,
+            realization_receipt_path=attempt / "receipt.json",
+            qualification_receipt_path=qualification_path,
+        )
+
+
+def test_custodied_phase_receipts_are_immutable(tmp_path: Path) -> None:
+    predecessor = _authorized_p0_receipt()
+    _, database_path = _open_service_with_custodied_p0(tmp_path / "daemon", predecessor)
+    database = Database(database_path)
+
+    for statement in (
+        "UPDATE portfolio_phase_receipts SET authority='autonomous'",
+        "DELETE FROM portfolio_phase_receipts",
+    ):
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            with database.immediate() as connection:
+                connection.execute(statement)
 
 
 def test_gate_derives_positive_predicate_from_bound_exact_bytes(
