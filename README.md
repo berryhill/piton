@@ -31,11 +31,15 @@ machine_actuation = false
 
 One source-native Python/build123d Part, one bounded parameter mutation, one pinned exact-geometry worker, three to five predeclared checks, revision-pinned review artifacts, human review, and an optional visibly unreleased draft export.
 
+The current custody scaffold includes capability-gated durable build admission
+with server-derived attempt identity and exact project-scoped reads. It does not
+execute workers or imply review, approval, export, release, or machine actuation.
+
 ## Repository verification
 
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests -v
-python3 scripts/verify_repo.py
+uv run --frozen python -m pytest -q
+uv run --frozen python scripts/verify_repo.py
 ```
 
 The GitHub remote is attached as `origin` at `https://github.com/berryhill/piton.git`. This repository remains review-only: no deployment, production approval, fabrication release, or machine actuation is authorized.

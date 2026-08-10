@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 import subprocess
 import sys
@@ -23,6 +22,9 @@ REQUIRED = [
     ROOT / "src/piton/model.py",
     ROOT / "src/piton/revision.py",
     ROOT / "src/piton/implementation_loop.py",
+    ROOT / "src/piton/storage/build_attempts.py",
+    ROOT / "src/piton/storage/migrations/0005_durable_build_attempts.sql",
+    ROOT / "tests/test_build_attempt_admission.py",
     ROOT / "flows/piton_implementation_loop_v1.json",
     ROOT / "schemas/retry-error-packet-v1.schema.json",
     ROOT / "schemas/design-revision-v1.schema.json",
@@ -85,9 +87,8 @@ else:
     raise SystemExit("design revision schema accepted caller-minted authority")
 
 result = subprocess.run(
-    [sys.executable, "-m", "unittest", "discover", "-s", str(ROOT / "tests"), "-v"],
+    [sys.executable, "-m", "pytest", "-q", str(ROOT / "tests")],
     cwd=ROOT,
-    env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
     check=False,
 )
 if result.returncode:
