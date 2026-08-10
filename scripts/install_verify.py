@@ -15,6 +15,7 @@ from piton.portfolio.partner_scaffold_t001 import (
     validate_partner_scaffold_t001,
 )
 from piton.storage import BuildAdmission, BuildAttemptCoordinator, Database
+from piton.worker_contracts import PrecisionWorkerRequest
 
 PITON_IMPLEMENTATION_LOOP.validate()
 TruthBoundary().assert_safe()
@@ -23,6 +24,27 @@ if not validate_partner_scaffold_t001(receipt):
     raise SystemExit("installed T001 scaffold failed zero-claim validation")
 
 digest = "sha256:" + "0" * 64
+worker_request = PrecisionWorkerRequest(
+    project_id="install-smoke",
+    revision_id="rev_" + "0" * 64,
+    attempt_id="attempt_smoke",
+    generation=0,
+    fence=0,
+    lease_id="lease_smoke",
+    input_manifest_digest=digest,
+    recipe_digest=digest,
+    toolchain_digest=digest,
+    capability_manifest_digest=digest,
+    resource_limits_digest=digest,
+    expected_outputs_digest=digest,
+    request_signature_ref=digest,
+    worker_id="precision_worker_one",
+    worker_pin="precision_worker_one:piton.realization.v1",
+    isolation_class="trusted-local",
+    expected_outputs=("exact_brep", "inspection_receipt", "step"),
+)
+if PrecisionWorkerRequest.from_manifest(worker_request.to_manifest()) != worker_request:
+    raise SystemExit("installed precision-worker request contract failed canonical round trip")
 install_project = PitonProject(
     project_id="install-smoke",
     units="mm",
@@ -87,6 +109,7 @@ print(
             "build_attempt_custody": sorted(durable_tables),
             "build_attempt_replacement_guard": sorted(durable_triggers),
             "launch_asset_package": launch_receipt["schema"],
+            "precision_worker_request": worker_request.schema,
             "steps": len(PITON_IMPLEMENTATION_LOOP.steps),
             "t001_zero_claim": True,
         },

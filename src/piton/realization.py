@@ -6,6 +6,8 @@ review, approval, release, or machine-actuation authority.
 """
 from __future__ import annotations
 
+import ctypes
+import errno
 import hashlib
 import importlib.metadata
 import json
@@ -13,6 +15,7 @@ import os
 import platform
 import shutil
 import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -36,6 +39,33 @@ EXACT_BREP_NAME = "part.brep"
 STEP_NAME = "part.step"
 RECEIPT_NAME = "receipt.json"
 _STEP_TIMESTAMP = "1970-01-01T00:00:00+00:00"
+_RENAME_NOREPLACE = 1
+
+
+def _rename_no_replace(parent_fd: int, source: str, destination: str) -> None:
+    """Publish one directory atomically without replacing an existing name."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameat2 = getattr(libc, "renameat2", None)
+    if renameat2 is None:
+        raise OSError(errno.ENOSYS, "renameat2 is required for no-clobber publication")
+    renameat2.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
+    renameat2.restype = ctypes.c_int
+    result = renameat2(
+        parent_fd,
+        os.fsencode(source),
+        parent_fd,
+        os.fsencode(destination),
+        _RENAME_NOREPLACE,
+    )
+    if result != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number), destination)
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -163,18 +193,34 @@ def realize_exact(
     revision: DesignRevision,
     inputs: RealizationInputs,
     attempt_directory: Path,
-) -> dict[str, Any]:
-    """Realize exact BREP and STEP derivatives into one new attempt directory."""
+    *,
+    parent_fd: int | None = None,
+) -> dict[str, Any] | tuple[dict[str, Any], int]:
+    """Realize exact derivatives and retain descriptor custody when requested."""
     input_digests = _verify_inputs(revision, inputs)
     toolchain = _verify_toolchain()
 
-    attempt_directory = attempt_directory.resolve()
-    if attempt_directory.exists():
-        raise FileExistsError("attempt_directory must be new and attempt-scoped")
-    attempt_directory.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(
-        tempfile.mkdtemp(prefix=f".{attempt_directory.name}.staging-", dir=attempt_directory.parent)
-    )
+    staging_fd: int | None = None
+    staging_name: str | None = None
+    if parent_fd is None:
+        attempt_directory = attempt_directory.resolve()
+        if attempt_directory.exists():
+            raise FileExistsError("attempt_directory must be new and attempt-scoped")
+        attempt_directory.parent.mkdir(parents=True, exist_ok=True)
+        staging = Path(
+            tempfile.mkdtemp(
+                prefix=f".{attempt_directory.name}.staging-", dir=attempt_directory.parent
+            )
+        )
+    else:
+        staging_name = f".{attempt_directory.name}.staging-{uuid.uuid4().hex}"
+        os.mkdir(staging_name, mode=0o700, dir_fd=parent_fd)
+        staging_fd = os.open(
+            staging_name,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=parent_fd,
+        )
+        staging = Path(f"/proc/self/fd/{staging_fd}")
 
     try:
         part = build_l_bracket(inputs.parameters)
@@ -230,8 +276,20 @@ def realize_exact(
             json.dumps(receipt, indent=2, sort_keys=True, allow_nan=False) + "\n",
             encoding="utf-8",
         )
-        os.replace(staging, attempt_directory)
-        return receipt
+        if parent_fd is None:
+            os.replace(staging, attempt_directory)
+            return receipt
+        assert staging_name is not None and staging_fd is not None
+        os.fsync(staging_fd)
+        _rename_no_replace(parent_fd, staging_name, attempt_directory.name)
+        os.fsync(parent_fd)
+        return receipt, os.dup(staging_fd)
     except BaseException:
-        shutil.rmtree(staging, ignore_errors=True)
+        if parent_fd is None:
+            shutil.rmtree(staging, ignore_errors=True)
+        # Descriptor-relative staging is retained for quarantine/recovery.
+        # Pathname cleanup could delete an attacker-swapped directory.
         raise
+    finally:
+        if staging_fd is not None:
+            os.close(staging_fd)
