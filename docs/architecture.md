@@ -29,6 +29,18 @@ mutation, one writable source-native authority, one pinned precision
 worker, three to five predeclared checks selected from observed reviewer
 decisions.
 
+### Bounded source-native mutation boundary
+
+Adapters submit an immutable `ChangeProposal`; they do not select or assert the
+current revision. `PitonApplicationService.derive_change_candidate(project_id,
+proposal, ctx)` reads the exact project-scoped workspace head from daemon
+custody, holds the write-serialization transaction through verified manifest
+readback and pure single-parameter derivation, and returns an unpersisted
+candidate. The former public `piton.apply_change_proposal` entry point is
+intentionally removed because its caller-supplied current-revision argument
+could not establish daemon-owned currency. Derivation does not move a channel,
+commit a revision, approve a proposal, export, release, or actuate machinery.
+
 ## Stage 1 durable lifecycle (ten distinct concepts)
 
 `ChangeProposal` → `ProposalDisposition` → `DesignRevision` → `BuildAttempt` → `EvidenceClosure` → `ChannelPointer` → `ApprovalRecord` → `DraftExport` → `FabricationRelease` → `ReleasedPackageProjection`.
