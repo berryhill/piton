@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Mapping
 
 from ..feasibility import evaluate_exact_cad_feasibility
+from ..model import ChangeProposal, _derive_change_candidate
 from ..portfolio import (
     Authority,
     Disposition,
@@ -296,6 +297,43 @@ class PitonApplicationService:
         if not isinstance(receipt, CommandReceipt):
             raise TypeError("import_source_base returned a non-command receipt")
         return receipt
+
+    def derive_change_candidate(
+        self,
+        project_id: str,
+        proposal: ChangeProposal,
+        ctx: PrincipalContext,
+    ) -> DesignRevision:
+        """Derive a review candidate from the daemon-custodied workspace head.
+
+        Adapters cannot assert which revision is current. The service reads the
+        workspace pointer from trusted storage, binds the proposal to that exact
+        revision, and only then invokes the pure one-parameter derivation. This
+        operation neither persists the candidate nor moves a channel.
+        """
+        self._require(proposal, ChangeProposal, ctx)
+        if not isinstance(project_id, str) or not project_id:
+            raise ValueError("project_id must not be empty")
+        with self.__database.immediate() as connection:
+            current = connection.execute(
+                "SELECT pointer.revision_id, revision.manifest_digest "
+                "FROM channel_pointers AS pointer "
+                "JOIN design_revisions AS revision "
+                "ON revision.project_id=pointer.project_id "
+                "AND revision.revision_id=pointer.revision_id "
+                "WHERE pointer.project_id=? AND pointer.channel='workspace'",
+                (project_id,),
+            ).fetchone()
+            if current is None or current[0] != proposal.base_revision_id:
+                raise StaleBaseConflictError(
+                    "proposal base is not the daemon-custodied workspace head"
+                )
+            with self.__blobs.open_verified(current[1]) as stream:
+                manifest = json.load(stream)
+            base_revision = DesignRevision.from_manifest(manifest)
+            if base_revision.revision_id != current[0]:
+                raise RuntimeError("custodied workspace revision failed exact readback")
+            return _derive_change_candidate(base_revision, proposal)
 
     def _import_source_base(
         self, cmd: ImportSourceBase, ctx: PrincipalContext
