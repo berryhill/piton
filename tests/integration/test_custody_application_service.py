@@ -8,6 +8,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from piton import ChangeProposal
+from piton.model import _derive_change_candidate
 from piton.service.application import (
     IdempotencyConflictError,
     PitonApplicationService,
@@ -108,6 +110,126 @@ class CustodyApplicationServiceTests(unittest.TestCase):
                 self.assertIs(type(caught.exception), StaleDraftBaseError)
 
         self.assertEqual(self.receipt_count(), 2)
+
+    def test_change_candidate_uses_custodied_head_not_caller_asserted_current_state(self) -> None:
+        proposal = ChangeProposal(
+            proposal_id="proposal_height_11",
+            base_revision_id=self.base.persisted_revision_id,
+            parameter_id="height",
+            expected_old_quantity="10 mm",
+            new_quantity="11 mm",
+        )
+
+        database = Database(self.root / ".piton" / "piton.sqlite3")
+        with database.read() as connection:
+            pointer_before = tuple(
+                connection.execute(
+                    "SELECT revision_id, generation FROM channel_pointers "
+                    "WHERE project_id=? AND channel='workspace'",
+                    ("project_one",),
+                ).fetchone()
+            )
+
+        candidate = self.service.derive_change_candidate(
+            "project_one", proposal, self.context
+        )
+        with database.read() as connection:
+            pointer_after = tuple(
+                connection.execute(
+                    "SELECT revision_id, generation FROM channel_pointers "
+                    "WHERE project_id=? AND channel='workspace'",
+                    ("project_one",),
+                ).fetchone()
+            )
+        self.assertEqual(candidate.parent_revision_id, self.base.persisted_revision_id)
+        self.assertEqual(candidate.parameter_values["height"], "11 mm")
+        self.assertEqual(pointer_after, pointer_before)
+        self.assertEqual(self.counts()[0:2], (1, 1))
+
+        draft = self.service.begin_draft(
+            BeginDraft(
+                "cmd_begin_advance",
+                "project_one",
+                self.base.persisted_revision_id,
+                1,
+            ),
+            self.context,
+        )
+        self.service.commit_draft(
+            CommitDraft(
+                "cmd_commit_advance",
+                "project_one",
+                draft.draft_id,
+                self.base.persisted_revision_id,
+                1,
+                {"height": "12 mm"},
+            ),
+            self.context,
+        )
+
+        with self.assertRaisesRegex(StaleBaseConflictError, "custodied workspace head"):
+            self.service.derive_change_candidate("project_one", proposal, self.context)
+
+    def test_change_candidate_rejects_cross_project_and_untrusted_context(self) -> None:
+        assert self.base.persisted_revision_id is not None
+        proposal = ChangeProposal(
+            proposal_id="proposal_wrong_custody",
+            base_revision_id=self.base.persisted_revision_id,
+            parameter_id="height",
+            expected_old_quantity="10 mm",
+            new_quantity="11 mm",
+        )
+        self.service.create_project(
+            CreateProject("cmd_create_two_for_mutation", "project_two", "Two"),
+            self.context,
+        )
+        self.service.import_source_base(
+            ImportSourceBase(
+                "cmd_import_two_for_mutation",
+                "project_two",
+                tree(b"def build():\n    return 2\n"),
+                {"height": "10 mm"},
+            ),
+            self.context,
+        )
+
+        with self.assertRaisesRegex(StaleBaseConflictError, "custodied workspace head"):
+            self.service.derive_change_candidate("project_two", proposal, self.context)
+        with self.assertRaisesRegex(TypeError, "trusted PrincipalContext"):
+            self.service.derive_change_candidate("project_one", proposal, object())  # type: ignore[arg-type]
+
+    def test_change_candidate_serializes_head_binding_through_derivation(self) -> None:
+        proposal = ChangeProposal(
+            proposal_id="proposal_height_serialized",
+            base_revision_id=self.base.persisted_revision_id,
+            parameter_id="height",
+            expected_old_quantity="10 mm",
+            new_quantity="11 mm",
+        )
+        competing_database = Database(
+            self.root / ".piton" / "piton.sqlite3", busy_timeout_ms=1
+        )
+
+        def derive_while_competing_writer_is_denied(base, change):
+            with self.assertRaisesRegex(sqlite3.OperationalError, "locked"):
+                with competing_database.immediate() as connection:
+                    connection.execute(
+                        "UPDATE channel_pointers SET generation=generation+1 "
+                        "WHERE project_id=? AND channel='workspace'",
+                        ("project_one",),
+                    )
+            return _derive_change_candidate(base, change)
+
+        with mock.patch(
+            "piton.service.application._derive_change_candidate",
+            side_effect=derive_while_competing_writer_is_denied,
+        ):
+            candidate = self.service.derive_change_candidate(
+                "project_one", proposal, self.context
+            )
+
+        self.assertEqual(candidate.parent_revision_id, self.base.persisted_revision_id)
+        self.assertEqual(candidate.parameter_values["height"], "11 mm")
 
     def test_idempotency_identity_and_receipt_rows_are_immutable(self) -> None:
         database = Database(self.root / ".piton" / "piton.sqlite3")

@@ -191,28 +191,24 @@ class ChangeProposal:
         object.__setattr__(self, "requirement_ids", requirements)
 
 
-def apply_change_proposal(
+def _derive_change_candidate(
     base_revision: DesignRevision,
     proposal: ChangeProposal,
-    *,
-    current_revision_id: str,
 ) -> DesignRevision:
-    """Derive one immutable candidate from one exact, current source revision.
+    """Pure derivation used only after the service binds its trusted current head.
 
-    ``current_revision_id`` is server-owned concurrency state. The proposal may
-    describe one parameter replacement, but it cannot select a stale base,
-    introduce parameters, or alter source/toolchain authority.
+    This helper has no concurrency-authority input. The application service
+    must load the daemon-custodied workspace head and reject stale proposals
+    before calling it. The proposal may describe one parameter replacement,
+    but it cannot introduce parameters or alter source/toolchain authority.
     """
     if not isinstance(base_revision, DesignRevision):
         raise TypeError("base_revision must be a DesignRevision")
     if not isinstance(proposal, ChangeProposal):
         raise TypeError("proposal must be a ChangeProposal")
-    _require_revision_id("current_revision_id", current_revision_id)
 
     if proposal.base_revision_id != base_revision.revision_id:
         raise ValueError("proposal base_revision_id must match the supplied base revision")
-    if current_revision_id != base_revision.revision_id:
-        raise ValueError("supplied base revision must be the server-owned current revision")
     if proposal.parameter_id not in base_revision.parameter_values:
         raise ValueError("proposal names an unknown parameter_id")
 

@@ -31,5 +31,5 @@ jobs:
       - name: Install wheel and smoke test in a clean environment
         run: |
           uv venv --python 3.12.11 /tmp/piton-wheel-venv
-          uv pip install --python /tmp/piton-wheel-venv/bin/python --no-deps dist/*.whl
+          uv pip install --python /tmp/piton-wheel-venv/bin/python dist/*.whl
           /tmp/piton-wheel-venv/bin/python scripts/install_verify.py

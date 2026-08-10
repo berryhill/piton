@@ -1,7 +1,8 @@
 import unittest
 from typing import Any
 
-from piton import ChangeProposal, TruthBoundary, apply_change_proposal
+from piton import ChangeProposal, TruthBoundary
+from piton.model import _derive_change_candidate
 from piton.revision import DesignRevision
 
 DIGEST_A = "sha256:" + "a" * 64
@@ -40,16 +41,8 @@ class SourceMutationContractTests(unittest.TestCase):
         base = base_revision()
         change = proposal(base)
 
-        candidate = apply_change_proposal(
-            base,
-            change,
-            current_revision_id=base.revision_id,
-        )
-        repeated = apply_change_proposal(
-            base,
-            change,
-            current_revision_id=base.revision_id,
-        )
+        candidate = _derive_change_candidate(base, change)
+        repeated = _derive_change_candidate(base, change)
 
         self.assertEqual(base.revision_id, candidate.parent_revision_id)
         self.assertEqual("proposal_leg_length_90", candidate.proposal_id)
@@ -71,11 +64,7 @@ class SourceMutationContractTests(unittest.TestCase):
         base = base_revision()
         original_manifest = base.to_manifest()
 
-        candidate = apply_change_proposal(
-            base,
-            proposal(base),
-            current_revision_id=base.revision_id,
-        )
+        candidate = _derive_change_candidate(base, proposal(base))
 
         self.assertEqual(original_manifest, base.to_manifest())
         self.assertEqual(base.source_manifest_digest, candidate.source_manifest_digest)
@@ -100,28 +89,16 @@ class SourceMutationContractTests(unittest.TestCase):
         other_revision_id = "rev_" + "d" * 64
 
         with self.assertRaisesRegex(ValueError, "proposal base_revision_id"):
-            apply_change_proposal(
+            _derive_change_candidate(
                 base,
                 proposal(base, base_revision_id=other_revision_id),
-                current_revision_id=base.revision_id,
-            )
-
-    def test_rejects_stale_server_owned_current_revision(self):
-        base = base_revision()
-        newer_revision_id = "rev_" + "e" * 64
-
-        with self.assertRaisesRegex(ValueError, "current revision"):
-            apply_change_proposal(
-                base,
-                proposal(base),
-                current_revision_id=newer_revision_id,
             )
 
     def test_rejects_unknown_parameter(self):
         base = base_revision()
 
         with self.assertRaisesRegex(ValueError, "unknown parameter_id"):
-            apply_change_proposal(
+            _derive_change_candidate(
                 base,
                 proposal(
                     base,
@@ -129,27 +106,24 @@ class SourceMutationContractTests(unittest.TestCase):
                     expected_old_quantity="1 mm",
                     new_quantity="2 mm",
                 ),
-                current_revision_id=base.revision_id,
             )
 
     def test_rejects_stale_expected_old_quantity_without_normalizing(self):
         base = base_revision()
 
         with self.assertRaisesRegex(ValueError, "expected_old_quantity"):
-            apply_change_proposal(
+            _derive_change_candidate(
                 base,
                 proposal(base, expected_old_quantity="80.0 mm"),
-                current_revision_id=base.revision_id,
             )
 
     def test_rejects_no_op_mutation(self):
         base = base_revision()
 
         with self.assertRaisesRegex(ValueError, "must differ"):
-            apply_change_proposal(
+            _derive_change_candidate(
                 base,
                 proposal(base, new_quantity="80 mm"),
-                current_revision_id=base.revision_id,
             )
 
 

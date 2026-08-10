@@ -7,7 +7,9 @@ from pathlib import Path
 
 import piton.storage as storage
 from piton.implementation_loop import PITON_IMPLEMENTATION_LOOP
+from piton.launch_assets import build_review_export
 from piton.model import TruthBoundary
+from piton.project_format import PitonProject, ProjectAuthority, ProjectSafety, SourceFile
 from piton.portfolio.partner_scaffold_t001 import (
     PartnerScaffoldT001Receipt,
     validate_partner_scaffold_t001,
@@ -19,6 +21,32 @@ TruthBoundary().assert_safe()
 receipt = PartnerScaffoldT001Receipt()
 if not validate_partner_scaffold_t001(receipt):
     raise SystemExit("installed T001 scaffold failed zero-claim validation")
+
+digest = "sha256:" + "0" * 64
+install_project = PitonProject(
+    project_id="install-smoke",
+    units="mm",
+    authority=ProjectAuthority(
+        writable="source-native-python",
+        entrypoint="source/part.py",
+        dependency_lock="locks/dependencies.lock",
+        toolchain_lock="locks/toolchain.lock",
+    ),
+    source_files=(
+        SourceFile("source/part.py", digest, "text/x-python", "lf"),
+        SourceFile("locks/dependencies.lock", digest, "text/plain", "lf"),
+        SourceFile("locks/toolchain.lock", digest, "text/plain", "lf"),
+    ),
+    records=(),
+    safety=ProjectSafety("needs_human_review", False, False),
+)
+launch_receipt = build_review_export(install_project)
+if launch_receipt["safety"] != {
+    "review_state": "needs_human_review",
+    "fabrication_release": False,
+    "machine_actuation": False,
+}:
+    raise SystemExit("installed launch-asset receipt violated safety truth")
 
 with tempfile.TemporaryDirectory() as temporary_directory:
     database = Database(Path(temporary_directory) / "piton.sqlite3")
@@ -58,6 +86,7 @@ print(
             "review_state": receipt.review_state,
             "build_attempt_custody": sorted(durable_tables),
             "build_attempt_replacement_guard": sorted(durable_triggers),
+            "launch_asset_package": launch_receipt["schema"],
             "steps": len(PITON_IMPLEMENTATION_LOOP.steps),
             "t001_zero_claim": True,
         },
