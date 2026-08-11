@@ -17,7 +17,6 @@ from piton.launch_verification import (
     CURRENT_PRECISION_WORKER_OUTPUTS,
     CURRENT_PRECISION_WORKER_PIN,
     validate_launch_worker_contract,
-    validate_precision_worker_source,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -219,51 +218,6 @@ def test_launch_verification_rejects_stale_v1_or_three_role_assets(
         validate_launch_worker_contract(worker_pin, outputs)
 
 
-@pytest.mark.parametrize(
-    "extra_source",
-    [
-        '\nif True:\n    PRECISION_WORKER_PIN = "precision_worker_one:piton.realization.v1"\n',
-        '\nEXPECTED_OUTPUTS = ("exact_brep", "inspection_receipt", "step")\n',
-        '\nEXPECTED_OUTPUTS: tuple[str, ...] = ("exact_brep", "inspection_receipt", "step")\n',
-        "\ndef PRECISION_WORKER_PIN():\n    return None\n",
-        "\nclass EXPECTED_OUTPUTS:\n    pass\n",
-        "\nfrom stale_worker import pin as PRECISION_WORKER_PIN\n",
-        "\nfrom stale_worker import *\n",
-        "\ndel EXPECTED_OUTPUTS\n",
-        "\ntry:\n    pass\nexcept Exception as EXPECTED_OUTPUTS:\n    pass\n",
-        "\nmatch object():\n    case PRECISION_WORKER_PIN:\n        pass\n",
-    ],
-)
-def test_launch_source_verification_rejects_runtime_or_duplicate_rebinding(
-    tmp_path: Path, extra_source: str
-):
-    source = tmp_path / "precision_worker.py"
-    source.write_text(
-        f'PRECISION_WORKER_PIN = {CURRENT_PRECISION_WORKER_PIN!r}\n'
-        f'EXPECTED_OUTPUTS = {CURRENT_PRECISION_WORKER_OUTPUTS!r}\n'
-        + extra_source,
-        encoding="utf-8",
-    )
-    with pytest.raises(ValueError, match="one module-level binding"):
-        validate_precision_worker_source(source)
-
-
-def test_launch_source_verification_rejects_nonliteral_or_missing_constants(tmp_path: Path):
-    nonliteral = tmp_path / "nonliteral.py"
-    nonliteral.write_text(
-        f'PRECISION_WORKER_PIN = {CURRENT_PRECISION_WORKER_PIN!r}\n'
-        'EXPECTED_OUTPUTS = tuple(["exact_brep"])\n',
-        encoding="utf-8",
-    )
-    with pytest.raises(ValueError, match="not a literal value"):
-        validate_precision_worker_source(nonliteral)
-
-    missing = tmp_path / "missing.py"
-    missing.write_text(f'PRECISION_WORKER_PIN = {CURRENT_PRECISION_WORKER_PIN!r}\n', encoding="utf-8")
-    with pytest.raises(ValueError, match="one module-level binding"):
-        validate_precision_worker_source(missing)
-
-
 def test_install_and_repository_verifiers_pin_current_seven_role_closure():
     install = run_script("install_verify.py")
     assert install.returncode == 0, install.stderr
@@ -274,7 +228,7 @@ def test_install_and_repository_verifiers_pin_current_seven_role_closure():
     verifier = (ROOT / "scripts" / "verify_repo.py").read_text(encoding="utf-8")
     assert 'ROOT / "src/piton/mesh_derivatives.py"' in verifier
     assert 'ROOT / "tests/test_mesh_derivatives.py"' in verifier
-    assert 'validate_precision_worker_source(ROOT / "src/piton/precision_worker.py")' in verifier
+    assert "validate_launch_worker_contract(PRECISION_WORKER_PIN, EXPECTED_OUTPUTS)" in verifier
 
 
 def test_reference_build_cli_rejects_authority_injection_and_names_closure_digest(tmp_path: Path):

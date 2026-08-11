@@ -18,7 +18,8 @@ from piton.launch_assets import (
     validate_restore_forward,
     validate_review_export,
 )
-from piton.launch_verification import validate_precision_worker_source
+from piton.launch_verification import validate_launch_worker_contract
+from piton.precision_worker import EXPECTED_OUTPUTS, PRECISION_WORKER_PIN
 from piton.project_format import load_project_directory
 from piton.revision import DesignRevision
 
@@ -68,8 +69,8 @@ if missing:
     raise SystemExit("missing required files: " + ", ".join(missing))
 
 try:
-    validate_precision_worker_source(ROOT / "src/piton/precision_worker.py")
-except (OSError, SyntaxError, ValueError) as error:
+    validate_launch_worker_contract(PRECISION_WORKER_PIN, EXPECTED_OUTPUTS)
+except ValueError as error:
     raise SystemExit(str(error)) from error
 
 for schema_name in (

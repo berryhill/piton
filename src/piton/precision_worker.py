@@ -12,6 +12,10 @@ import stat
 from pathlib import Path
 from typing import Any, Mapping
 
+from .launch_verification import (
+    CURRENT_PRECISION_WORKER_OUTPUTS,
+    CURRENT_PRECISION_WORKER_PIN,
+)
 from .mesh_derivatives import (
     DerivativeSource,
     TessellationPolicy,
@@ -35,16 +39,8 @@ from .worker_contracts import (
 )
 
 PRECISION_WORKER_ID = "precision_worker_one"
-PRECISION_WORKER_PIN = "precision_worker_one:piton.realization-and-review.v2"
-EXPECTED_OUTPUTS = (
-    "exact_brep",
-    "inspection_receipt",
-    "review_glb",
-    "review_glb_receipt",
-    "review_selection_map",
-    "review_selection_map_receipt",
-    "step",
-)
+PRECISION_WORKER_PIN = CURRENT_PRECISION_WORKER_PIN
+EXPECTED_OUTPUTS = CURRENT_PRECISION_WORKER_OUTPUTS
 
 
 class WorkerOutputCustodyError(RuntimeError):

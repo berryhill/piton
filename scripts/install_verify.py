@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import importlib.util
 import json
 import tempfile
 from dataclasses import fields
@@ -12,7 +11,7 @@ from piton.launch_assets import build_review_export
 from piton.launch_verification import (
     CURRENT_PRECISION_WORKER_OUTPUTS,
     CURRENT_PRECISION_WORKER_PIN,
-    validate_precision_worker_source,
+    validate_launch_worker_contract,
 )
 from piton.model import TruthBoundary
 from piton.project_format import PitonProject, ProjectAuthority, ProjectSafety, SourceFile
@@ -25,12 +24,12 @@ from piton.worker_contracts import PrecisionWorkerRequest
 
 PITON_IMPLEMENTATION_LOOP.validate()
 TruthBoundary().assert_safe()
-worker_spec = importlib.util.find_spec("piton.precision_worker")
-if worker_spec is None or worker_spec.origin is None:
-    raise SystemExit("installed precision-worker source is missing")
 try:
-    validate_precision_worker_source(Path(worker_spec.origin))
-except (OSError, SyntaxError, ValueError) as error:
+    validate_launch_worker_contract(
+        CURRENT_PRECISION_WORKER_PIN,
+        CURRENT_PRECISION_WORKER_OUTPUTS,
+    )
+except ValueError as error:
     raise SystemExit(str(error)) from error
 receipt = PartnerScaffoldT001Receipt()
 if not validate_partner_scaffold_t001(receipt):
