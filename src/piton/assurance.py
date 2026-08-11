@@ -194,6 +194,101 @@ class AssuranceRequirement:
 
 
 @dataclass(frozen=True, slots=True)
+class P4AssuranceReceipt:
+    """Policy-bound statement that required manual evidence is unavailable."""
+
+    policy_digest: str
+    requirement_id: str
+    method_digest: str
+    comparator_digest: str
+    threshold: Mapping[str, Any]
+    environment_ids: tuple[str, ...]
+    invalidation_conditions: tuple[str, ...]
+    availability: Literal["unavailable"] = "unavailable"
+    threshold_passed: Literal[False] = False
+    evidence_refs: tuple[str, ...] = ()
+
+    schema: ClassVar[str] = "piton.p4-assurance-receipt.v1"
+    FIELD_NAMES: ClassVar[tuple[str, ...]] = (
+        "schema", "policy_digest", "requirement_id", "method_digest",
+        "comparator_digest", "threshold", "environment_ids",
+        "invalidation_conditions", "availability", "threshold_passed",
+        "evidence_refs",
+    )
+
+    def __post_init__(self) -> None:
+        _require_digest("policy_digest", self.policy_digest)
+        _require_identifier("requirement_id", self.requirement_id)
+        _require_digest("method_digest", self.method_digest)
+        _require_digest("comparator_digest", self.comparator_digest)
+        threshold = json.loads(_canonical_bytes(dict(self.threshold)))
+        if not threshold:
+            raise ValueError("assurance receipt threshold must be predeclared")
+        environments = tuple(self.environment_ids)
+        invalidations = tuple(self.invalidation_conditions)
+        evidence_refs = tuple(self.evidence_refs)
+        if not environments or len(set(environments)) != len(environments):
+            raise ValueError("receipt environment identifiers must be nonempty and unique")
+        for identifier in environments:
+            _require_identifier("receipt environment ID", identifier)
+        if not invalidations or any(
+            not isinstance(item, str) or not item for item in invalidations
+        ):
+            raise ValueError("receipt invalidation conditions must be predeclared")
+        if (
+            self.availability != "unavailable"
+            or self.threshold_passed is not False
+            or evidence_refs
+        ):
+            raise ValueError("unavailable assurance receipts must fail closed")
+        object.__setattr__(self, "threshold", _freeze_json(threshold))
+        object.__setattr__(self, "environment_ids", environments)
+        object.__setattr__(self, "invalidation_conditions", invalidations)
+        object.__setattr__(self, "evidence_refs", evidence_refs)
+
+    def to_primitive(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "policy_digest": self.policy_digest,
+            "requirement_id": self.requirement_id,
+            "method_digest": self.method_digest,
+            "comparator_digest": self.comparator_digest,
+            "threshold": _thaw_json(self.threshold),
+            "environment_ids": list(self.environment_ids),
+            "invalidation_conditions": list(self.invalidation_conditions),
+            "availability": self.availability,
+            "threshold_passed": self.threshold_passed,
+            "evidence_refs": list(self.evidence_refs),
+        }
+
+    @property
+    def canonical_bytes(self) -> bytes:
+        return _canonical_bytes(self.to_primitive()) + b"\n"
+
+    @property
+    def digest(self) -> str:
+        return _digest(self.to_primitive())
+
+    @classmethod
+    def from_primitive(cls, value: Mapping[str, Any]) -> "P4AssuranceReceipt":
+        _closed_mapping(value, cls.FIELD_NAMES, "P4 assurance receipt")
+        if value["schema"] != cls.schema:
+            raise ValueError("unsupported P4 assurance receipt schema")
+        return cls(
+            policy_digest=value["policy_digest"],
+            requirement_id=value["requirement_id"],
+            method_digest=value["method_digest"],
+            comparator_digest=value["comparator_digest"],
+            threshold=value["threshold"],
+            environment_ids=tuple(value["environment_ids"]),
+            invalidation_conditions=tuple(value["invalidation_conditions"]),
+            availability=value["availability"],
+            threshold_passed=value["threshold_passed"],
+            evidence_refs=tuple(value["evidence_refs"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class P4AssurancePolicy:
     """Immutable policy frozen before P4 evidence evaluation."""
 
@@ -462,3 +557,20 @@ def default_p4_assurance_policy() -> P4AssurancePolicy:
 
 
 DEFAULT_P4_ASSURANCE_POLICY = default_p4_assurance_policy()
+
+
+def emit_unavailable_p4_receipts() -> tuple[P4AssuranceReceipt, ...]:
+    """Emit fail-closed receipts bound to the source-fixed default policy."""
+    policy = default_p4_assurance_policy()
+    return tuple(
+        P4AssuranceReceipt(
+            policy_digest=policy.digest,
+            requirement_id=requirement.requirement_id,
+            method_digest=requirement.method_digest,
+            comparator_digest=requirement.comparator_digest,
+            threshold=requirement.threshold,
+            environment_ids=requirement.environment_ids,
+            invalidation_conditions=requirement.invalidation_conditions,
+        )
+        for requirement in policy.requirements
+    )

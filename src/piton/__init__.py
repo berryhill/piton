@@ -15,7 +15,9 @@ from .assurance import (
     GovernedAlphaEvidence,
     P4AssuranceEvidence,
     P4AssurancePolicy,
+    P4AssuranceReceipt,
     default_p4_assurance_policy,
+    emit_unavailable_p4_receipts,
     validate_p4_evidence_policy_binding,
 )
 from .model import (
@@ -105,6 +107,7 @@ __all__ = [
     "PhaseExitReceipt",
     "P4AssuranceEvidence",
     "P4AssurancePolicy",
+    "P4AssuranceReceipt",
     "P3ReviewEvidenceBundle",
     "PartnerAlphaScaffoldT002",
     "PitonProject",
@@ -124,6 +127,7 @@ __all__ = [
     "canonical_project_bytes",
     "compute_revision_id",
     "default_p4_assurance_policy",
+    "emit_unavailable_p4_receipts",
     "default_partner_alpha_receipt",
     "issue_phase_exit_receipt",
     "load_project_bytes",

@@ -8,12 +8,15 @@ from importlib.resources import files
 import pytest
 from jsonschema import Draft202012Validator, ValidationError
 
+import piton.assurance as assurance_module
 from piton.assurance import (
     AssuranceRequirement,
     DEFAULT_P4_ASSURANCE_POLICY,
     GovernedAlphaEvidence,
     P4AssuranceEvidence,
     P4AssurancePolicy,
+    P4AssuranceReceipt,
+    emit_unavailable_p4_receipts,
     validate_p4_evidence_policy_binding,
 )
 from piton.portfolio import (
@@ -196,6 +199,93 @@ def test_source_native_default_policy_freezes_all_assurance_dimensions() -> None
         "vendored-csp-license-privacy",
     }
     assert P4AssurancePolicy.from_primitive(frozen.to_primitive()).digest == frozen.digest
+
+
+def test_unavailable_receipts_close_default_policy_in_order() -> None:
+    receipts = emit_unavailable_p4_receipts()
+
+    assert tuple(receipt.requirement_id for receipt in receipts) == tuple(
+        requirement.requirement_id
+        for requirement in DEFAULT_P4_ASSURANCE_POLICY.requirements
+    )
+    assert len(receipts) == len(DEFAULT_P4_ASSURANCE_POLICY.requirements)
+
+
+def test_unavailable_receipt_emitter_rejects_caller_minted_policy_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    caller_policy = policy()
+
+    with pytest.raises(TypeError):
+        emit_unavailable_p4_receipts(caller_policy)
+
+    monkeypatch.setattr(assurance_module, "DEFAULT_P4_ASSURANCE_POLICY", caller_policy)
+    receipts = emit_unavailable_p4_receipts()
+    source_policy = assurance_module.default_p4_assurance_policy()
+
+    assert all(
+        receipt.policy_digest == source_policy.digest
+        for receipt in receipts
+    )
+    assert tuple(receipt.requirement_id for receipt in receipts) == tuple(
+        requirement.requirement_id for requirement in source_policy.requirements
+    )
+
+
+def test_unavailable_receipts_bind_every_requirement_field() -> None:
+    receipts = emit_unavailable_p4_receipts()
+
+    for receipt, requirement in zip(
+        receipts, DEFAULT_P4_ASSURANCE_POLICY.requirements, strict=True
+    ):
+        assert receipt.policy_digest == DEFAULT_P4_ASSURANCE_POLICY.digest
+        assert receipt.requirement_id == requirement.requirement_id
+        assert receipt.method_digest == requirement.method_digest
+        assert receipt.comparator_digest == requirement.comparator_digest
+        assert receipt.threshold == requirement.threshold
+        assert receipt.environment_ids == requirement.environment_ids
+        assert receipt.invalidation_conditions == requirement.invalidation_conditions
+        assert receipt.availability == "unavailable"
+        assert receipt.threshold_passed is False
+        assert receipt.evidence_refs == ()
+
+
+def test_unavailable_receipt_is_closed_canonical_and_rejects_forgery() -> None:
+    receipt = emit_unavailable_p4_receipts()[0]
+    primitive = receipt.to_primitive()
+
+    assert json.loads(receipt.canonical_bytes) == primitive
+    assert P4AssuranceReceipt.from_primitive(primitive) == receipt
+    assert P4AssuranceReceipt.from_primitive(primitive).digest == receipt.digest
+    with pytest.raises(ValueError, match="closed schema"):
+        P4AssuranceReceipt.from_primitive({**primitive, "approval": True})
+    with pytest.raises(ValueError, match="fail closed"):
+        replace(receipt, threshold_passed=True)
+    with pytest.raises(ValueError, match="fail closed"):
+        replace(receipt, evidence_refs=(DIGEST,))
+    with pytest.raises(ValueError, match="fail closed"):
+        replace(receipt, availability="available")
+
+
+def test_unavailable_receipt_matches_packaged_public_schema() -> None:
+    schema = json.loads(
+        files("piton")
+        .joinpath("schemas", "p4-assurance-receipt-v1.schema.json")
+        .read_text(encoding="utf-8")
+    )
+    validator = Draft202012Validator(schema)
+    primitive = emit_unavailable_p4_receipts()[0].to_primitive()
+
+    validator.validate(primitive)
+    for field, unsafe_value in (
+        ("availability", "available"),
+        ("threshold_passed", True),
+        ("evidence_refs", [DIGEST]),
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate({**primitive, field: unsafe_value})
+    with pytest.raises(ValidationError):
+        validator.validate({**primitive, "approval": True})
 
 
 def test_p4_evidence_binds_exact_predeclared_policy_digest() -> None:
