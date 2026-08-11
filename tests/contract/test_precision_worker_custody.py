@@ -167,3 +167,30 @@ def test_worker_keeps_published_inode_pinned_during_destination_swap(
     assert result.expected_output_closure is False
     assert (project / "relocated_attempt" / "part.step").is_file()
     assert list((project / "attempt_one").iterdir()) == []
+
+
+def test_review_generation_stays_on_pinned_attempt_during_destination_swap(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import piton.precision_worker as worker
+
+    service = _configured_service(tmp_path)
+    original = worker.derive_review_derivatives
+    outside = tmp_path / "outside-review"
+    outside.mkdir()
+
+    def swap_attempt_then_derive(source, policy, output_directory):
+        project = tmp_path / ".piton" / "build-attempts" / "project_one"
+        (project / "attempt_one").rename(project / "relocated_attempt")
+        (project / "attempt_one").symlink_to(outside, target_is_directory=True)
+        return original(source, policy, output_directory)
+
+    monkeypatch.setattr(worker, "derive_review_derivatives", swap_attempt_then_derive)
+    request = service.issue_precision_worker_request("project_one", "attempt_one")
+    result = service.run_precision_worker(request)
+
+    project = tmp_path / ".piton" / "build-attempts" / "project_one"
+    assert result.status == "failed"
+    assert result.expected_output_closure is False
+    assert list(outside.iterdir()) == []
+    assert (project / "relocated_attempt" / "review" / "glb.receipt.json").is_file()

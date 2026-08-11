@@ -81,7 +81,15 @@ def test_request_is_deeply_immutable_and_canonical(tmp_path: Path) -> None:
     assert first == second
     assert first.canonical_bytes == second.canonical_bytes
     assert first.request_digest == second.request_digest
-    assert tuple(first.expected_outputs) == ("exact_brep", "inspection_receipt", "step")
+    assert tuple(first.expected_outputs) == (
+        "exact_brep",
+        "inspection_receipt",
+        "review_glb",
+        "review_glb_receipt",
+        "review_selection_map",
+        "review_selection_map_receipt",
+        "step",
+    )
     assert first.truth == {
         "fabrication_release": False,
         "machine_actuation": False,
