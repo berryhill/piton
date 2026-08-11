@@ -9,7 +9,25 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 import piton.storage as storage
-from piton import DraftExport, FrameworkPacketClosure, HumanReviewIntake
+from piton import (
+    Authority,
+    DEFAULT_P4_ASSURANCE_POLICY,
+    Disposition,
+    DraftExport,
+    EvidenceArtifact,
+    ExecutionStatus,
+    FrameworkPacketClosure,
+    GovernedAlphaEvidence,
+
+    HumanReviewIntake,
+    P4AssuranceEvidence,
+    P4AssurancePolicy,
+    Phase,
+    SafetyState,
+    issue_phase_exit_receipt,
+
+    validate_p4_evidence_policy_binding,
+)
 from piton.implementation_loop import PITON_IMPLEMENTATION_LOOP
 from piton.launch_assets import build_review_export
 from piton.launch_verification import (
@@ -53,6 +71,9 @@ for schema_name in (
     "semantic-selection-map-v1.schema.json",
     "human-review-intake-v1.schema.json",
     "framework-packet-closure-v1.schema.json",
+    "governed-alpha-evidence-v1.schema.json",
+    "p4-assurance-policy-v1.schema.json",
+    "p4-assurance-evidence-v1.schema.json",
 ):
     schema = json.loads(package_root.joinpath("schemas", schema_name).read_text(encoding="utf-8"))
     Draft202012Validator.check_schema(schema)
@@ -68,6 +89,55 @@ if not validate_partner_scaffold_t001(receipt):
     raise SystemExit("installed T001 scaffold failed zero-claim validation")
 
 digest = "sha256:" + "0" * 64
+governed_alpha = GovernedAlphaEvidence(
+    project_id="install-smoke",
+    revision_id="rev_" + "0" * 64,
+    build_attempt_id="attempt_smoke",
+    evidence_closure_digest=digest,
+    framework_packet_closure_digest=digest,
+    review_packet_digest=digest,
+    exact_brep_digest=digest,
+    exact_brep_claim_scope="exact-realization",
+    step_digest=digest,
+    step_claim_scope="exact-exchange",
+    review_glb_digest=digest,
+    review_glb_claim_scope="review-only",
+    review_selection_map_digest=digest,
+    review_selection_map_claim_scope="review-only",
+)
+governed_alpha_schema = json.loads(
+    package_root.joinpath(
+        "schemas", "governed-alpha-evidence-v1.schema.json"
+    ).read_text(encoding="utf-8")
+)
+Draft202012Validator(governed_alpha_schema).validate(governed_alpha.to_primitive())
+
+p4_policy = DEFAULT_P4_ASSURANCE_POLICY
+p4_policy_round_trip = P4AssurancePolicy.from_primitive(p4_policy.to_primitive())
+p4_policy_schema = json.loads(
+    package_root.joinpath("schemas", "p4-assurance-policy-v1.schema.json").read_text(
+        encoding="utf-8"
+    )
+)
+Draft202012Validator(p4_policy_schema).validate(p4_policy_round_trip.to_primitive())
+if p4_policy_round_trip.digest != p4_policy.digest:
+    raise SystemExit("installed P4 assurance policy canonical digest is unstable")
+p4_evidence = P4AssuranceEvidence(
+    policy_digest=p4_policy.digest,
+    evaluated_requirement_ids=tuple(
+        requirement.requirement_id for requirement in p4_policy.requirements
+    ),
+    result="hold",
+)
+p4_evidence_schema = json.loads(
+    package_root.joinpath(
+        "schemas", "p4-assurance-evidence-v1.schema.json"
+    ).read_text(encoding="utf-8")
+)
+Draft202012Validator(p4_evidence_schema).validate(p4_evidence.to_primitive())
+if validate_p4_evidence_policy_binding(p4_policy, p4_evidence):
+    raise SystemExit("installed P4 assurance evidence failed policy binding")
+
 draft_export = DraftExport(
     receipt_id="install-smoke-draft-receipt",
     export_id="install-smoke-draft-export",
@@ -137,6 +207,31 @@ framework_closure_schema = json.loads(
 Draft202012Validator(framework_closure_schema).validate(
     framework_packet_closure.to_primitive()
 )
+if not framework_packet_closure.closure_digest.startswith("sha256:"):
+    raise SystemExit("installed framework closure digest is unavailable")
+authority_artifact = EvidenceArtifact.from_content(
+    artifact_id="install-authority-evidence",
+    repository_path="evidence/install-authority.json",
+    content={"result": "measured"},
+)
+human_receipt = issue_phase_exit_receipt(
+    receipt_id="install-authority-p0",
+    phase=Phase.P0,
+    status=ExecutionStatus.COMPLETED,
+    disposition=Disposition.ADVANCE,
+    authority=Authority.HUMAN,
+    predecessor_receipt_id=None,
+    predecessor_receipt_digest=None,
+    predicates={},
+    evidence=(authority_artifact,),
+    safety=SafetyState(),
+)
+if human_receipt.successor_authorized or not any(
+    "trusted durable human authorization issuance/verification is not implemented"
+    in reason
+    for reason in human_receipt.authorization_reasons
+):
+    raise SystemExit("installed portfolio API did not fail closed for human authority")
 worker_request = PrecisionWorkerRequest(
     project_id="install-smoke",
     revision_id="rev_" + "0" * 64,
@@ -264,6 +359,10 @@ print(
             "framework_packet_closure_api": framework_packet_closure.to_primitive()[
                 "schema"
             ],
+            "governed_alpha_evidence_api": governed_alpha.to_primitive()["schema"],
+            "p4_assurance_policy_id": p4_policy.policy_id,
+            "p4_assurance_policy_digest": p4_policy.digest,
+            "p4_assurance_binding": "verified-hold",
             "viewer_assets": list(viewer_assets),
             "precision_worker_request": worker_request.schema,
             "precision_worker_pin": worker_request.worker_pin,

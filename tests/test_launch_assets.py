@@ -13,6 +13,12 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 
+from piton.assurance import (
+    DEFAULT_P4_ASSURANCE_POLICY,
+    GovernedAlphaEvidence,
+    P4AssuranceEvidence,
+    validate_p4_evidence_policy_binding,
+)
 from piton.launch_verification import (
     CURRENT_PRECISION_WORKER_OUTPUTS,
     CURRENT_PRECISION_WORKER_PIN,
@@ -158,6 +164,57 @@ def test_templates_have_explicit_scopes_and_false_safety():
         }
 
 
+def test_launch_templates_bind_p3_closure_and_source_fixed_p4_policy():
+    for relative in ("templates/evidence-record-v1.json", "templates/artifact-manifest-v1.json"):
+        payload = json.loads((ROOT / relative).read_text(encoding="utf-8"))
+        governed_alpha = GovernedAlphaEvidence.from_primitive(
+            payload["governed_alpha_evidence"]
+        )
+        assert governed_alpha.exact_brep_claim_scope == "exact-realization"
+        assert governed_alpha.step_claim_scope == "exact-exchange"
+        assert governed_alpha.review_glb_claim_scope == "review-only"
+        assert governed_alpha.review_selection_map_claim_scope == "review-only"
+
+        assurance = payload["p4_assurance"]
+        assert assurance["policy_id"] == DEFAULT_P4_ASSURANCE_POLICY.policy_id
+        assert assurance["policy_digest"] == DEFAULT_P4_ASSURANCE_POLICY.digest
+        evidence = P4AssuranceEvidence.from_primitive(assurance["evidence"])
+        assert validate_p4_evidence_policy_binding(
+            DEFAULT_P4_ASSURANCE_POLICY, evidence
+        ) == ()
+        assert evidence.result == "hold"
+        assert evidence.review_state == "needs_human_review"
+        assert evidence.fabrication_release is False
+        assert evidence.machine_actuation is False
+
+
+def test_launch_docs_define_p3_p4_authority_admission_and_stop_conditions():
+    architecture = (ROOT / "docs/architecture.md").read_text(encoding="utf-8")
+    instructions = (ROOT / "docs/human-review-launch-assets.md").read_text(
+        encoding="utf-8"
+    )
+    for document in (architecture, instructions):
+        for required in (
+            "GovernedAlphaEvidence",
+            "P4AssurancePolicy",
+            "P4AssuranceEvidence",
+            "DEFAULT_P4_ASSURANCE_POLICY",
+            "validate_p4_evidence_policy_binding",
+            "exact-realization",
+            "exact-exchange",
+            "review-only",
+            "needs_human_review",
+        ):
+            assert required in document
+    for required in (
+        "verify_successor_admission",
+        "policy_digest",
+        "evaluated_requirement_ids",
+        "Stop review",
+    ):
+        assert required in instructions
+
+
 def test_launch_manifest_closes_current_exact_and_review_roles_with_independent_receipts():
     payload = json.loads((ROOT / "templates/artifact-manifest-v1.json").read_text(encoding="utf-8"))
 
@@ -231,10 +288,15 @@ def test_install_and_repository_verifiers_pin_current_seven_role_closure():
         "evidence_closure_receipts",
         "evidence_closure_artifacts",
     }
+    assert receipt["p4_assurance_policy_id"] == DEFAULT_P4_ASSURANCE_POLICY.policy_id
+    assert receipt["p4_assurance_policy_digest"] == DEFAULT_P4_ASSURANCE_POLICY.digest
+    assert receipt["p4_assurance_binding"] == "verified-hold"
 
     verifier = (ROOT / "scripts" / "verify_repo.py").read_text(encoding="utf-8")
     assert 'ROOT / "src/piton/mesh_derivatives.py"' in verifier
     assert 'ROOT / "tests/test_mesh_derivatives.py"' in verifier
+    assert 'ROOT / "src/piton/assurance.py"' in verifier
+    assert 'ROOT / "tests/test_assurance_policy.py"' in verifier
     assert "validate_launch_worker_contract(PRECISION_WORKER_PIN, EXPECTED_OUTPUTS)" in verifier
 
 

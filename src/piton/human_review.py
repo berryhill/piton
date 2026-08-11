@@ -5,6 +5,7 @@ approval, export, fabrication release, or machine action.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from typing import Any, Sequence
@@ -184,3 +185,8 @@ class FrameworkPacketClosure:
     @property
     def canonical_bytes(self) -> bytes:
         return canonical_json_bytes(self.to_primitive())
+
+    @property
+    def closure_digest(self) -> str:
+        """Digest the complete closed assertion without a self-reference."""
+        return "sha256:" + hashlib.sha256(self.canonical_bytes).hexdigest()

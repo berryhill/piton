@@ -201,6 +201,51 @@ generation/fence/lease, exact B-rep/STEP, and review-only GLB/selection-map
 digests. Closure is not review acceptance, engineering approval, channel
 promotion, export, fabrication release, or machine actuation.
 
+### P3 governed-alpha and P4 assurance authority
+
+P3 admission is controlled by one closed `GovernedAlphaEvidence` record, not by
+free-form launch notes or worker success text. The record binds one project,
+derived revision, durable successful build attempt, `EvidenceClosure`,
+`FrameworkPacketClosure`, review packet, and four derivative identities. Its
+claim scopes are fixed: exact B-rep is `exact-realization`, STEP is
+`exact-exchange`, and the GLB and artifact-local selection map are each
+`review-only`. It also fixes `review_state=needs_human_review`,
+`fabrication_release=false`, `machine_actuation=false`,
+`release_state=unreleased`, and `channel_transition=false`. A P3 phase-exit
+receipt requires exactly one repository-native artifact containing that closed
+record, exact P2 predecessor ID/digest binding, completed execution, and an
+advance disposition. These checks validate a review-evidence candidate only.
+`P3ReviewEvidenceBundle` is caller-provided evidence, is not daemon custody, and
+cannot mint or confer successor authority even when every identity, digest, and
+packet byte is self-consistent.
+
+Trusted durable human authorization issuance and verification are not
+implemented in this Stage-1 slice. Every `Authority.HUMAN` advancement therefore
+fails closed with an explicit reason; caller-selected enums, records, verifier
+objects, database rows, and P3 evidence bundles are never authority. A later
+daemon-derived identity/admission task owns authenticated identity, durable
+issuance, custody, and verification. Until that task lands, P4 cannot be
+admitted from P3.
+
+P4 has a separate, source-native policy authority. `P4AssurancePolicy` freezes
+policy identity, ordered requirements, method/comparator digests, thresholds,
+named environments, and invalidation conditions before evaluation.
+`DEFAULT_P4_ASSURANCE_POLICY` is the only policy authority accepted by portfolio
+admission; a caller-supplied lookalike policy has no authority. One closed
+`P4AssuranceEvidence` record binds `policy_digest` and the exact ordered
+`evaluated_requirement_ids`. `validate_p4_evidence_policy_binding` recomputes the
+canonical default-policy digest and requires both bindings to match exactly.
+The evidence result is deliberately limited to `hold`, `rework`, `stop`, or
+`reject`; it cannot self-declare advancement. P4 remains a human judgment gate,
+and policy/evidence validity never implies review acceptance, approval, export,
+release, channel transition, or actuation.
+
+Admission and review stop on a missing/extra record or field; a schema,
+canonicalization, identity, predecessor, policy-digest, requirement-order, or
+claim-scope mismatch; any changed policy input without fresh evidence; any
+non-human judgment authority; or any root-truth escalation. No fallback policy,
+nearest identity, stale packet, or prior digest may be substituted.
+
 ## Stage 1 custody
 
 Git-friendly local directory of deterministic UTF-8 source/manifests and
