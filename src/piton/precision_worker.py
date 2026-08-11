@@ -346,6 +346,10 @@ def execute_precision_worker(
             artifacts=artifacts,
             diagnostics=(),
         )
+        destination = os.stat(request.attempt_id, dir_fd=parent_fd, follow_symlinks=False)
+        retained = os.fstat(attempt_fd)
+        if (destination.st_dev, destination.st_ino) != (retained.st_dev, retained.st_ino):
+            raise WorkerOutputCustodyError("published attempt destination changed before closure")
         return verify_precision_worker_result(
             request,
             result,
@@ -400,22 +404,40 @@ def verify_precision_worker_result(
         raise ValueError("result does not match its exact request bindings")
     if result.truth != request.truth:
         raise ValueError("result truth boundary does not match request")
+    if result.environment.get("network_isolation_proven", False) is not False:
+        raise ValueError("result overclaims network isolation")
+    if result.environment.get("credential_isolation_proven", False) is not False:
+        raise ValueError("result overclaims credential isolation")
     if result.status != "succeeded":
         if result.artifacts or result.expected_output_closure:
             raise ValueError("unsuccessful result claims output closure")
         return result
     if set(result.artifacts) != set(request.expected_outputs):
         raise ValueError("successful result does not close exactly the expected outputs")
+    expected_artifact_metadata = {
+        "exact_brep": (EXACT_BREP_NAME, "model/vnd.occt-brep", "exact_occt_brep_derived_realization"),
+        "step": (STEP_NAME, "model/step", "derived_exchange_representation"),
+        "inspection_receipt": (
+            RECEIPT_NAME,
+            "application/json",
+            "attempt_bound_exact_inspection_receipt",
+        ),
+    }
+    for role, artifact in result.artifacts.items():
+        expected_path, expected_media_type, expected_claim_scope = expected_artifact_metadata[role]
+        if (
+            artifact.relative_path != expected_path
+            or artifact.media_type != expected_media_type
+            or artifact.claim_scope != expected_claim_scope
+            or artifact.units != "mm"
+        ):
+            raise ValueError("artifact metadata does not match its exact role")
     if dict(result.toolchain) != {
         "python": EXPECTED_TOOLCHAIN["python"],
         "build123d": EXPECTED_TOOLCHAIN["build123d"],
         "cadquery-ocp-novtk": EXPECTED_TOOLCHAIN["cadquery-ocp-novtk"],
     }:
         raise ValueError("result toolchain does not match the pinned exact toolchain")
-    if result.environment.get("network_isolation_proven") is not False:
-        raise ValueError("result overclaims network isolation")
-    if result.environment.get("credential_isolation_proven") is not False:
-        raise ValueError("result overclaims credential isolation")
     root = output_directory
     if pinned_directory_fd is None:
         if root.is_symlink() or not root.is_dir():
@@ -453,6 +475,31 @@ def verify_precision_worker_result(
         if len(content) != artifact.byte_length or digest != artifact.digest:
             raise ValueError("artifact digest or byte length does not match successful result")
     receipt = json.loads(observed_bytes["inspection_receipt"])
+    if (
+        receipt.get("schema") != "piton.exact-realization-receipt.v1"
+        or receipt.get("status") != "succeeded"
+        or receipt.get("attempt_scope") != request.attempt_id
+        or receipt.get("artifacts") != {"exact_brep": EXACT_BREP_NAME, "step": STEP_NAME}
+        or receipt.get("claim_scopes")
+        != {
+            "exact_brep": "exact_occt_brep_derived_realization",
+            "step": "derived_exchange_representation",
+        }
+        or receipt.get("toolchain") != dict(result.toolchain)
+        or receipt.get("units") != "mm"
+    ):
+        raise ValueError("inspection receipt does not match exact output closure")
+    receipt_digests = receipt.get("artifact_digests", {})
+    for role in ("exact_brep", "step"):
+        observed_digest = "sha256:" + hashlib.sha256(observed_bytes[role]).hexdigest()
+        if receipt_digests.get(role) != observed_digest:
+            raise ValueError("inspection receipt artifact digest does not match output")
+    inspection = receipt.get("inspection", {})
+    topology_counts = inspection.get("topology_counts", {})
+    if inspection.get("valid") is not True or topology_counts.get("solids") != 1:
+        raise ValueError("inspection receipt does not prove one valid solid")
+    if not observed_bytes["step"].lstrip().startswith(b"ISO-10303-21;"):
+        raise ValueError("STEP artifact does not match its media type")
     if receipt["revision_id"] != request.revision_id:
         raise ValueError("inspection receipt revision does not match request")
     if receipt["isolation_class"] != "trusted-local":

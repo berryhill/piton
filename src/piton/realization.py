@@ -280,6 +280,16 @@ def realize_exact(
             os.replace(staging, attempt_directory)
             return receipt
         assert staging_name is not None and staging_fd is not None
+        for artifact_name in (EXACT_BREP_NAME, STEP_NAME, RECEIPT_NAME):
+            artifact_fd = os.open(
+                artifact_name,
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                dir_fd=staging_fd,
+            )
+            try:
+                os.fsync(artifact_fd)
+            finally:
+                os.close(artifact_fd)
         os.fsync(staging_fd)
         _rename_no_replace(parent_fd, staging_name, attempt_directory.name)
         os.fsync(parent_fd)

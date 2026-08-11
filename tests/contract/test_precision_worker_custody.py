@@ -163,6 +163,7 @@ def test_worker_keeps_published_inode_pinned_during_destination_swap(
     result = service.run_precision_worker(request)
 
     project = tmp_path / ".piton" / "build-attempts" / "project_one"
-    assert result.status == "succeeded"
+    assert result.status == "failed"
+    assert result.expected_output_closure is False
     assert (project / "relocated_attempt" / "part.step").is_file()
     assert list((project / "attempt_one").iterdir()) == []

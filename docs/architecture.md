@@ -112,9 +112,10 @@ execution.
 Attempt output custody walks `.piton/build-attempts/<project>/<attempt>` from the
 trusted control root with directory file descriptors and `O_NOFOLLOW`. A symlink
 or non-directory ancestor blocks before geometry and an existing attempt scope is
-never overwritten. Failure cleanup is relative to the already pinned project
-directory and only removes a positively identified real attempt directory; it
-never resolves an untrusted link into a cleanup target.
+never overwritten. Geometry is staged under the pinned project directory and
+published with atomic no-replace rename. Failed descriptor-relative staging is
+retained for later bounded quarantine/recovery; execution never performs
+pathname-based recursive cleanup that could delete an attacker-swapped entry.
 
 The worker module does not own repositories, clocks, request issuance, or output-root
 selection. It exposes bounded binding validation, realization, and result
