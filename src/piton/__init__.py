@@ -23,6 +23,7 @@ from .model import (
     TruthBoundary,
     validate_lifecycle,
 )
+from .human_review import HumanReviewIntake, HumanReviewIntakeError
 from .partner_alpha import (
     DEFAULT_PARTNER_SCAFFOLD_T002,
     PartnerAlphaReceipt,
@@ -75,6 +76,8 @@ __all__ = [
     "EvidenceClosure",
     "EvidenceSource",
     "ExternalEvidenceT002Receipt",
+    "HumanReviewIntake",
+    "HumanReviewIntakeError",
     "ExecutionStatus",
     "Phase",
     "PhaseExitReceipt",

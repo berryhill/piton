@@ -15,6 +15,7 @@ from typing import Callable, Mapping
 
 from ..evidence import EvidenceClosure, EvidenceClosureError, EvidenceRepository
 from ..feasibility import evaluate_exact_cad_feasibility
+from ..human_review import HumanReviewIntake, HumanReviewIntakeError
 from ..model import ChangeProposal, _derive_change_candidate
 from ..portfolio import (
     Authority,
@@ -36,7 +37,7 @@ from ..precision_worker import (
     verify_precision_worker_result,
 )
 from ..realization import RealizationInputs
-from ..review_packet import ReviewPacket, build_review_packet
+from ..review_packet import ReviewPacket, build_review_packet, validate_review_packet
 from ..revision import DesignRevision
 from ..source_tree import SourceTree, SourceTreeFile
 from ..storage.blobs import BlobStore
@@ -365,6 +366,44 @@ class PitonApplicationService:
             / closure.attempt_id
         )
         return build_review_packet(closure, result, artifact_root, output_directory)
+
+    def intake_human_review(
+        self, intake: HumanReviewIntake, packet_directory: str | Path
+    ) -> HumanReviewIntake:
+        """Admit identified review work without recording a review decision or effect."""
+        if not isinstance(intake, HumanReviewIntake):
+            raise TypeError("intake must be a HumanReviewIntake")
+        closure = self.__evidence_repository.get_closure(
+            intake.project_id, intake.evidence_closure_digest
+        )
+        packet = validate_review_packet(packet_directory)
+        bindings = (
+            ("project", intake.project_id, closure.project_id, packet.project_id),
+            ("revision", intake.revision_id, closure.revision_id, packet.revision_id),
+            ("attempt", intake.attempt_id, closure.attempt_id, packet.build_attempt_id),
+            (
+                "evidence closure",
+                intake.evidence_closure_digest,
+                closure.closure_digest,
+                packet.evidence_closure_digest,
+            ),
+        )
+        for label, asserted, custodied, packet_value in bindings:
+            if asserted != custodied or asserted != packet_value:
+                raise HumanReviewIntakeError(
+                    f"human-review intake {label} identity is not exact"
+                )
+        if intake.review_packet_digest != packet.packet_digest:
+            raise HumanReviewIntakeError("human-review intake packet digest is not exact")
+        if (
+            packet.truth.get("review_state") != "needs_human_review"
+            or packet.fabrication_release is not False
+            or packet.truth.get("machine_actuation") is not False
+        ):
+            raise HumanReviewIntakeError(
+                "human-review intake packet violates the root truth boundary"
+            )
+        return intake
 
     def issue_autonomous_p1_engineering_disposition(
         self,

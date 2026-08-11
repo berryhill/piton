@@ -11,6 +11,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from jsonschema import Draft202012Validator, ValidationError
+from piton.human_review import HumanReviewIntake
 from piton.implementation_loop import RetryErrorPacket
 from piton.launch_assets import (
     build_restore_forward,
@@ -38,6 +39,7 @@ REQUIRED = [
     ROOT / "src/piton/mesh_derivatives.py",
     ROOT / "src/piton/launch_verification.py",
     ROOT / "src/piton/review_packet.py",
+    ROOT / "src/piton/human_review.py",
     ROOT / "src/piton/viewer_assets/index.html",
     ROOT / "src/piton/viewer_assets/viewer.js",
     ROOT / "src/piton/viewer_assets/viewer.css",
@@ -52,6 +54,7 @@ REQUIRED = [
     ROOT / "tests/integration/test_evidence_closure.py",
     ROOT / "tests/test_mesh_derivatives.py",
     ROOT / "tests/test_review_packet.py",
+    ROOT / "tests/test_human_review_intake.py",
     ROOT / "flows/piton_implementation_loop_v1.json",
     ROOT / "schemas/retry-error-packet-v1.schema.json",
     ROOT / "schemas/design-revision-v1.schema.json",
@@ -60,10 +63,12 @@ REQUIRED = [
     ROOT / "schemas/restore-forward-request-v1.schema.json",
     ROOT / "schemas/review-packet-v1.schema.json",
     ROOT / "schemas/semantic-selection-map-v1.schema.json",
+    ROOT / "schemas/human-review-intake-v1.schema.json",
     ROOT / "src/piton/schemas/review-export-receipt-v1.schema.json",
     ROOT / "src/piton/schemas/restore-forward-request-v1.schema.json",
     ROOT / "src/piton/schemas/review-packet-v1.schema.json",
     ROOT / "src/piton/schemas/semantic-selection-map-v1.schema.json",
+    ROOT / "src/piton/schemas/human-review-intake-v1.schema.json",
     ROOT / "scripts/review_export.py",
     ROOT / "scripts/restore_forward.py",
     ROOT / "scripts/build_part.py",
@@ -92,6 +97,7 @@ for schema_name in (
     "restore-forward-request-v1.schema.json",
     "review-packet-v1.schema.json",
     "semantic-selection-map-v1.schema.json",
+    "human-review-intake-v1.schema.json",
 ):
     repository_schema = (ROOT / "schemas" / schema_name).read_bytes()
     packaged_schema = (ROOT / "src" / "piton" / "schemas" / schema_name).read_bytes()
@@ -160,6 +166,9 @@ for required_instruction in (
     "packet file inventory",
     "disconnected browser",
     "visible loaded state",
+    "Admit framework-only human-review work",
+    "intake_human_review",
+    "non-persistent",
 ):
     if required_instruction not in review_instructions:
         raise SystemExit("human review instructions omit evidence-closure custody")
@@ -178,7 +187,18 @@ review_export_validator = load_validator("review-export-receipt-v1.schema.json")
 restore_forward_validator = load_validator("restore-forward-request-v1.schema.json")
 load_validator("review-packet-v1.schema.json")
 load_validator("semantic-selection-map-v1.schema.json")
+human_review_intake_validator = load_validator("human-review-intake-v1.schema.json")
 digest = "sha256:" + "0" * 64
+human_review_intake = HumanReviewIntake(
+    intake_id="verify-intake",
+    project_id="verify-project",
+    revision_id="rev_" + "0" * 64,
+    attempt_id="verify-attempt",
+    evidence_closure_digest=digest,
+    review_packet_digest=digest,
+    review_scope=("Verify exact review identity",),
+)
+human_review_intake_validator.validate(human_review_intake.to_primitive())
 revision = DesignRevision(
     parent_revision_id=None,
     source_manifest_digest=digest,

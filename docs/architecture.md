@@ -167,6 +167,25 @@ claim scopes, environment, units, tolerances, warnings, uncertainty, and root
 truths. Evidence closure remains review preparation only: it is not human
 acceptance, approval, export, fabrication release, or machine actuation.
 
+### Framework-only human-review intake
+
+`HumanReviewIntake` is an immutable, public Python contract whose canonical
+primitive is validated by the packaged `piton.human-review-intake.v1` JSON
+schema. `PitonApplicationService.intake_human_review(intake,
+packet_directory)` admits review work only after rebinding the intake's exact
+project, revision, build-attempt, evidence-closure, and review-packet
+identities to daemon-custodied closure state and independently validated
+packet bytes. There is no `latest`, channel, filename, nearest-face, or other
+fallback identity.
+
+The method is intentionally read-only and non-persistent: it returns the same
+frozen intake after validation and writes no revision, channel, attempt,
+closure, receipt, review disposition, approval, export, release, or machine
+state. An admitted intake therefore remains
+`review_state=needs_human_review`, `fabrication_release=false`, and
+`machine_actuation=false`; admission is not a human decision or lifecycle
+transition.
+
 ## Stage 1 custody
 
 Git-friendly local directory of deterministic UTF-8 source/manifests and
