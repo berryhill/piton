@@ -569,3 +569,12 @@ def test_installed_launch_asset_surface_has_runtime_dependency_and_packaged_sche
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "uv pip install --python /tmp/piton-wheel-venv/bin/python dist/*.whl" in ci
     assert "--no-deps dist/*.whl" not in ci
+
+
+def test_ci_provisions_the_required_precision_worker_sandbox_before_tests():
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    install = "sudo apt-get install --yes --no-install-recommends bubblewrap"
+    test = "uv run --frozen python -m pytest -q"
+    assert install in ci
+    assert ci.index(install) < ci.index(test)
