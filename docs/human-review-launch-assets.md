@@ -389,11 +389,16 @@ must be replaced from the exact custodied records.
 `P3ReviewEvidenceBundle` is intentionally caller-provided review evidence, not
 trusted daemon custody. Its deep identity, digest, and packet checks are useful
 for review but cannot confer successor authority. Trusted durable human
-authorization is unavailable in this Stage-1 slice; a later daemon-derived
-identity/admission task owns authenticated identity, durable issuance, custody,
-and verification. The standalone `verify_portfolio_admission.py` command and
-application service therefore cannot turn serialized human/P3 claims, database
-rows, or caller objects into authority.
+authorization is unavailable in this Stage-1 slice. The implemented Linux-local
+`LocalDaemonCommandAdapter` derives a connected AF_UNIX peer UID from
+kernel-owned `SO_PEERCRED`, resolves only server-mapped UIDs, and admits closed
+typed commands. Reviewers must not treat that transport identity as durable
+human-authorization issuance, custody, verification, approval, release, or
+machine authority. Unknown UIDs, unavailable peer credentials, extra envelope
+or payload fields, and unsupported commands fail closed. The standalone
+`verify_portfolio_admission.py` command and application service therefore cannot
+turn serialized human/P3 claims, database rows, caller objects, or local peer
+identity into human authority.
 
 The P4 result vocabulary is intentionally fail-closed and cannot self-declare
 advancement. `P4AssurancePolicy`, `P4AssuranceEvidence`, schema validity, a
