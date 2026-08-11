@@ -154,9 +154,11 @@ class PitonApplicationService:
         self.__repository = RevisionRepository(database, blobs)
         self.__mutation_capability = _issue_server_mutation_capability()
         self.__build_attempt_coordinator = BuildAttemptCoordinator(database)
-        self.__evidence_repository = EvidenceRepository(database)
         self.__precision_inputs = precision_inputs
         self.__precision_clock = precision_clock or (lambda: datetime.now(UTC))
+        self.__evidence_repository = EvidenceRepository(
+            database, trusted_clock=self.__precision_clock
+        )
         self.__precision_control_root = blobs.control_root
 
     @classmethod

@@ -11,8 +11,9 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from types import MappingProxyType
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from .storage.build_attempts import CoordinatorState, DurableBuildAttempt
 from .storage.db import Database
@@ -519,10 +520,27 @@ class EvidenceClosure:
 class EvidenceRepository:
     """Append-only evidence records behind one daemon-owned Database boundary."""
 
-    def __init__(self, database: Database) -> None:
+    def __init__(
+        self, database: Database, *, trusted_clock: Callable[[], datetime] | None = None
+    ) -> None:
         if not isinstance(database, Database):
             raise TypeError("database must be a Database")
+        if trusted_clock is not None and not callable(trusted_clock):
+            raise TypeError("trusted_clock must be callable")
         self._database = database
+        self._trusted_clock = trusted_clock or (lambda: datetime.now(UTC))
+
+    @staticmethod
+    def _lease_expiry(value: str) -> datetime:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise EvidenceClosureError(
+                "current coordinator lease expiry is not an ISO-8601 timestamp"
+            ) from error
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise EvidenceClosureError("current coordinator lease expiry has no timezone")
+        return parsed.astimezone(UTC)
 
     def declare(self, attempt: DurableBuildAttempt) -> EvidenceCheckDeclaration:
         declaration = EvidenceCheckDeclaration.for_attempt(
@@ -726,8 +744,18 @@ class EvidenceRepository:
             raise EvidenceClosureError(
                 "required check failed; no EvidenceClosure published"
             )
-        now = state.updated_at
         with self._database.immediate() as connection:
+            transaction_now = self._trusted_clock()
+            if (
+                not isinstance(transaction_now, datetime)
+                or transaction_now.tzinfo is None
+                or transaction_now.utcoffset() is None
+            ):
+                raise EvidenceClosureError(
+                    "trusted transaction clock must return a timezone-aware datetime"
+                )
+            transaction_now = transaction_now.astimezone(UTC)
+            now = transaction_now.isoformat(timespec="microseconds").replace("+00:00", "Z")
             existing = connection.execute(
                 "SELECT closure_digest, canonical_json, worker_result_digest FROM evidence_closures "
                 "WHERE attempt_id=?",
@@ -745,7 +773,8 @@ class EvidenceRepository:
                 return closure
             current = connection.execute(
                 "SELECT attempt.project_id,attempt.revision_id,state.state,state.generation,state.fence,"
-                "state.lease_id FROM build_attempts AS attempt JOIN build_coordinator_state AS state "
+                "state.lease_id,state.lease_expires_at FROM build_attempts AS attempt "
+                "JOIN build_coordinator_state AS state "
                 "ON state.attempt_id=attempt.attempt_id WHERE attempt.attempt_id=?",
                 (attempt.attempt_id,),
             ).fetchone()
@@ -756,10 +785,17 @@ class EvidenceRepository:
                 state.generation,
                 state.fence,
                 state.lease_id,
+                state.lease_expires_at,
             )
             if current is None or tuple(current) != expected:
                 raise EvidenceClosureError(
                     "current daemon custody changed before closure transaction"
+                )
+            if current["lease_expires_at"] is None or self._lease_expiry(
+                current["lease_expires_at"]
+            ) <= transaction_now:
+                raise EvidenceClosureError(
+                    "current coordinator lease expired before closure transaction"
                 )
             connection.execute(
                 "INSERT INTO evidence_closures(closure_digest,project_id,revision_id,attempt_id,"

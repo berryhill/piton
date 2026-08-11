@@ -33,12 +33,13 @@ ROOT = Path(__file__).resolve().parents[2]
 DIGEST = "sha256:" + "7" * 64
 
 
-def prepared(tmp_path: Path):
+def prepared(tmp_path: Path, *, precision_clock=None):
     inputs = RealizationInputs.from_repository(ROOT, DEFAULT_PARAMETERS)
     service = PitonApplicationService.open(
         tmp_path,
         precision_inputs=lambda project_id, revision_id, manifest_digest: inputs,
-        precision_clock=lambda: datetime(2026, 8, 10, 0, 30, tzinfo=UTC),
+        precision_clock=precision_clock
+        or (lambda: datetime(2026, 8, 10, 0, 30, tzinfo=UTC)),
     )
     database = Database(tmp_path / ".piton" / "piton.sqlite3")
     now = "2026-08-10T00:00:00Z"
@@ -204,6 +205,48 @@ def test_stale_or_failed_result_publishes_no_closure_and_retains_declaration(
             ).fetchone()[0]
             == "running"
         )
+
+
+def test_lease_expiry_during_checks_publishes_no_evidence_or_state_change(
+    tmp_path: Path,
+) -> None:
+    clock_calls = 0
+
+    def clock() -> datetime:
+        nonlocal clock_calls
+        clock_calls += 1
+        if clock_calls <= 3:
+            return datetime(2026, 8, 10, 0, 30, tzinfo=UTC)
+        return datetime(2026, 8, 10, 1, 0, tzinfo=UTC)
+
+    service, database, inputs = prepared(tmp_path, precision_clock=clock)
+    request = service.issue_precision_worker_request("project_one", "attempt_one")
+    result = service.run_precision_worker(request)
+
+    with pytest.raises(EvidenceClosureError, match="lease.*expired"):
+        service.close_precision_worker_evidence(request, result)
+
+    with database.read() as connection:
+        assert connection.execute("SELECT count(*) FROM evidence_closures").fetchone()[0] == 0
+        assert (
+            connection.execute("SELECT count(*) FROM evidence_check_receipts").fetchone()[0]
+            == 0
+        )
+        assert (
+            connection.execute("SELECT count(*) FROM evidence_closure_artifacts").fetchone()[0]
+            == 0
+        )
+        assert connection.execute("SELECT count(*) FROM artifacts").fetchone()[0] == 2
+        assert tuple(
+            connection.execute(
+                "SELECT state,lease_id,lease_expires_at FROM build_coordinator_state "
+                "WHERE attempt_id='attempt_one'"
+            ).fetchone()
+        ) == ("running", "lease_one", "2026-08-10T01:00:00Z")
+        channels = connection.execute(
+            "SELECT revision_id,generation FROM channel_pointers"
+        ).fetchall()
+    assert all(tuple(row) == (inputs.revision.revision_id, 0) for row in channels)
 
 
 def test_closure_transaction_failure_rolls_back_all_metadata_and_preserves_channels(
