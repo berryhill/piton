@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "piton.review-packet.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "project_id", "revision_id", "build_attempt_id", "worker_pin", "evidence_closure_digest", "worker_result_digest", "declaration_digest", "generation", "fence", "lease_id", "artifacts", "receipt_digests", "semantic_selection_map", "source_parameters", "exact_geometry", "review_geometry", "build_plane", "validation_issues", "viewer", "truth", "packet_digest"],
+  "properties": {
+    "schema": {"const": "piton.review-packet.v1"},
+    "project_id": {"type": "string", "minLength": 1},
+    "revision_id": {"type": "string", "minLength": 1},
+    "build_attempt_id": {"type": "string", "minLength": 1},
+    "worker_pin": {"type": "string", "minLength": 1},
+    "evidence_closure_digest": {"$ref": "#/$defs/digest"},
+    "worker_result_digest": {"$ref": "#/$defs/digest"},
+    "declaration_digest": {"$ref": "#/$defs/digest"},
+    "generation": {"type": "integer", "minimum": 0},
+    "fence": {"type": "integer", "minimum": 0},
+    "lease_id": {"type": "string", "minLength": 1},
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exact_brep", "step", "inspection_receipt", "review_glb", "review_selection_map", "review_glb_receipt", "review_selection_map_receipt"],
+      "properties": {
+        "exact_brep": {"$ref": "#/$defs/artifact"},
+        "step": {"$ref": "#/$defs/artifact"},
+        "inspection_receipt": {"$ref": "#/$defs/artifact"},
+        "review_glb": {"$ref": "#/$defs/artifact"},
+        "review_selection_map": {"$ref": "#/$defs/artifact"},
+        "review_glb_receipt": {"$ref": "#/$defs/artifact"},
+        "review_selection_map_receipt": {"$ref": "#/$defs/artifact"}
+      }
+    },
+    "receipt_digests": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/digest"}},
+    "semantic_selection_map": {
+      "type": "object", "additionalProperties": false,
+      "required": ["digest", "byte_length", "path", "glb_digest"],
+      "properties": {
+        "digest": {"$ref": "#/$defs/digest"}, "byte_length": {"type": "integer", "minimum": 1},
+        "path": {"const": "semantic-selection-map.json"}, "glb_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "source_parameters": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}},
+    "exact_geometry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["representation", "bounding_box_mm", "z_min_mm"],
+      "properties": {"representation": {"const": "OCCT BREP"}, "bounding_box_mm": {"$ref": "#/$defs/bounds"}, "z_min_mm": {"type": "number"}}
+    },
+    "review_geometry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["representation", "claim_scope", "bounding_box_mm", "mesh_measurements"],
+      "properties": {"representation": {"const": "GLB review mesh"}, "claim_scope": {"const": "review-only"}, "bounding_box_mm": {"$ref": "#/$defs/bounds"}, "mesh_measurements": {"const": "review-only"}}
+    },
+    "build_plane": {
+      "type": "object", "additionalProperties": false,
+      "required": ["exact_brep_z_min_mm", "review_z_min_mm", "artifact_to_cad_translation_mm", "artifact_to_world_mapping", "world_grid_axis", "tolerance_mm", "translated_review_floor_is_exact_coordinate"],
+      "properties": {
+        "exact_brep_z_min_mm": {"type": "number"}, "review_z_min_mm": {"const": 0.0},
+        "artifact_to_cad_translation_mm": {"$ref": "#/$defs/vector3"},
+        "artifact_to_world_mapping": {"const": "[x,y,z] -> [x,z,-y]"}, "world_grid_axis": {"const": "Y=0"},
+        "tolerance_mm": {"type": "number", "exclusiveMinimum": 0},
+        "translated_review_floor_is_exact_coordinate": {"const": false}
+      }
+    },
+    "validation_issues": {
+      "type": "array", "minItems": 1,
+      "items": {"type": "object", "additionalProperties": false, "required": ["status", "message"], "properties": {"status": {"enum": ["pass", "warning", "blocked"]}, "message": {"type": "string", "minLength": 1}}}
+    },
+    "viewer": {
+      "type": "object", "additionalProperties": false,
+      "required": ["entrypoint", "frontend_dependencies", "asset_digests", "capabilities"],
+      "properties": {
+        "entrypoint": {"const": "index.html"}, "frontend_dependencies": {"const": []},
+        "asset_digests": {
+          "type": "object", "additionalProperties": false,
+          "required": ["viewer.js", "viewer.css", "THIRD_PARTY_NOTICES.txt"],
+          "properties": {"viewer.js": {"$ref": "#/$defs/digest"}, "viewer.css": {"$ref": "#/$defs/digest"}, "THIRD_PARTY_NOTICES.txt": {"$ref": "#/$defs/digest"}}
+        },
+        "capabilities": {"const": "read-only review presentation; no authored or lifecycle mutation"}
+      }
+    },
+    "truth": {"$ref": "#/$defs/truth"},
+    "packet_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "artifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["relative_path", "digest", "byte_length", "media_type", "claim_scope", "units", "packet_path"],
+      "properties": {
+        "relative_path": {"type": "string", "minLength": 1}, "digest": {"$ref": "#/$defs/digest"},
+        "byte_length": {"type": "integer", "minimum": 1}, "media_type": {"type": "string", "minLength": 1},
+        "claim_scope": {"type": "string", "minLength": 1}, "units": {"type": "string", "minLength": 1},
+        "packet_path": {"type": "string", "pattern": "^artifacts/[A-Za-z0-9._-]+$"}
+      }
+    },
+    "vector3": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}},
+    "bounds": {
+      "type": "object", "additionalProperties": false, "required": ["min", "max", "size"],
+      "properties": {"min": {"$ref": "#/$defs/vector3"}, "max": {"$ref": "#/$defs/vector3"}, "size": {"$ref": "#/$defs/vector3"}}
+    },
+    "truth": {
+      "type": "object", "additionalProperties": false,
+      "required": ["review_state", "fabrication_release", "machine_actuation", "release_state", "channel_transition"],
+      "properties": {"review_state": {"const": "needs_human_review"}, "fabrication_release": {"const": false}, "machine_actuation": {"const": false}, "release_state": {"const": "unreleased"}, "channel_transition": {"const": false}}
+    }
+  }
+}

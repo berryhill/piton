@@ -12,12 +12,14 @@ import os
 import shutil
 import tempfile
 from dataclasses import dataclass
+from importlib.resources import files
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from jsonschema import Draft202012Validator, ValidationError
+
 from .evidence import EvidenceClosure
-from .mesh_derivatives import read_glb
 from .worker_contracts import PrecisionWorkerResult, canonical_json_bytes
 
 EXPECTED_ROLES = frozenset(
@@ -54,6 +56,25 @@ _PACKET_FILES = {
 
 class ReviewPacketError(RuntimeError):
     """Packet admission, assembly, or readback failed closed."""
+
+
+def _schema_validator(schema_name: str) -> Draft202012Validator:
+    schema = json.loads(files("piton").joinpath("schemas", schema_name).read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema)
+
+
+def _validate_contract(value: Mapping[str, Any], schema_name: str, label: str) -> None:
+    try:
+        _schema_validator(schema_name).validate(value)
+    except ValidationError as error:
+        if (
+            label == "review packet"
+            and error.absolute_path
+            and error.absolute_path[0] == "viewer"
+        ):
+            label = "review packet viewer metadata"
+        raise ReviewPacketError(f"{label} violates its closed schema") from error
 
 
 def _digest_bytes(content: bytes) -> str:
@@ -177,6 +198,7 @@ class ReviewPacket:
 
     @classmethod
     def from_primitive(cls, value: Mapping[str, Any]) -> "ReviewPacket":
+        _validate_contract(value, "review-packet-v1.schema.json", "review packet")
         required = {
             "schema", "project_id", "revision_id", "build_attempt_id", "worker_pin",
             "evidence_closure_digest", "worker_result_digest", "declaration_digest",
@@ -294,6 +316,8 @@ def _admit(
     glb_receipt = _json_bytes(contents["review_glb_receipt"], "GLB receipt")
     selection_receipt = _json_bytes(contents["review_selection_map_receipt"], "selection-map receipt")
     original_selection = _json_bytes(contents["review_selection_map"], "worker selection map")
+    from .mesh_derivatives import read_glb
+
     with tempfile.NamedTemporaryFile(suffix=".glb") as verified_glb:
         verified_glb.write(contents["review_glb"])
         verified_glb.flush()
@@ -461,6 +485,26 @@ def validate_review_packet(packet_directory: str | Path) -> ReviewPacket:
     packet = ReviewPacket.from_primitive(packet_value)
     if _safe_artifact_bytes(root, "review-packet.json") != packet.canonical_bytes:
         raise ReviewPacketError("review packet bytes are not canonical")
+    packet_paths = {
+        role: record.get("packet_path") for role, record in packet.artifacts.items()
+    }
+    if (
+        packet_paths != _PACKET_FILES
+        or len(set(packet_paths.values())) != len(EXPECTED_ROLES)
+    ):
+        raise ReviewPacketError("review packet artifact path inventory is not closed")
+    expected_files = {
+        "review-packet.json",
+        "semantic-selection-map.json",
+        "index.html",
+        *_VIEWER_ASSET_NAMES,
+        *packet_paths.values(),
+    }
+    actual_files = {
+        path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()
+    }
+    if actual_files != expected_files:
+        raise ReviewPacketError("review packet file inventory is not exact")
     for role, record in packet.artifacts.items():
         content = _safe_artifact_bytes(root, record["packet_path"])
         if _digest_bytes(content) != record["digest"] or len(content) != record["byte_length"]:
@@ -472,9 +516,17 @@ def validate_review_packet(packet_directory: str | Path) -> ReviewPacket:
     ):
         raise ReviewPacketError("semantic selection map digest or byte length mismatch")
     semantic = _json_bytes(semantic_bytes, "semantic selection map")
+    _validate_contract(
+        semantic, "semantic-selection-map-v1.schema.json", "semantic selection map"
+    )
     if semantic_bytes != canonical_json_bytes(semantic):
         raise ReviewPacketError("semantic selection map bytes are not canonical")
     bindings = semantic.get("bindings")
+    if (
+        semantic.get("source_selection_map_digest")
+        != packet.artifacts["review_selection_map"]["digest"]
+    ):
+        raise ReviewPacketError("semantic source selection map digest is cross-artifact")
     if (
         semantic.get("revision_id") != packet.revision_id
         or semantic.get("build_attempt_id") != packet.build_attempt_id

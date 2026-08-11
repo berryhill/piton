@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator, ValidationError
 
 from piton import review_packet as review_packet_module
 from piton.review_packet import ReviewPacketError, build_review_packet, validate_review_packet
@@ -235,3 +236,70 @@ def test_self_consistent_viewer_entrypoint_path_rewrite_is_rejected(tmp_path: Pa
 
     with pytest.raises(ReviewPacketError, match="viewer metadata"):
         validate_review_packet(packet_root)
+
+
+def test_repository_schemas_close_packet_and_semantic_map_contracts(tmp_path: Path) -> None:
+    _, closure, result, root = _closed(tmp_path)
+    packet_root = tmp_path / "packet"
+    build_review_packet(closure, result, root, packet_root)
+
+    repository_root = Path(__file__).resolve().parents[1]
+    packet_schema = json.loads(
+        (repository_root / "schemas" / "review-packet-v1.schema.json").read_text(encoding="utf-8")
+    )
+    semantic_schema = json.loads(
+        (repository_root / "schemas" / "semantic-selection-map-v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    packet_validator = Draft202012Validator(packet_schema)
+    semantic_validator = Draft202012Validator(semantic_schema)
+    packet_value = json.loads((packet_root / "review-packet.json").read_bytes())
+    semantic_value = json.loads((packet_root / "semantic-selection-map.json").read_bytes())
+
+    packet_validator.validate(packet_value)
+    semantic_validator.validate(semantic_value)
+    with pytest.raises(ValidationError):
+        packet_validator.validate({**packet_value, "caller_minted_release": True})
+    with pytest.raises(ValidationError):
+        semantic_validator.validate({**semantic_value, "nearest_face_fallback": True})
+
+
+def test_readback_rejects_extra_packet_files_and_cross_document_digest_drift(
+    tmp_path: Path,
+) -> None:
+    _, closure, result, root = _closed(tmp_path)
+    extra_root = tmp_path / "packet-extra"
+    build_review_packet(closure, result, root, extra_root)
+    (extra_root / "unexpected.txt").write_text("not admitted", encoding="utf-8")
+    with pytest.raises(ReviewPacketError, match="file inventory"):
+        validate_review_packet(extra_root)
+
+    drift_root = tmp_path / "packet-drift"
+    build_review_packet(closure, result, root, drift_root)
+    semantic_path = drift_root / "semantic-selection-map.json"
+    semantic = json.loads(semantic_path.read_bytes())
+    semantic["source_selection_map_digest"] = "sha256:" + "0" * 64
+    semantic_bytes = review_packet_module.canonical_json_bytes(semantic)
+    semantic_path.write_bytes(semantic_bytes)
+
+    packet_path = drift_root / "review-packet.json"
+    packet_value = json.loads(packet_path.read_bytes())
+    packet_value["semantic_selection_map"]["digest"] = review_packet_module._digest_bytes(
+        semantic_bytes
+    )
+    packet_value["semantic_selection_map"]["byte_length"] = len(semantic_bytes)
+    packet_value["packet_digest"] = review_packet_module._digest_value(
+        {key: value for key, value in packet_value.items() if key != "packet_digest"}
+    )
+    packet = review_packet_module.ReviewPacket.from_primitive(packet_value)
+    packet_path.write_bytes(packet.canonical_bytes)
+    glb_bytes = (drift_root / packet.artifacts["review_glb"]["packet_path"]).read_bytes()
+    (drift_root / "index.html").write_bytes(
+        review_packet_module._render_viewer_entrypoint(
+            packet.canonical_bytes, semantic_bytes, glb_bytes
+        )
+    )
+
+    with pytest.raises(ReviewPacketError, match="source selection map"):
+        validate_review_packet(drift_root)

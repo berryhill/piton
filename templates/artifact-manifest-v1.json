@@ -138,6 +138,38 @@
       "identity_scope": "artifact-local; no durable topology identity; no nearest fallback"
     }
   },
+  "review_packet_evidence": {
+    "verification_state": "template_incomplete_unverified",
+    "packet_schema": "piton.review-packet.v1",
+    "packet_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "semantic_map_schema": "piton.semantic-selection-map.v1",
+    "semantic_map_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "semantic_map_byte_length": null,
+    "semantic_map_glb_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "identity_scope": "artifact-local; no durable topology identity; no nearest fallback",
+    "packet_file_inventory_verified": false,
+    "viewer_entrypoint": "index.html",
+    "viewer_asset_digests": {
+      "viewer.js": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "viewer.css": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "THIRD_PARTY_NOTICES.txt": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "disconnected_load_evidence": {
+      "default_src_none": false,
+      "connect_src_none": false,
+      "network_requests_observed": null,
+      "evidence_ref": "REPLACE_WITH_DISCONNECTED_BROWSER_EVIDENCE"
+    },
+    "viewer_loaded_state": {
+      "exact_revision_and_attempt_visible": false,
+      "packet_digest_visible": false,
+      "source_parameter_zones_loaded": false,
+      "selected_zone_callouts_verified": false,
+      "bbox_and_build_volume_visible": false,
+      "review_disclosures_visible": false,
+      "evidence_ref": "REPLACE_WITH_VIEWER_LOADED_STATE_EVIDENCE"
+    }
+  },
   "build_plane_evidence": {
     "exact_brep_z_min_mm": null,
     "review_glb_z_min_mm": null,

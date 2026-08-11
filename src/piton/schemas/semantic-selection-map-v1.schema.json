@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "piton.semantic-selection-map.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "revision_id", "build_attempt_id", "glb_digest", "source_selection_map_digest", "identity_scope", "selection_policy", "bindings"],
+  "properties": {
+    "schema": {"const": "piton.semantic-selection-map.v1"},
+    "revision_id": {"type": "string", "minLength": 1},
+    "build_attempt_id": {"type": "string", "minLength": 1},
+    "glb_digest": {"$ref": "#/$defs/digest"},
+    "source_selection_map_digest": {"$ref": "#/$defs/digest"},
+    "identity_scope": {"const": "artifact-local; no durable topology identity; no nearest fallback"},
+    "selection_policy": {"const": "exact declared primitive/triangle range only; ambiguity blocks"},
+    "bindings": {
+      "type": "array", "minItems": 1, "maxItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["semantic_id", "primitive", "triangle_start", "triangle_count", "semantic_entity_id", "source_part_id", "occurrence_id", "zones"],
+        "properties": {
+          "semantic_id": {"const": "part:l_bracket"}, "primitive": {"const": 0}, "triangle_start": {"const": 0},
+          "triangle_count": {"type": "integer", "minimum": 1}, "semantic_entity_id": {"const": "part:l_bracket"},
+          "source_part_id": {"const": "part:l_bracket"}, "occurrence_id": {"const": "occurrence:l_bracket:1"},
+          "zones": {
+            "type": "array", "minItems": 1,
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["zone_id", "label", "parameter_id"],
+              "properties": {"zone_id": {"type": "string", "pattern": "^parameter:.+$"}, "label": {"type": "string", "minLength": 1}, "parameter_id": {"type": "string", "minLength": 1}}
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {"digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}
+}

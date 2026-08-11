@@ -121,6 +121,61 @@ release fabrication, or actuate machinery. Preserve
 `machine_actuation=false`, `channel_transition=false`, and
 `release_state=unreleased` regardless of check or closure success.
 
+### Assemble and validate the offline review packet
+
+Packet assembly is a projection over one project-scoped, immutable
+`EvidenceClosure` and its exact successful `PrecisionWorkerResult`. It does not
+run source, mutate the accepted revision, move a channel, or create approval or
+release authority.
+
+1. Use the daemon-custodied application service to read the closure by exact
+   `project_id` and `closure_digest`, then assemble to a new destination. Never
+   select a closure by `latest`, channel, filename, or nearest identity:
+
+   ```python
+   packet = service.build_precision_review_packet(
+       project_id,
+       closure_digest,
+       exact_worker_result,
+       "/tmp/piton-review-packet",
+   )
+   ```
+
+2. Independently read back every packet-local binding before opening the viewer:
+
+   ```python
+   from piton.review_packet import validate_review_packet
+
+   verified = validate_review_packet("/tmp/piton-review-packet")
+   assert verified.packet_digest == packet.packet_digest
+   assert verified.truth == {
+       "review_state": "needs_human_review",
+       "fabrication_release": False,
+       "machine_actuation": False,
+       "release_state": "unreleased",
+       "channel_transition": False,
+   }
+   ```
+
+3. Require exactly this packet file inventory: `review-packet.json`,
+   `semantic-selection-map.json`, `index.html`, `viewer.js`, `viewer.css`,
+   `THIRD_PARTY_NOTICES.txt`, and the seven files under `artifacts/` named by the
+   packet. The packet and semantic map must validate against
+   `piton.review-packet.v1` and `piton.semantic-selection-map.v1`; extra fields,
+   missing roles, digest/length drift, ambiguous bindings, and nearest-face
+   fallbacks block review.
+4. Open the local `index.html` directly in a disconnected browser. Do not serve
+   it from a network origin and do not add dependencies. Confirm the CSP retains
+   `default-src 'none'` and `connect-src 'none'`, the visible loaded state names
+   the exact revision/build/packet identities, all source-parameter zones are
+   available, selected-zone callouts/highlights work, bbox and build-volume
+   context render, and reset/roll/view controls remain available.
+5. Record the viewer-asset digests, notices digest, semantic-map custody,
+   disconnected/CSP result, and visible loaded-state result in the artifact
+   manifest and evidence record. A viewer load is review evidence only; it is
+   not review acceptance, exact-geometry proof, approval, export, fabrication
+   release, or machine actuation.
+
 ## Restore-forward request (no rollback mutation)
 
 1. Preserve the accepted project and history byte-for-byte. Prepare the desired prior design as a new canonical candidate directory with truthful source digests.
