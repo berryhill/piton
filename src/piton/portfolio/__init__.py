@@ -15,6 +15,12 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, ClassVar, Literal, Mapping, Sequence
 
+from ..assurance import (
+    DEFAULT_P4_ASSURANCE_POLICY,
+    GovernedAlphaEvidence,
+    P4AssuranceEvidence,
+    validate_p4_evidence_policy_binding,
+)
 from ..model import _require_digest, _require_identifier
 
 
@@ -516,6 +522,29 @@ def _authorization_reasons(
         reasons.append("at least one repository-native evidence artifact is required")
     for artifact in evidence:
         reasons.extend(artifact.validation_reasons())
+    if phase is Phase.P3:
+        if len(evidence) != 1:
+            reasons.append("P3 requires exactly one governed-alpha evidence artifact")
+        else:
+            try:
+                GovernedAlphaEvidence.from_primitive(evidence[0].content)
+            except (KeyError, TypeError, ValueError) as exc:
+                reasons.append(f"P3 governed-alpha evidence is invalid: {exc}")
+    if phase is Phase.P4:
+        if len(evidence) != 1:
+            reasons.append("P4 requires exactly one policy-bound assurance evidence artifact")
+        else:
+            try:
+                assurance_evidence = P4AssuranceEvidence.from_primitive(evidence[0].content)
+            except (KeyError, TypeError, ValueError) as exc:
+                reasons.append(f"P4 policy-bound assurance evidence is invalid: {exc}")
+            else:
+                reasons.extend(
+                    validate_p4_evidence_policy_binding(
+                        DEFAULT_P4_ASSURANCE_POLICY,
+                        assurance_evidence,
+                    )
+                )
     if phase is Phase.P0:
         if predecessor_receipt_id is not None or predecessor_receipt_digest is not None:
             reasons.append("P0 must not claim a predecessor")

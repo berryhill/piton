@@ -68,6 +68,12 @@ REQUIRED = [
     ROOT / "schemas/semantic-selection-map-v1.schema.json",
     ROOT / "schemas/human-review-intake-v1.schema.json",
     ROOT / "schemas/framework-packet-closure-v1.schema.json",
+    ROOT / "schemas/governed-alpha-evidence-v1.schema.json",
+    ROOT / "schemas/p4-assurance-policy-v1.schema.json",
+    ROOT / "schemas/p4-assurance-evidence-v1.schema.json",
+    ROOT / "src/piton/schemas/governed-alpha-evidence-v1.schema.json",
+    ROOT / "src/piton/schemas/p4-assurance-policy-v1.schema.json",
+    ROOT / "src/piton/schemas/p4-assurance-evidence-v1.schema.json",
     ROOT / "src/piton/schemas/review-export-receipt-v1.schema.json",
     ROOT / "src/piton/schemas/restore-forward-request-v1.schema.json",
     ROOT / "src/piton/schemas/review-packet-v1.schema.json",
@@ -106,6 +112,9 @@ for schema_name in (
     "semantic-selection-map-v1.schema.json",
     "human-review-intake-v1.schema.json",
     "framework-packet-closure-v1.schema.json",
+    "governed-alpha-evidence-v1.schema.json",
+    "p4-assurance-policy-v1.schema.json",
+    "p4-assurance-evidence-v1.schema.json",
 ):
     repository_schema = (ROOT / "schemas" / schema_name).read_bytes()
     packaged_schema = (ROOT / "src" / "piton" / "schemas" / schema_name).read_bytes()

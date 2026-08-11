@@ -53,6 +53,9 @@ for schema_name in (
     "semantic-selection-map-v1.schema.json",
     "human-review-intake-v1.schema.json",
     "framework-packet-closure-v1.schema.json",
+    "governed-alpha-evidence-v1.schema.json",
+    "p4-assurance-policy-v1.schema.json",
+    "p4-assurance-evidence-v1.schema.json",
 ):
     schema = json.loads(package_root.joinpath("schemas", schema_name).read_text(encoding="utf-8"))
     Draft202012Validator.check_schema(schema)

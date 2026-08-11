@@ -42,6 +42,15 @@ and one project-scoped `EvidenceClosure` only after exact custody readback.
 A frozen `FrameworkPacketClosure` can then confirm, without persistence, that
 one independently validated packet and its separate exact/review artifact
 digests remain `needs_human_review`; it cannot record a human decision.
+P3 portfolio admission additionally requires one closed, repository-native
+`GovernedAlphaEvidence` record binding the exact project, revision, build
+attempt, evidence closure, framework/review packets, and separately scoped
+exact B-rep, STEP, GLB, and selection-map artifacts. P4 assurance thresholds,
+named environments, methods, comparators, and invalidation conditions are
+predeclared in an immutable, content-digested `P4AssurancePolicy`; later P4
+evidence must bind that exact digest and cannot self-declare advancement.
+This defines admission and readiness policy only. It does not claim that P3
+human review was accepted or that P4 assurance was executed or passed.
 This does not prove network or credential isolation and does not grant authored-
 state, channel, human-review, approval, export, fabrication-release, or machine-
 actuation authority.
