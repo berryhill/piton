@@ -133,53 +133,37 @@ def _open_service_with_custodied_p0(
     return PitonApplicationService.open(daemon_root), database_path
 
 
-def test_daemon_custody_issuer_derives_and_binds_the_engineering_disposition(
+def test_daemon_custody_cannot_supply_unimplemented_human_authority(
     exact_evidence: tuple[RealizationInputs, Path, Path, dict[str, Any]],
     tmp_path: Path,
 ) -> None:
     inputs, attempt, qualification_path, _ = exact_evidence
     predecessor = _authorized_p0_receipt()
-    service, database_path = _open_service_with_custodied_p0(tmp_path / "daemon", predecessor)
-
-    receipt = service.issue_autonomous_p1_engineering_disposition(
-        receipt_id="p1-engineering-disposition",
-        predecessor_receipt_id=predecessor.receipt_id,
-        revision=inputs.revision,
-        realization_receipt_path=attempt / "receipt.json",
-        qualification_receipt_path=qualification_path,
+    assert predecessor.successor_authorized is False
+    assert any(
+        "trusted durable human authorization issuance/verification is not implemented"
+        in reason
+        for reason in predecessor.authorization_reasons
+    )
+    service, database_path = _open_service_with_custodied_p0(
+        tmp_path / "daemon", predecessor
     )
 
-    assert receipt.phase is Phase.P1
-    assert receipt.status is ExecutionStatus.COMPLETED
-    assert receipt.disposition is Disposition.ADVANCE
-    assert receipt.authority is Authority.AUTONOMOUS
-    assert receipt.predicates == {"exact_cad_verified": True}
-    assert receipt.predecessor_receipt_id == predecessor.receipt_id
-    assert receipt.predecessor_receipt_digest == receipt_digest(predecessor)
-    assert receipt.successor_authorized is True
-    assert len(receipt.evidence) == 1
-    assert receipt.evidence[0].source.value == "repository_native"
-    assert receipt.evidence[0].content["revision_id"] == inputs.revision.revision_id
-    assert receipt.evidence[0].content["exact_cad_verified"] is True
-    assert receipt.safety == SafetyState()
+    with pytest.raises(ValueError, match="authorized human P0 predecessor"):
+        service.issue_autonomous_p1_engineering_disposition(
+            receipt_id="p1-engineering-disposition",
+            predecessor_receipt_id=predecessor.receipt_id,
+            revision=inputs.revision,
+            realization_receipt_path=attempt / "receipt.json",
+            qualification_receipt_path=qualification_path,
+        )
 
     with Database(database_path).read() as connection:
         stored = connection.execute(
-            "SELECT phase, authority, receipt_digest, authenticated_actor_id "
-            "FROM portfolio_phase_receipts WHERE receipt_id=?",
-            (receipt.receipt_id,),
-        ).fetchone()
-        head = connection.execute(
-            "SELECT receipt_id, receipt_digest FROM portfolio_phase_heads WHERE phase=?",
+            "SELECT receipt_id FROM portfolio_phase_receipts WHERE phase=?",
             (Phase.P1.value,),
-        ).fetchone()
-    assert tuple(stored) == (
-        Phase.P1.value,
-        Authority.AUTONOMOUS.value,
-        receipt_digest(receipt),
-        "piton-daemon:autonomous-p1",
-    )
-    assert tuple(head) == (receipt.receipt_id, receipt_digest(receipt))
+        ).fetchall()
+    assert stored == []
 
 
 def test_p1_issuer_accepts_only_a_custodied_reference_not_raw_authority() -> None:

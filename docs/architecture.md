@@ -213,9 +213,19 @@ claim scopes are fixed: exact B-rep is `exact-realization`, STEP is
 `fabrication_release=false`, `machine_actuation=false`,
 `release_state=unreleased`, and `channel_transition=false`. A P3 phase-exit
 receipt requires exactly one repository-native artifact containing that closed
-record, exact P2 predecessor ID/digest custody, completed execution, an advance
-disposition, and human authority. `verify_successor_admission` must independently
-rebind the P3 receipt to that exact P2 receipt before P4 is admitted.
+record, exact P2 predecessor ID/digest binding, completed execution, and an
+advance disposition. These checks validate a review-evidence candidate only.
+`P3ReviewEvidenceBundle` is caller-provided evidence, is not daemon custody, and
+cannot mint or confer successor authority even when every identity, digest, and
+packet byte is self-consistent.
+
+Trusted durable human authorization issuance and verification are not
+implemented in this Stage-1 slice. Every `Authority.HUMAN` advancement therefore
+fails closed with an explicit reason; caller-selected enums, records, verifier
+objects, database rows, and P3 evidence bundles are never authority. A later
+daemon-derived identity/admission task owns authenticated identity, durable
+issuance, custody, and verification. Until that task lands, P4 cannot be
+admitted from P3.
 
 P4 has a separate, source-native policy authority. `P4AssurancePolicy` freezes
 policy identity, ordered requirements, method/comparator digests, thresholds,

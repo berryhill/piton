@@ -10,13 +10,22 @@ from jsonschema import Draft202012Validator
 
 import piton.storage as storage
 from piton import (
+    Authority,
     DEFAULT_P4_ASSURANCE_POLICY,
+    Disposition,
     DraftExport,
+    EvidenceArtifact,
+    ExecutionStatus,
     FrameworkPacketClosure,
     GovernedAlphaEvidence,
+
     HumanReviewIntake,
     P4AssuranceEvidence,
     P4AssurancePolicy,
+    Phase,
+    SafetyState,
+    issue_phase_exit_receipt,
+
     validate_p4_evidence_policy_binding,
 )
 from piton.implementation_loop import PITON_IMPLEMENTATION_LOOP
@@ -198,6 +207,31 @@ framework_closure_schema = json.loads(
 Draft202012Validator(framework_closure_schema).validate(
     framework_packet_closure.to_primitive()
 )
+if not framework_packet_closure.closure_digest.startswith("sha256:"):
+    raise SystemExit("installed framework closure digest is unavailable")
+authority_artifact = EvidenceArtifact.from_content(
+    artifact_id="install-authority-evidence",
+    repository_path="evidence/install-authority.json",
+    content={"result": "measured"},
+)
+human_receipt = issue_phase_exit_receipt(
+    receipt_id="install-authority-p0",
+    phase=Phase.P0,
+    status=ExecutionStatus.COMPLETED,
+    disposition=Disposition.ADVANCE,
+    authority=Authority.HUMAN,
+    predecessor_receipt_id=None,
+    predecessor_receipt_digest=None,
+    predicates={},
+    evidence=(authority_artifact,),
+    safety=SafetyState(),
+)
+if human_receipt.successor_authorized or not any(
+    "trusted durable human authorization issuance/verification is not implemented"
+    in reason
+    for reason in human_receipt.authorization_reasons
+):
+    raise SystemExit("installed portfolio API did not fail closed for human authority")
 worker_request = PrecisionWorkerRequest(
     project_id="install-smoke",
     revision_id="rev_" + "0" * 64,

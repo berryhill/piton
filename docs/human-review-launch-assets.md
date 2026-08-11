@@ -308,8 +308,9 @@ must be replaced from the exact custodied records.
    ```python
    from piton import GovernedAlphaEvidence
    from piton.portfolio import (
-       Authority, Disposition, EvidenceArtifact, ExecutionStatus, Phase,
-       issue_phase_exit_receipt, receipt_digest, verify_successor_admission,
+       Authority, Disposition, EvidenceArtifact, ExecutionStatus,
+       P3ReviewEvidenceBundle, Phase, issue_phase_exit_receipt,
+       receipt_digest, verify_successor_admission,
    )
 
    governed = GovernedAlphaEvidence.from_primitive(
@@ -320,22 +321,34 @@ must be replaced from the exact custodied records.
        repository_path="evidence/alpha/p3-governed-alpha.json",
        content=governed.to_primitive(),
    )
+   review_evidence = P3ReviewEvidenceBundle(
+       project_id=evidence_closure.project_id,
+       current_revision_id=evidence_closure.revision_id,
+       current_attempt_id=evidence_closure.attempt_id,
+       evidence_closure=evidence_closure,
+       framework_packet_closure=framework_packet_closure,
+       review_packet=review_packet,
+       review_packet_directory=packet_directory,
+   )
    p3 = issue_phase_exit_receipt(
-       receipt_id="p3-exit",
-       phase=Phase.P3,
+       receipt_id="p3-exit", phase=Phase.P3,
        status=ExecutionStatus.COMPLETED,
-       disposition=Disposition.ADVANCE,
-       authority=Authority.HUMAN,
+       disposition=Disposition.ADVANCE, authority=Authority.HUMAN,
        predecessor_receipt_id=p2.receipt_id,
-       predecessor_receipt_digest=receipt_digest(p2),
-       predicates={},
-       evidence=(artifact,),
-       safety=p2.safety,
+       predecessor_receipt_digest=receipt_digest(p2), predicates={},
+       evidence=(artifact,), safety=p2.safety,
+       p3_review_evidence=review_evidence,
    )
    admission = verify_successor_admission(
-       p3, successor=Phase.P4, predecessor=p2
+       p3, successor=Phase.P4, predecessor=p2,
+       p3_review_evidence=review_evidence,
    )
-   assert admission.admitted, admission.reasons
+   assert not p3.successor_authorized
+   assert not admission.admitted
+   assert any(
+       "trusted durable human authorization issuance/verification is not implemented"
+       in reason for reason in admission.reasons
+   )
    ```
 
 3. Obtain P4 policy authority from installed source, never from the request,
@@ -372,6 +385,15 @@ must be replaced from the exact custodied records.
    )
    assert evidence.result in {"hold", "rework", "stop", "reject"}
    ```
+
+`P3ReviewEvidenceBundle` is intentionally caller-provided review evidence, not
+trusted daemon custody. Its deep identity, digest, and packet checks are useful
+for review but cannot confer successor authority. Trusted durable human
+authorization is unavailable in this Stage-1 slice; a later daemon-derived
+identity/admission task owns authenticated identity, durable issuance, custody,
+and verification. The standalone `verify_portfolio_admission.py` command and
+application service therefore cannot turn serialized human/P3 claims, database
+rows, or caller objects into authority.
 
 The P4 result vocabulary is intentionally fail-closed and cannot self-declare
 advancement. `P4AssurancePolicy`, `P4AssuranceEvidence`, schema validity, a

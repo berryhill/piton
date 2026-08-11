@@ -238,11 +238,12 @@ class PortfolioAdmissionTests(unittest.TestCase):
                         safety=safety,
                     )
 
-    def test_exact_predecessor_id_and_digest_are_required(self) -> None:
+    def test_exact_predecessor_binding_cannot_override_unavailable_human_authority(self) -> None:
         p0 = receipt(Phase.P0, authority=Authority.HUMAN)
         p1 = receipt(Phase.P1, predecessor=p0, predicates={"exact_cad_verified": True})
-        good = verify_successor_admission(p1, successor=Phase.P2, predecessor=p0)
-        self.assertTrue(good.admitted)
+        denied = verify_successor_admission(p1, successor=Phase.P2, predecessor=p0)
+        self.assertFalse(denied.admitted)
+        self.assertIn("predecessor did not authorize", " ".join(denied.reasons))
 
         wrong_id = replace(p1, predecessor_receipt_id="other")
         self.assertFalse(verify_successor_admission(wrong_id, successor=Phase.P2, predecessor=p0).admitted)

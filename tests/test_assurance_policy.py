@@ -129,8 +129,11 @@ def test_p3_requires_closed_governed_alpha_evidence_and_exact_p2() -> None:
         evidence=(artifact,),
         safety=SafetyState(),
     )
-    assert p3.successor_authorized is True
-    assert verify_successor_admission(p3, successor=Phase.P4, predecessor=p2).admitted is True
+    assert p3.successor_authorized is False
+    assert "trusted durable human authorization" in " ".join(p3.authorization_reasons)
+    assert verify_successor_admission(
+        p3, successor=Phase.P4, predecessor=p2
+    ).admitted is False
 
     generic = replace(artifact, content={"result": "measured"})
     denied = replace(p3, evidence=(generic,), successor_authorized=True, authorization_reasons=())

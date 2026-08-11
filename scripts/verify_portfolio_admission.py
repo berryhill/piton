@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Verify one portfolio exit receipt before admitting its immediate successor."""
+"""Fail-closed offline verification of one serialized portfolio exit receipt.
+
+Trusted durable human authorization issuance and verification are not
+implemented in this Stage-1 slice. This command diagnoses evidence and denies
+all human-authority advancement; serialized claims and caller-created review
+evidence can never supply authority.
+"""
 
 from __future__ import annotations
 
