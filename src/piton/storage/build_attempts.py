@@ -255,3 +255,28 @@ class BuildAttemptCoordinator:
         if row is None:
             raise LookupError("build coordinator state was not found")
         return CoordinatorState(*tuple(row))
+
+    def get_execution_bindings(
+        self, project_id: str, attempt_id: str
+    ) -> tuple[DurableBuildAttempt, CoordinatorState]:
+        """Read the immutable attempt and current coordinator lease atomically."""
+        _required("project_id", project_id)
+        _required("attempt_id", attempt_id)
+        with self._database.read() as connection:
+            row = connection.execute(
+                "SELECT attempt.attempt_id, attempt.project_id, attempt.revision_id, "
+                "attempt.input_manifest_digest, attempt.recipe_digest, attempt.toolchain_digest, "
+                "attempt.capability_manifest_digest, attempt.resource_limits_digest, "
+                "attempt.expected_outputs_digest, attempt.request_signature_digest, "
+                "attempt.worker_id, attempt.isolation_class, attempt.admission_state, "
+                "attempt.admitted_at, state.attempt_id, state.state, state.generation, "
+                "state.fence, state.lease_id, state.lease_expires_at, state.updated_at "
+                "FROM build_attempts AS attempt JOIN build_coordinator_state AS state "
+                "ON state.attempt_id=attempt.attempt_id "
+                "WHERE attempt.project_id=? AND attempt.attempt_id=?",
+                (project_id, attempt_id),
+            ).fetchone()
+        if row is None:
+            raise LookupError("build execution bindings were not found")
+        values = tuple(row)
+        return DurableBuildAttempt(*values[:14]), CoordinatorState(*values[14:])

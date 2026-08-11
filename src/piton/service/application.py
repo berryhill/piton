@@ -11,7 +11,7 @@ import json
 from dataclasses import asdict, dataclass, fields, is_dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 
 from ..feasibility import evaluate_exact_cad_feasibility
 from ..model import ChangeProposal, _derive_change_candidate
@@ -27,9 +27,17 @@ from ..portfolio import (
     receipt_digest,
     verify_successor_admission,
 )
+from ..precision_worker import (
+    EXPECTED_OUTPUTS,
+    PRECISION_WORKER_PIN,
+    execute_precision_worker,
+    validate_precision_worker_bindings,
+)
+from ..realization import RealizationInputs
 from ..revision import DesignRevision
 from ..source_tree import SourceTree, SourceTreeFile
 from ..storage.blobs import BlobStore
+from ..storage.build_attempts import BuildAttemptCoordinator, CoordinatorState, DurableBuildAttempt
 from ..storage.db import Database
 from ..storage.revisions import (
     ChannelConflictError,
@@ -46,8 +54,11 @@ from .commands import (
     UpdateDraft,
 )
 from .drafts import DraftRecord, DraftStore
+from ..worker_contracts import PrecisionWorkerRequest, PrecisionWorkerResult
 
 _PRINCIPAL_PROOF = object()
+ExactInputs = Callable[[str, str, str], RealizationInputs]
+Clock = Callable[[], datetime]
 
 
 class PrincipalAuthorityError(PermissionError):
@@ -118,26 +129,134 @@ class DraftReceipt:
 class PitonApplicationService:
     """Own every Stage-1 authored-state effect behind one typed boundary."""
 
-    def __init__(self, database: Database, blobs: BlobStore, drafts: DraftStore) -> None:
+    def __init__(
+        self,
+        database: Database,
+        blobs: BlobStore,
+        drafts: DraftStore,
+        *,
+        precision_inputs: ExactInputs | None = None,
+        precision_clock: Clock | None = None,
+    ) -> None:
         if not isinstance(database, Database) or not isinstance(blobs, BlobStore):
             raise TypeError("trusted Database and BlobStore are required")
         if not isinstance(drafts, DraftStore):
             raise TypeError("trusted DraftStore is required")
+        if precision_inputs is not None and not callable(precision_inputs):
+            raise TypeError("precision_inputs must be callable")
+        if precision_clock is not None and not callable(precision_clock):
+            raise TypeError("precision_clock must be callable")
         self.__database = database
         self.__blobs = blobs
         self.__drafts = drafts
         self.__repository = RevisionRepository(database, blobs)
         self.__mutation_capability = _issue_server_mutation_capability()
+        self.__build_attempt_coordinator = BuildAttemptCoordinator(database)
+        self.__precision_inputs = precision_inputs
+        self.__precision_clock = precision_clock or (lambda: datetime.now(UTC))
+        self.__precision_control_root = blobs.control_root
 
     @classmethod
-    def open(cls, project_root: str | Path) -> "PitonApplicationService":
+    def open(
+        cls,
+        project_root: str | Path,
+        *,
+        precision_inputs: ExactInputs | None = None,
+        precision_clock: Clock | None = None,
+    ) -> "PitonApplicationService":
         root = Path(project_root)
         blobs = BlobStore(root)
         database = Database(root / ".piton" / "piton.sqlite3")
         database.migrate()
         drafts = DraftStore(root)
         drafts.recover_after_crash()
-        return cls(database, blobs, drafts)
+        return cls(
+            database,
+            blobs,
+            drafts,
+            precision_inputs=precision_inputs,
+            precision_clock=precision_clock,
+        )
+
+    @staticmethod
+    def _lease_expiry(value: str) -> datetime:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise ValueError("coordinator lease expiry must be an ISO-8601 timestamp") from error
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError("coordinator lease expiry must include a timezone")
+        return parsed.astimezone(UTC)
+
+    def _precision_worker_bindings(
+        self, project_id: str, attempt_id: str
+    ) -> tuple[DurableBuildAttempt, CoordinatorState, RealizationInputs]:
+        attempt, state = self.__build_attempt_coordinator.get_execution_bindings(
+            project_id, attempt_id
+        )
+        now = self.__precision_clock()
+        if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("trusted clock must return a timezone-aware datetime")
+        if state.lease_expires_at is None:
+            raise ValueError("coordinator lease expiry is required")
+        if self._lease_expiry(state.lease_expires_at) <= now.astimezone(UTC):
+            raise ValueError("coordinator lease is expired")
+        if self.__precision_inputs is None:
+            raise RuntimeError("trusted exact-input repository is not configured")
+        inputs = self.__precision_inputs(
+            attempt.project_id, attempt.revision_id, attempt.input_manifest_digest
+        )
+        if not isinstance(inputs, RealizationInputs):
+            raise TypeError("trusted exact-input repository returned invalid inputs")
+        validate_precision_worker_bindings(attempt, state, inputs.revision, inputs)
+        return attempt, state, inputs
+
+    @staticmethod
+    def _compose_precision_worker_request(
+        attempt: DurableBuildAttempt, state: CoordinatorState
+    ) -> PrecisionWorkerRequest:
+        if state.lease_id is None:
+            raise ValueError("coordinator lease is required")
+        return PrecisionWorkerRequest(
+            project_id=attempt.project_id,
+            revision_id=attempt.revision_id,
+            attempt_id=attempt.attempt_id,
+            generation=state.generation,
+            fence=state.fence,
+            lease_id=state.lease_id,
+            input_manifest_digest=attempt.input_manifest_digest,
+            recipe_digest=attempt.recipe_digest,
+            toolchain_digest=attempt.toolchain_digest,
+            capability_manifest_digest=attempt.capability_manifest_digest,
+            resource_limits_digest=attempt.resource_limits_digest,
+            expected_outputs_digest=attempt.expected_outputs_digest,
+            request_signature_ref=attempt.request_signature_digest,
+            worker_id=attempt.worker_id,
+            worker_pin=PRECISION_WORKER_PIN,
+            isolation_class=attempt.isolation_class,
+            expected_outputs=EXPECTED_OUTPUTS,
+        )
+
+    def issue_precision_worker_request(
+        self, project_id: str, attempt_id: str
+    ) -> PrecisionWorkerRequest:
+        """Compose one request solely from daemon-custodied current bindings."""
+        attempt, state, _ = self._precision_worker_bindings(project_id, attempt_id)
+        return self._compose_precision_worker_request(attempt, state)
+
+    def run_precision_worker(self, request: PrecisionWorkerRequest) -> PrecisionWorkerResult:
+        """Rebind an issued request and select its attempt-scoped output internally."""
+        if not isinstance(request, PrecisionWorkerRequest):
+            raise TypeError("request must be a PrecisionWorkerRequest")
+        attempt, state, inputs = self._precision_worker_bindings(
+            request.project_id, request.attempt_id
+        )
+        expected = self._compose_precision_worker_request(attempt, state)
+        if request.canonical_bytes != expected.canonical_bytes:
+            raise ValueError("request no longer matches durable attempt and coordinator bindings")
+        return execute_precision_worker(
+            request, inputs.revision, inputs, self.__precision_control_root
+        )
 
     def issue_autonomous_p1_engineering_disposition(
         self,

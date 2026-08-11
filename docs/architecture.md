@@ -95,6 +95,47 @@ review, approval, export, fabrication-release, or machine-actuation authority.
 The root truths remain `review_state=needs_human_review`,
 `fabrication_release=false`, and `machine_actuation=false`.
 
+### Pinned precision-worker contracts
+
+`PrecisionWorkerRequest` is a frozen canonical record. The existing
+`PitonApplicationService` composition root owns the trusted attempt coordinator,
+exact-input repository, bounded `.piton/build-attempts` output root, and clock.
+Its `issue_precision_worker_request` and `run_precision_worker` methods read the
+exact durable attempt and current running lease/generation/fence; callers cannot
+supply attempt/coordinator DTOs, revisions, realization inputs, or output paths.
+The run path re-reads custody and requires byte-identical canonical request
+bindings before geometry execution. Caller-constructed contract records remain
+data, not execution authority. The application service rejects an expired lease
+against its timezone-aware trusted clock before request creation and again before
+execution.
+
+Attempt output custody walks `.piton/build-attempts/<project>/<attempt>` from the
+trusted control root with directory file descriptors and `O_NOFOLLOW`. A symlink
+or non-directory ancestor blocks before geometry and an existing attempt scope is
+never overwritten. Geometry is staged under the pinned project directory and
+published with atomic no-replace rename. Failed descriptor-relative staging is
+retained for later bounded quarantine/recovery; execution never performs
+pathname-based recursive cleanup that could delete an attacker-swapped entry.
+
+The worker module does not own repositories, clocks, request issuance, or output-root
+selection. It exposes bounded binding validation, realization, and result
+verification over an already-composed immutable request. Python name deletion and
+closure cells are not treated as an authority boundary.
+The request binds the exact project, revision, source manifest, recipe,
+Python/build123d/OCP toolchain, capability/resource/output manifests, request
+signature reference, and `precision_worker_one` implementation pin. The first
+implementation truthfully reports `trusted-local`; it does not claim container,
+microVM, WASM, network, credential, or result-signature isolation that is not
+implemented.
+
+`PrecisionWorkerResult` is a frozen, canonical, attempt/request-bound execution
+fact. Success requires exactly the expected BREP, STEP, and inspection-receipt
+files with verified sizes and SHA-256 digests. Failed and blocked results retain
+only bounded sanitized diagnostics and cannot claim output closure. Request and
+result verification performs no SQL write, CAS publication, coordinator update,
+channel movement, review decision, approval, export, release, or actuation.
+Every request, result, and exact receipt preserves the root truth boundary.
+
 ## Stage 1 custody
 
 Git-friendly local directory of deterministic UTF-8 source/manifests and

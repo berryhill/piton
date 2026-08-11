@@ -233,10 +233,18 @@ def test_attempt_and_state_reads_require_exact_project_scope(tmp_path: Path) -> 
 
     assert attempt_coordinator.get_attempt("project_one", "attempt_one").attempt_id == "attempt_one"
     assert attempt_coordinator.get_state("project_one", "attempt_one").state == "admitted"
+    attempt, state = attempt_coordinator.get_execution_bindings("project_one", "attempt_one")
+    assert (attempt.attempt_id, state.attempt_id, state.state) == (
+        "attempt_one",
+        "attempt_one",
+        "admitted",
+    )
     with pytest.raises(LookupError):
         attempt_coordinator.get_attempt("project_two", "attempt_one")
     with pytest.raises(LookupError):
         attempt_coordinator.get_state("project_two", "attempt_one")
+    with pytest.raises(LookupError):
+        attempt_coordinator.get_execution_bindings("project_two", "attempt_one")
 
 
 def test_schema_rejects_open_states_negative_counters_and_cross_project_pairs(tmp_path: Path) -> None:
