@@ -9,6 +9,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 import piton.storage as storage
+from piton import HumanReviewIntake
 from piton.implementation_loop import PITON_IMPLEMENTATION_LOOP
 from piton.launch_assets import build_review_export
 from piton.launch_verification import (
@@ -46,7 +47,11 @@ if "default-src 'none'" not in viewer_surface or "connect-src 'none'" not in vie
     raise SystemExit("installed viewer assets omit disconnected CSP")
 if "https://" in viewer_surface or "http://" in viewer_surface:
     raise SystemExit("installed viewer assets contain a network URL")
-for schema_name in ("review-packet-v1.schema.json", "semantic-selection-map-v1.schema.json"):
+for schema_name in (
+    "review-packet-v1.schema.json",
+    "semantic-selection-map-v1.schema.json",
+    "human-review-intake-v1.schema.json",
+):
     schema = json.loads(package_root.joinpath("schemas", schema_name).read_text(encoding="utf-8"))
     Draft202012Validator.check_schema(schema)
 try:
@@ -61,6 +66,27 @@ if not validate_partner_scaffold_t001(receipt):
     raise SystemExit("installed T001 scaffold failed zero-claim validation")
 
 digest = "sha256:" + "0" * 64
+human_review_intake = HumanReviewIntake(
+    intake_id="install-smoke-intake",
+    project_id="install-smoke",
+    revision_id="rev_" + "0" * 64,
+    attempt_id="attempt_smoke",
+    evidence_closure_digest=digest,
+    review_packet_digest=digest,
+    review_scope=("Verify installed review intake",),
+)
+human_review_schema = json.loads(
+    package_root.joinpath("schemas", "human-review-intake-v1.schema.json").read_text(
+        encoding="utf-8"
+    )
+)
+Draft202012Validator(human_review_schema).validate(human_review_intake.to_primitive())
+if (
+    human_review_intake.review_state != "needs_human_review"
+    or human_review_intake.fabrication_release is not False
+    or human_review_intake.machine_actuation is not False
+):
+    raise SystemExit("installed human-review intake API violated safety truth")
 worker_request = PrecisionWorkerRequest(
     project_id="install-smoke",
     revision_id="rev_" + "0" * 64,
@@ -183,6 +209,7 @@ print(
                 "review-packet-v1.schema.json",
                 "semantic-selection-map-v1.schema.json",
             ],
+            "human_review_intake_api": human_review_intake.to_primitive()["schema"],
             "viewer_assets": list(viewer_assets),
             "precision_worker_request": worker_request.schema,
             "precision_worker_pin": worker_request.worker_pin,

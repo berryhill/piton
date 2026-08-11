@@ -176,6 +176,46 @@ release authority.
    not review acceptance, exact-geometry proof, approval, export, fabrication
    release, or machine actuation.
 
+### Admit framework-only human-review work
+
+After packet validation succeeds, construct an immutable intake from the
+exact identities already returned by the daemon-custodied closure and the
+validated packet. Do not select any identity by channel, `latest`, filename,
+or geometric proximity:
+
+```python
+from piton import HumanReviewIntake
+
+intake = HumanReviewIntake(
+    intake_id="review-intake-one",
+    project_id=closure.project_id,
+    revision_id=closure.revision_id,
+    attempt_id=closure.attempt_id,
+    evidence_closure_digest=closure.closure_digest,
+    review_packet_digest=verified.packet_digest,
+    review_scope=("Inspect exact/review geometry correspondence",),
+    questions=("Are the source parameters acceptable for the stated intent?",),
+)
+admitted = service.intake_human_review(intake, "/tmp/piton-review-packet")
+assert admitted is intake
+assert admitted.project_id == verified.project_id
+assert admitted.revision_id == verified.revision_id
+assert admitted.attempt_id == verified.build_attempt_id
+assert admitted.evidence_closure_digest == verified.evidence_closure_digest
+assert admitted.review_packet_digest == verified.packet_digest
+assert admitted.review_state == "needs_human_review"
+assert admitted.fabrication_release is False
+assert admitted.machine_actuation is False
+```
+
+The canonical `to_primitive()` representation is governed by the packaged
+`piton.human-review-intake.v1` schema. Intake admission is deliberately
+non-persistent and has no disposition field: it records no review decision and
+cannot mutate a revision, channel, build attempt, evidence closure, command
+receipt, approval, export, release, or machine state. Confirm those durable
+row counts are unchanged when auditing an integration. Treat an identity,
+digest, packet-truth, or schema mismatch as a blocking custody failure.
+
 ## Restore-forward request (no rollback mutation)
 
 1. Preserve the accepted project and history byte-for-byte. Prepare the desired prior design as a new canonical candidate directory with truthful source digests.
