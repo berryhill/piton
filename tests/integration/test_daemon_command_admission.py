@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import socket
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -51,6 +53,36 @@ class LocalDaemonCommandAdmissionTests(unittest.TestCase):
         return self.adapter.execute(
             self.server_socket, {"command_type": command_type, "payload": payload}
         )
+
+    def test_installed_daemon_boundary_does_not_require_optional_cad_runtime(self) -> None:
+        script = """
+import builtins
+import pathlib
+import sys
+
+real_import = builtins.__import__
+
+
+def reject_optional_cad(name, *args, **kwargs):
+    if name == "build123d" or name.startswith("build123d."):
+        raise ModuleNotFoundError("optional CAD runtime is unavailable")
+    return real_import(name, *args, **kwargs)
+
+
+builtins.__import__ = reject_optional_cad
+from piton.service import CommandAdmissionError, LocalDaemonCommandAdapter
+
+adapter = LocalDaemonCommandAdapter.open(pathlib.Path(sys.argv[1]), principal_ids_by_uid={})
+assert adapter.__class__ is LocalDaemonCommandAdapter
+assert issubclass(CommandAdmissionError, ValueError)
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", script, str(self.root / "without-cad")],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_peer_uid_is_mapped_inside_daemon_without_credentials_or_claimed_identity(self) -> None:
         receipt = self.execute(
