@@ -264,6 +264,13 @@ admission; a caller-supplied lookalike policy has no authority. One closed
 `P4AssuranceEvidence` record binds `policy_digest` and the exact ordered
 `evaluated_requirement_ids`. `validate_p4_evidence_policy_binding` recomputes the
 canonical default-policy digest and requires both bindings to match exactly.
+When a predeclared manual evaluation is unavailable,
+`emit_unavailable_p4_receipts` emits one closed `P4AssuranceReceipt` per policy
+requirement in declaration order. Each receipt binds the policy, method,
+comparator, threshold, environments, and invalidation conditions while fixing
+`availability=unavailable`, `threshold_passed=false`, and `evidence_refs=[]`.
+These receipts record missing evidence; they do not satisfy a requirement or
+advance review, approval, export, release, channel, or actuation state.
 The evidence result is deliberately limited to `hold`, `rework`, `stop`, or
 `reject`; it cannot self-declare advancement. P4 remains a human judgment gate,
 and policy/evidence validity never implies review acceptance, approval, export,
