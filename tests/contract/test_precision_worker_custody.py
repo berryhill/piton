@@ -65,6 +65,23 @@ def _configured_service(tmp_path: Path) -> PitonApplicationService:
     return service
 
 
+def test_current_worker_pin_admits_the_exact_staged_executable_payload(tmp_path: Path) -> None:
+    from piton.launch_verification import CURRENT_PRECISION_WORKER_PIN
+    from piton.precision_worker_launch import (
+        remove_input_bundle,
+        stage_input_bundle,
+        worker_payload_digest,
+    )
+    from piton.worker_admission import ADMITTED_WORKER_PAYLOADS
+
+    inputs = RealizationInputs.from_repository(ROOT, DEFAULT_PARAMETERS)
+    bundle, _ = stage_input_bundle(ROOT, tmp_path / ".piton", inputs.revision)
+    try:
+        assert ADMITTED_WORKER_PAYLOADS[CURRENT_PRECISION_WORKER_PIN] == worker_payload_digest(bundle)
+    finally:
+        remove_input_bundle(bundle)
+
+
 def test_worker_authority_is_owned_by_application_service(tmp_path: Path) -> None:
     import piton.precision_worker as worker
 
