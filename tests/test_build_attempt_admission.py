@@ -360,6 +360,12 @@ def test_install_verifier_exercises_public_api_and_fresh_schema() -> None:
     assert "Database" in verifier
     assert "build_attempts" in verifier
     assert "build_coordinator_state" in verifier
+    assert "evidence_check_declarations" in verifier
+    assert "evidence_check_receipts" in verifier
+    assert "evidence_closures" in verifier
+    assert "evidence_closure_receipts" in verifier
+    assert "evidence_closure_artifacts" in verifier
+    assert "evidence_closures_no_duplicate_insert" in verifier
     assert "Durable build admission and coordinator state" in architecture
     assert "fabrication_release" in architecture
     assert "machine_actuation" in architecture

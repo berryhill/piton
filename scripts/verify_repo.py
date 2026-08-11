@@ -89,6 +89,49 @@ for schema_name in (
 flow_path = ROOT / "flows/piton_implementation_loop_v1.json"
 json.loads(flow_path.read_text(encoding="utf-8"))
 
+artifact_manifest = json.loads(
+    (ROOT / "templates" / "artifact-manifest-v1.json").read_text(encoding="utf-8")
+)
+closure_template = artifact_manifest.get("evidence_closure", {})
+expected_checks = [
+    "exact-artifact-closure",
+    "one-valid-solid",
+    "review-artifact-binding",
+]
+receipts = closure_template.get("ordered_check_receipts", [])
+if [receipt.get("check_id") for receipt in receipts] != expected_checks:
+    raise SystemExit("artifact manifest does not preserve evidence declaration order")
+required_receipt_fields = {
+    "check_id",
+    "status",
+    "receipt_digest",
+    "method",
+    "units",
+    "tolerance",
+    "checker_digest",
+    "comparator_digest",
+    "environment_digest",
+    "evidence_roles",
+    "invalidation_conditions",
+}
+if any(set(receipt) != required_receipt_fields for receipt in receipts):
+    raise SystemExit("artifact manifest check receipt bindings are incomplete")
+if closure_template.get("channel_transition") is not False or closure_template.get(
+    "release_consequence"
+) != "none":
+    raise SystemExit("artifact manifest implies a forbidden closure consequence")
+review_instructions = (ROOT / "docs" / "human-review-launch-assets.md").read_text(
+    encoding="utf-8"
+)
+for required_instruction in (
+    "project-scoped readback",
+    "generation`, monotonic `fence`, and",
+    "channel_transition=false",
+):
+    if required_instruction not in review_instructions:
+        raise SystemExit("human review instructions omit evidence-closure custody")
+
+
 def load_validator(name: str) -> Draft202012Validator:
     schema = json.loads((ROOT / "schemas" / name).read_text(encoding="utf-8"))
     Draft202012Validator.check_schema(schema)

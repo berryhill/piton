@@ -82,6 +82,45 @@ worker. Do not substitute the ungoverned reference build above.
    `review_state=needs_human_review`, `fabrication_release=false`, and
    `machine_actuation=false`. A complete packet only prepares human review.
 
+### Attempt-bound evidence-closure review
+
+The seven worker roles above are inputs to closure, not closure evidence by
+themselves. Before treating a packet as ready for human review, independently
+perform a project-scoped readback of the immutable `EvidenceClosure` by its
+exact `project_id` and `closure_digest`; a lookup under any other project must
+fail. Then:
+
+1. Recompute the canonical evidence-check declaration digest and verify it is
+   bound to the frozen revision, attempt, and expected-output digest. Reject a
+   declaration made after worker execution or one with substituted checks.
+2. Recompute the worker-result digest. Verify the closure binds that digest,
+   the declaration digest, and the same `generation`, monotonic `fence`, and
+   live `lease_id` as the admitted worker request/result. Expired, cancelled,
+   stale-fence, cross-generation, or cross-attempt results block closure.
+3. Require exactly these three receipts, in declaration order:
+   `exact-artifact-closure`, `one-valid-solid`, and
+   `review-artifact-binding`. For every receipt independently recompute its
+   digest and verify `check_id`, `status=pass`, method, units, tolerance,
+   checker/comparator digests, toolchain/environment digests, exact evidence
+   inputs, measurements, uncertainty, claim scope, and invalidation
+   conditions. Missing, reordered, failed, blocked, or extra receipts block.
+4. Recompute the closure digest from the canonical closure, including the
+   ordered receipt digests and artifact bindings. Match every closure artifact
+   role/digest/path/unit/claim-scope value to the seven-role worker result and
+   to the independently checked files. The stored closure and a replayed close
+   must be byte-identical.
+5. Copy the declaration, worker-result, closure, and ordered receipt bindings
+   into the `evidence_closure` section of
+   `templates/artifact-manifest-v1.json`. Replace every placeholder and set
+   `verification_state=verified` only after all checks above pass.
+
+Evidence closure records execution facts only. Closure does not promote a
+channel, mutate a revision, accept review, approve engineering, export,
+release fabrication, or actuate machinery. Preserve
+`review_state=needs_human_review`, `fabrication_release=false`,
+`machine_actuation=false`, `channel_transition=false`, and
+`release_state=unreleased` regardless of check or closure success.
+
 ## Restore-forward request (no rollback mutation)
 
 1. Preserve the accepted project and history byte-for-byte. Prepare the desired prior design as a new canonical candidate directory with truthful source digests.
