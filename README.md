@@ -32,8 +32,13 @@ machine_actuation = false
 One source-native Python/build123d Part, one bounded parameter mutation, one pinned exact-geometry worker, three to five predeclared checks, revision-pinned review artifacts, human review, and an optional visibly unreleased draft export.
 
 The current custody scaffold includes capability-gated durable build admission
-with server-derived attempt identity and exact project-scoped reads. It does not
-execute workers or imply review, approval, export, release, or machine actuation.
+with server-derived attempt identity and exact project-scoped reads.
+`PitonApplicationService` executes the pinned
+`precision_worker_one:piton.realization-and-review.v2` worker under the honestly
+declared weaker `trusted-local` isolation class. It verifies attempt-bound exact
+and review output closure, but does not prove network or credential isolation and
+does not grant authored-state, channel, review, approval, export, fabrication-
+release, or machine-actuation authority.
 
 ## Repository verification
 

@@ -12,6 +12,15 @@ import stat
 from pathlib import Path
 from typing import Any, Mapping
 
+from .launch_verification import (
+    CURRENT_PRECISION_WORKER_OUTPUTS,
+    CURRENT_PRECISION_WORKER_PIN,
+)
+from .mesh_derivatives import (
+    DerivativeSource,
+    TessellationPolicy,
+    derive_review_derivatives,
+)
 from .realization import (
     EXACT_BREP_NAME,
     EXPECTED_TOOLCHAIN,
@@ -30,8 +39,8 @@ from .worker_contracts import (
 )
 
 PRECISION_WORKER_ID = "precision_worker_one"
-PRECISION_WORKER_PIN = "precision_worker_one:piton.realization.v1"
-EXPECTED_OUTPUTS = ("exact_brep", "inspection_receipt", "step")
+PRECISION_WORKER_PIN = CURRENT_PRECISION_WORKER_PIN
+EXPECTED_OUTPUTS = CURRENT_PRECISION_WORKER_OUTPUTS
 
 
 class WorkerOutputCustodyError(RuntimeError):
@@ -53,7 +62,7 @@ PINNED_RECIPE_DIGEST = _manifest_digest(
     "piton.precision-worker-recipe.v1",
     {
         "worker_pin": PRECISION_WORKER_PIN,
-        "entrypoint": "piton.realization:realize_exact",
+        "entrypoint": "piton.precision_worker:execute_precision_worker",
         "outputs": list(EXPECTED_OUTPUTS),
     },
 )
@@ -73,7 +82,7 @@ PINNED_CAPABILITY_DIGEST = _manifest_digest(
 )
 PINNED_RESOURCE_LIMITS_DIGEST = _manifest_digest(
     "piton.precision-worker-resources.v1",
-    {"attempt_scoped_output": True, "existing_output_policy": "refuse", "output_count": 3},
+    {"attempt_scoped_output": True, "existing_output_policy": "refuse", "output_count": 7},
 )
 EXPECTED_OUTPUTS_DIGEST = _manifest_digest(
     "piton.precision-worker-expected-outputs.v1",
@@ -151,6 +160,26 @@ def _read_regular_at(directory_fd: int, name: str) -> bytes:
             chunks.append(chunk)
     finally:
         os.close(fd)
+
+
+def _read_regular_path_at(directory_fd: int, relative_path: str) -> bytes:
+    """Read one regular artifact while refusing symlinks in every path component."""
+    parts = Path(relative_path).parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise ValueError("worker artifact path is not a safe relative path")
+    current_fd = os.dup(directory_fd)
+    try:
+        for component in parts[:-1]:
+            child_fd = os.open(
+                component,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                dir_fd=current_fd,
+            )
+            os.close(current_fd)
+            current_fd = child_fd
+        return _read_regular_at(current_fd, parts[-1])
+    finally:
+        os.close(current_fd)
 
 
 def _artifact_bytes(
@@ -309,10 +338,33 @@ def execute_precision_worker(
             raise TypeError("descriptor-relative realization did not retain custody")
         receipt, attempt_fd = realized
         pinned_output_directory = Path(f"/proc/self/fd/{attempt_fd}")
+        exact_brep_bytes = _read_regular_at(attempt_fd, EXACT_BREP_NAME)
+        exact_receipt_bytes = _read_regular_at(attempt_fd, RECEIPT_NAME)
+        review = derive_review_derivatives(
+            DerivativeSource(
+                revision_id=request.revision_id,
+                build_attempt_scope=request.attempt_id,
+                exact_brep_digest="sha256:" + hashlib.sha256(exact_brep_bytes).hexdigest(),
+                exact_receipt_digest="sha256:" + hashlib.sha256(exact_receipt_bytes).hexdigest(),
+                exact_attempt_directory=pinned_output_directory,
+            ),
+            TessellationPolicy(),
+            pinned_output_directory / "review",
+        )
+        review_paths = {
+            "review_glb": "review/" + review["artifacts"]["glb"],
+            "review_selection_map": "review/" + review["artifacts"]["selection_map"],
+            "review_glb_receipt": "review/" + review["receipts"]["glb"],
+            "review_selection_map_receipt": "review/" + review["receipts"]["selection_map"],
+        }
         artifact_bytes = {
-            "exact_brep": _read_regular_at(attempt_fd, EXACT_BREP_NAME),
+            "exact_brep": exact_brep_bytes,
             "step": _read_regular_at(attempt_fd, STEP_NAME),
-            "inspection_receipt": _read_regular_at(attempt_fd, RECEIPT_NAME),
+            "inspection_receipt": exact_receipt_bytes,
+            **{
+                role: _read_regular_path_at(attempt_fd, relative_path)
+                for role, relative_path in review_paths.items()
+            },
         }
         artifacts = {
             "exact_brep": _artifact_bytes(
@@ -332,6 +384,30 @@ def execute_precision_worker(
                 relative_path=RECEIPT_NAME,
                 media_type="application/json",
                 claim_scope="attempt_bound_exact_inspection_receipt",
+            ),
+            "review_glb": _artifact_bytes(
+                artifact_bytes["review_glb"],
+                relative_path=review_paths["review_glb"],
+                media_type="model/gltf-binary",
+                claim_scope="review-only",
+            ),
+            "review_selection_map": _artifact_bytes(
+                artifact_bytes["review_selection_map"],
+                relative_path=review_paths["review_selection_map"],
+                media_type="application/json",
+                claim_scope="artifact-local-review-selection-only",
+            ),
+            "review_glb_receipt": _artifact_bytes(
+                artifact_bytes["review_glb_receipt"],
+                relative_path=review_paths["review_glb_receipt"],
+                media_type="application/json",
+                claim_scope="attempt_bound_review_artifact_receipt",
+            ),
+            "review_selection_map_receipt": _artifact_bytes(
+                artifact_bytes["review_selection_map_receipt"],
+                relative_path=review_paths["review_selection_map_receipt"],
+                media_type="application/json",
+                claim_scope="attempt_bound_review_artifact_receipt",
             ),
         }
         result = _result(
@@ -422,11 +498,27 @@ def verify_precision_worker_result(
             "application/json",
             "attempt_bound_exact_inspection_receipt",
         ),
+        "review_glb": (None, "model/gltf-binary", "review-only"),
+        "review_selection_map": (
+            None,
+            "application/json",
+            "artifact-local-review-selection-only",
+        ),
+        "review_glb_receipt": (
+            "review/glb.receipt.json",
+            "application/json",
+            "attempt_bound_review_artifact_receipt",
+        ),
+        "review_selection_map_receipt": (
+            "review/selection-map.receipt.json",
+            "application/json",
+            "attempt_bound_review_artifact_receipt",
+        ),
     }
     for role, artifact in result.artifacts.items():
         expected_path, expected_media_type, expected_claim_scope = expected_artifact_metadata[role]
         if (
-            artifact.relative_path != expected_path
+            (expected_path is not None and artifact.relative_path != expected_path)
             or artifact.media_type != expected_media_type
             or artifact.claim_scope != expected_claim_scope
             or artifact.units != "mm"
@@ -451,6 +543,18 @@ def verify_precision_worker_result(
         "exact_brep": EXACT_BREP_NAME,
         "step": STEP_NAME,
         "inspection_receipt": RECEIPT_NAME,
+        "review_glb": (
+            "review/artifacts/sha256/"
+            + result.artifacts["review_glb"].digest.removeprefix("sha256:")
+            + "/part.glb"
+        ),
+        "review_selection_map": (
+            "review/artifacts/sha256/"
+            + result.artifacts["review_selection_map"].digest.removeprefix("sha256:")
+            + "/selection-map.json"
+        ),
+        "review_glb_receipt": "review/glb.receipt.json",
+        "review_selection_map_receipt": "review/selection-map.receipt.json",
     }
     observed_bytes: dict[str, bytes] = {}
     for role, artifact in result.artifacts.items():
@@ -494,6 +598,60 @@ def verify_precision_worker_result(
         observed_digest = "sha256:" + hashlib.sha256(observed_bytes[role]).hexdigest()
         if receipt_digests.get(role) != observed_digest:
             raise ValueError("inspection receipt artifact digest does not match output")
+
+    exact_receipt_digest = "sha256:" + hashlib.sha256(
+        observed_bytes["inspection_receipt"]
+    ).hexdigest()
+    exact_brep_digest = "sha256:" + hashlib.sha256(observed_bytes["exact_brep"]).hexdigest()
+    review_receipts = {
+        "glb": json.loads(observed_bytes["review_glb_receipt"]),
+        "selection_map": json.loads(observed_bytes["review_selection_map_receipt"]),
+    }
+    review_artifact_roles = {
+        "glb": "review_glb",
+        "selection_map": "review_selection_map",
+    }
+    expected_review_claims = {
+        "glb": "review-only",
+        "selection_map": "artifact-local-review-selection-only",
+    }
+    for receipt_role, artifact_role in review_artifact_roles.items():
+        review_receipt = review_receipts[receipt_role]
+        artifact = result.artifacts[artifact_role]
+        if (
+            review_receipt.get("schema") != "piton.mesh-derivative-receipt.v1"
+            or review_receipt.get("status") != "succeeded"
+            or review_receipt.get("revision_id") != request.revision_id
+            or review_receipt.get("source_build_attempt_scope") != request.attempt_id
+            or review_receipt.get("source_exact_brep_digest") != exact_brep_digest
+            or review_receipt.get("source_exact_receipt_digest") != exact_receipt_digest
+            or review_receipt.get("artifact_role") != receipt_role
+            or review_receipt.get("artifact_filename")
+            != artifact.relative_path.removeprefix("review/")
+            or review_receipt.get("artifact_digest") != artifact.digest
+            or review_receipt.get("artifact_byte_length") != artifact.byte_length
+            or review_receipt.get("claim_scope") != expected_review_claims[receipt_role]
+            or review_receipt.get("review_state") != "needs_human_review"
+            or review_receipt.get("fabrication_release") is not False
+            or review_receipt.get("machine_actuation") is not False
+        ):
+            raise ValueError("review artifact receipt does not match exact output closure")
+    if review_receipts["glb"].get("selection_map_digest") != result.artifacts[
+        "review_selection_map"
+    ].digest:
+        raise ValueError("GLB receipt does not bind its artifact-local selection map")
+    selection_map = json.loads(observed_bytes["review_selection_map"])
+    if (
+        selection_map.get("schema") != "piton.glb-selection-map.v1"
+        or selection_map.get("revision_id") != request.revision_id
+        or selection_map.get("source_build_attempt_scope") != request.attempt_id
+        or selection_map.get("glb_digest") != result.artifacts["review_glb"].digest
+        or selection_map.get("identity_scope")
+        != "artifact-local; no durable topology identity; no nearest fallback"
+        or not isinstance(selection_map.get("bindings"), list)
+        or len(selection_map["bindings"]) != 1
+    ):
+        raise ValueError("review selection map does not match its artifact-local GLB")
     inspection = receipt.get("inspection", {})
     topology_counts = inspection.get("topology_counts", {})
     if inspection.get("valid") is not True or topology_counts.get("solids") != 1:

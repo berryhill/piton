@@ -86,8 +86,21 @@ def test_worker_closes_exact_outputs_and_result_is_deeply_immutable(tmp_path: Pa
     assert result.isolation_class == "trusted-local"
     assert result.authenticated is False
     assert result.result_signature_ref is None
-    assert set(result.artifacts) == {"exact_brep", "inspection_receipt", "step"}
+    assert set(result.artifacts) == {
+        "exact_brep",
+        "inspection_receipt",
+        "review_glb",
+        "review_glb_receipt",
+        "review_selection_map",
+        "review_selection_map_receipt",
+        "step",
+    }
     assert result.expected_output_closure is True
+    assert result.artifacts["review_glb"].claim_scope == "review-only"
+    assert (
+        result.artifacts["review_selection_map"].claim_scope
+        == "artifact-local-review-selection-only"
+    )
     assert result.truth["review_state"] == "needs_human_review"
     assert result.truth["fabrication_release"] is False
     assert result.truth["machine_actuation"] is False
@@ -158,6 +171,33 @@ def test_tampered_artifact_and_result_fail_verification(tmp_path: Path) -> None:
     manifest["fence"] += 1
     with pytest.raises(ValueError, match="result_digest"):
         PrecisionWorkerResult.from_manifest(manifest)
+
+
+def test_review_artifacts_are_independently_receipted_from_verified_exact_bytes(
+    tmp_path: Path,
+) -> None:
+    inputs, attempt, state, request, dispatcher = context(tmp_path)
+    output = tmp_path / ".piton" / "build-attempts" / "project_one" / "attempt_one"
+
+    result = dispatcher.run_precision_worker(request)
+    glb_receipt = json.loads((output / "review" / "glb.receipt.json").read_bytes())
+    selection_receipt = json.loads(
+        (output / "review" / "selection-map.receipt.json").read_bytes()
+    )
+
+    assert glb_receipt["source_build_attempt_scope"] == attempt.attempt_id
+    assert glb_receipt["source_exact_brep_digest"] == result.artifacts["exact_brep"].digest
+    assert glb_receipt["source_exact_receipt_digest"] == result.artifacts["inspection_receipt"].digest
+    assert glb_receipt["claim_scope"] == "review-only"
+    assert glb_receipt["selection_map_digest"] == result.artifacts["review_selection_map"].digest
+    assert selection_receipt["source_exact_brep_digest"] == result.artifacts["exact_brep"].digest
+    assert selection_receipt["claim_scope"] == "artifact-local-review-selection-only"
+    assert glb_receipt["fabrication_release"] is False
+    assert selection_receipt["machine_actuation"] is False
+
+    (output / result.artifacts["review_glb"].relative_path).write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="digest"):
+        verify_precision_worker_result(request, result, output)
 
 
 def test_result_copies_caller_owned_nested_values(tmp_path: Path) -> None:

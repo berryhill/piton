@@ -130,7 +130,14 @@ class DerivativeSource:
 def _admit(source: DerivativeSource) -> tuple[Path, dict[str, Any]]:
     if not isinstance(source, DerivativeSource):
         raise TypeError("source must be a DerivativeSource")
-    attempt = source.exact_attempt_directory.resolve(strict=True)
+    supplied_attempt = source.exact_attempt_directory
+    descriptor_pinned = (
+        supplied_attempt.parent == Path("/proc/self/fd")
+        and supplied_attempt.name.isdigit()
+    )
+    attempt = supplied_attempt if descriptor_pinned else supplied_attempt.resolve(strict=True)
+    if not attempt.is_dir():
+        raise ValueError("source exact attempt is not a directory")
     receipt_path = attempt / "receipt.json"
     receipt_bytes = receipt_path.read_bytes()
     if _digest_bytes(receipt_bytes) != source.exact_receipt_digest:
@@ -143,7 +150,10 @@ def _admit(source: DerivativeSource) -> tuple[Path, dict[str, Any]]:
         raise ValueError("source exact receipt schema mismatch")
     if receipt.get("status") != "succeeded":
         raise ValueError("source exact realization is not successful")
-    if receipt.get("attempt_scope") != source.build_attempt_scope or attempt.name != source.build_attempt_scope:
+    if (
+        receipt.get("attempt_scope") != source.build_attempt_scope
+        or (not descriptor_pinned and attempt.name != source.build_attempt_scope)
+    ):
         raise ValueError("source build attempt scope mismatch")
     if receipt.get("revision_id") != source.revision_id:
         raise ValueError("source revision ID mismatch")
@@ -461,25 +471,38 @@ def _validate_bounds(decoded: Mapping[str, Any], exact_receipt: Mapping[str, Any
         raise ValueError("decoded mesh does not contact the CAD build plane")
 
 
-def derive_mesh_derivatives(source: DerivativeSource, policy: TessellationPolicy,
-                            output_directory: Path) -> dict[str, Any]:
-    """Admit one exact realization and atomically publish four derived artifacts."""
+def _derive_mesh_derivatives(
+    source: DerivativeSource,
+    policy: TessellationPolicy,
+    output_directory: Path,
+    *,
+    include_additive: bool,
+    retain_output_reference: bool = False,
+) -> dict[str, Any]:
+    """Admit exact bytes and atomically publish a bounded derivative set."""
     if not isinstance(policy, TessellationPolicy):
         raise TypeError("policy must be a TessellationPolicy")
     brep_path, exact_receipt = _admit(source)
-    output_directory = output_directory.resolve()
+    if not retain_output_reference:
+        output_directory = output_directory.resolve()
     if output_directory.exists():
         raise FileExistsError("output_directory must be new and attempt-scoped")
     output_directory.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{output_directory.name}.staging-", dir=output_directory.parent))
     try:
         vertices, triangles, z_offset = _mesh(brep_path, policy)
-        paths = {"glb": staging / _GLB_NAME, "stl": staging / _STL_NAME, "3mf": staging / _3MF_NAME}
+        paths = {"glb": staging / _GLB_NAME}
         paths["glb"].write_bytes(_glb_bytes(vertices, triangles))
-        paths["stl"].write_bytes(_stl_bytes(vertices, triangles))
-        paths["3mf"].write_bytes(_three_mf_bytes(vertices, triangles))
+        if include_additive:
+            paths["stl"] = staging / _STL_NAME
+            paths["3mf"] = staging / _3MF_NAME
+            paths["stl"].write_bytes(_stl_bytes(vertices, triangles))
+            paths["3mf"].write_bytes(_three_mf_bytes(vertices, triangles))
 
-        decoded = {"glb": read_glb(paths["glb"]), "stl": read_binary_stl(paths["stl"]), "3mf": read_3mf(paths["3mf"])}
+        decoded = {"glb": read_glb(paths["glb"])}
+        if include_additive:
+            decoded["stl"] = read_binary_stl(paths["stl"])
+            decoded["3mf"] = read_3mf(paths["3mf"])
         for value in decoded.values():
             _validate_bounds(value, exact_receipt, z_offset, policy)
         if len({value["triangle_count"] for value in decoded.values()}) != 1:
@@ -542,3 +565,35 @@ def derive_mesh_derivatives(source: DerivativeSource, policy: TessellationPolicy
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
+
+
+def derive_review_derivatives(
+    source: DerivativeSource,
+    policy: TessellationPolicy,
+    output_directory: Path,
+) -> dict[str, Any]:
+    """Publish only required review GLB/selection artifacts and their receipts."""
+    parent = output_directory.parent
+    if parent.parent != Path("/proc/self/fd") or not parent.name.isdigit():
+        raise ValueError("review output requires a descriptor-pinned attempt directory")
+    return _derive_mesh_derivatives(
+        source,
+        policy,
+        output_directory,
+        include_additive=False,
+        retain_output_reference=True,
+    )
+
+
+def derive_mesh_derivatives(
+    source: DerivativeSource,
+    policy: TessellationPolicy,
+    output_directory: Path,
+) -> dict[str, Any]:
+    """Publish review artifacts plus explicitly requested STL and 3MF derivatives."""
+    return _derive_mesh_derivatives(
+        source,
+        policy,
+        output_directory,
+        include_additive=True,
+    )

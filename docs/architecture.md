@@ -129,11 +129,22 @@ microVM, WASM, network, credential, or result-signature isolation that is not
 implemented.
 
 `PrecisionWorkerResult` is a frozen, canonical, attempt/request-bound execution
-fact. Success requires exactly the expected BREP, STEP, and inspection-receipt
-files with verified sizes and SHA-256 digests. Failed and blocked results retain
-only bounded sanitized diagnostics and cannot claim output closure. Request and
-result verification performs no SQL write, CAS publication, coordinator update,
-channel movement, review decision, approval, export, release, or actuation.
+fact. Success requires exact closure over all seven roles from
+`precision_worker_one:piton.realization-and-review.v2`: exact BREP, STEP, exact
+inspection receipt, review GLB, artifact-local review selection map, GLB receipt,
+and selection-map receipt. Every file has a verified size and SHA-256 digest.
+The exact inspection receipt independently binds the BREP and STEP to the exact
+revision and successful build attempt. Separate GLB and selection-map receipts
+independently bind each review artifact to that same revision/attempt and to the
+source exact-BREP and exact-receipt digests; the GLB receipt additionally binds
+the selection-map digest. Triangle/primitive IDs remain local to that one GLB
+and never become durable topology identity. Thus exact geometry and review
+geometry close together without collapsing their claim scopes: review geometry
+is not exact geometry, and closure is not human acceptance, approval, export,
+release, or actuation. Failed and blocked results retain only bounded sanitized
+diagnostics and cannot claim output closure. Request and result verification
+performs no SQL write, CAS publication, coordinator update, channel movement,
+review decision, approval, export, release, or actuation.
 Every request, result, and exact receipt preserves the root truth boundary.
 
 ## Stage 1 custody
