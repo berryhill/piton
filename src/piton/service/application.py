@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable, Mapping
 
+from ..evidence import EvidenceClosure, EvidenceClosureError, EvidenceRepository
 from ..feasibility import evaluate_exact_cad_feasibility
 from ..model import ChangeProposal, _derive_change_candidate
 from ..portfolio import (
@@ -32,6 +33,7 @@ from ..precision_worker import (
     PRECISION_WORKER_PIN,
     execute_precision_worker,
     validate_precision_worker_bindings,
+    verify_precision_worker_result,
 )
 from ..realization import RealizationInputs
 from ..revision import DesignRevision
@@ -152,6 +154,7 @@ class PitonApplicationService:
         self.__repository = RevisionRepository(database, blobs)
         self.__mutation_capability = _issue_server_mutation_capability()
         self.__build_attempt_coordinator = BuildAttemptCoordinator(database)
+        self.__evidence_repository = EvidenceRepository(database)
         self.__precision_inputs = precision_inputs
         self.__precision_clock = precision_clock or (lambda: datetime.now(UTC))
         self.__precision_control_root = blobs.control_root
@@ -242,6 +245,10 @@ class PitonApplicationService:
     ) -> PrecisionWorkerRequest:
         """Compose one request solely from daemon-custodied current bindings."""
         attempt, state, _ = self._precision_worker_bindings(project_id, attempt_id)
+        # Geometry-only contract tests use a coordinator double with no durable
+        # database. Every production coordinator has this daemon-owned binding.
+        if hasattr(self.__build_attempt_coordinator, "_database"):
+            self.__evidence_repository.declare(attempt)
         return self._compose_precision_worker_request(attempt, state)
 
     def run_precision_worker(self, request: PrecisionWorkerRequest) -> PrecisionWorkerResult:
@@ -257,6 +264,87 @@ class PitonApplicationService:
         return execute_precision_worker(
             request, inputs.revision, inputs, self.__precision_control_root
         )
+
+    def close_precision_worker_evidence(
+        self, request: PrecisionWorkerRequest, result: PrecisionWorkerResult
+    ) -> EvidenceClosure:
+        """Verify current daemon custody, run fixed checks, and publish atomically."""
+        if not isinstance(request, PrecisionWorkerRequest):
+            raise TypeError("request must be a PrecisionWorkerRequest")
+        if not isinstance(result, PrecisionWorkerResult):
+            raise TypeError("result must be a PrecisionWorkerResult")
+        with self.__database.read() as connection:
+            existing = connection.execute(
+                "SELECT closure_digest,worker_result_digest FROM evidence_closures "
+                "WHERE project_id=? AND attempt_id=?",
+                (request.project_id, request.attempt_id),
+            ).fetchone()
+        if existing is not None:
+            if (
+                result.status != "succeeded"
+                or existing["worker_result_digest"] != result.result_digest
+            ):
+                raise EvidenceClosureError(
+                    "immutable closure attempt is bound to a different or unsuccessful worker result"
+                )
+            closure = self.__evidence_repository.get_closure(
+                request.project_id, existing["closure_digest"]
+            )
+            bindings = (
+                (request.project_id, closure.project_id),
+                (request.revision_id, closure.revision_id),
+                (request.attempt_id, closure.attempt_id),
+                (request.generation, closure.generation),
+                (request.fence, closure.fence),
+                (request.lease_id, closure.lease_id),
+                (result.request_digest, request.request_digest),
+            )
+            if any(actual != expected for actual, expected in bindings):
+                raise EvidenceClosureError("replay does not match exact closure custody bindings")
+            output = (
+                self.__precision_control_root
+                / "build-attempts"
+                / request.project_id
+                / request.attempt_id
+            )
+            verify_precision_worker_result(request, result, output)
+            return closure
+
+        attempt, state, _ = self._precision_worker_bindings(
+            request.project_id, request.attempt_id
+        )
+        expected = self._compose_precision_worker_request(attempt, state)
+        if request.canonical_bytes != expected.canonical_bytes:
+            raise ValueError("request no longer matches durable attempt and coordinator bindings")
+        output = (
+            self.__precision_control_root
+            / "build-attempts"
+            / attempt.project_id
+            / attempt.attempt_id
+        )
+        verify_precision_worker_result(request, result, output)
+        if result.status != "succeeded":
+            raise EvidenceClosureError("unsuccessful worker result cannot close evidence")
+        declaration = self.__evidence_repository.get_declaration(
+            attempt.project_id, attempt.attempt_id
+        )
+        inspection = json.loads(
+            (output / result.artifacts["inspection_receipt"].relative_path).read_bytes()
+        )
+        receipts = self.__evidence_repository.execute_checks(declaration, result, inspection)
+        return self.__evidence_repository.publish(
+            attempt=attempt,
+            state=state,
+            declaration=declaration,
+            result=result,
+            receipts=receipts,
+        )
+
+    def get_evidence_closure(
+        self, project_id: str, closure_digest: str
+    ) -> EvidenceClosure:
+        """Read and revalidate one exact project-scoped immutable closure."""
+        return self.__evidence_repository.get_closure(project_id, closure_digest)
 
     def issue_autonomous_p1_engineering_disposition(
         self,

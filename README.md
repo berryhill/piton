@@ -36,9 +36,12 @@ with server-derived attempt identity and exact project-scoped reads.
 `PitonApplicationService` executes the pinned
 `precision_worker_one:piton.realization-and-review.v2` worker under the honestly
 declared weaker `trusted-local` isolation class. It verifies attempt-bound exact
-and review output closure, but does not prove network or credential isolation and
-does not grant authored-state, channel, review, approval, export, fabrication-
-release, or machine-actuation authority.
+and review output closure. Request issuance also freezes three deterministic
+attempt-bound checks; the daemon can atomically publish their immutable receipts
+and one project-scoped `EvidenceClosure` only after exact custody readback.
+This does not prove network or credential isolation and does not grant authored-
+state, channel, human-review, approval, export, fabrication-release, or machine-
+actuation authority.
 
 ## Repository verification
 
