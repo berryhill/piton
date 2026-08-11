@@ -33,6 +33,7 @@ from piton.model import DraftExport
 from piton.precision_worker import EXPECTED_OUTPUTS, PRECISION_WORKER_PIN
 from piton.project_format import load_project_directory
 from piton.revision import DesignRevision
+from piton.supply_chain import verify_first_party_supply_chain
 
 REQUIRED = [
     ROOT / "AGENTS.md",
@@ -49,6 +50,7 @@ REQUIRED = [
     ROOT / "src/piton/assurance.py",
     ROOT / "src/piton/mesh_derivatives.py",
     ROOT / "src/piton/launch_verification.py",
+    ROOT / "src/piton/supply_chain.py",
     ROOT / "src/piton/review_packet.py",
     ROOT / "src/piton/human_review.py",
     ROOT / "src/piton/service/daemon.py",
@@ -107,13 +109,24 @@ REQUIRED = [
     ROOT / "docs/human-review-launch-assets.md",
     ROOT / "docs/rollback.md",
     ROOT / "docs/fabrication-safety.md",
+    ROOT / "docs/threat-model.md",
     ROOT / "tests/test_launch_assets.py",
+    ROOT / "tests/test_supply_chain_gate.py",
     ROOT / ".github/workflows/ci.yml",
 ]
 
 missing = [str(path.relative_to(ROOT)) for path in REQUIRED if not path.is_file()]
 if missing:
     raise SystemExit("missing required files: " + ", ".join(missing))
+
+supply_chain_receipt = verify_first_party_supply_chain(ROOT)
+if (
+    supply_chain_receipt.status != "pass"
+    or supply_chain_receipt.review_state != "needs_human_review"
+    or supply_chain_receipt.fabrication_release is not False
+    or supply_chain_receipt.machine_actuation is not False
+):
+    raise SystemExit("first-party supply-chain gate violated root safety truth")
 
 try:
     validate_launch_worker_contract(PRECISION_WORKER_PIN, EXPECTED_OUTPUTS)
