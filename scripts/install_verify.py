@@ -40,6 +40,10 @@ from piton.launch_verification import (
 from piton.model import TruthBoundary
 from piton.project_format import PitonProject, ProjectAuthority, ProjectSafety, SourceFile
 from piton.review_packet import ReviewPacket, build_review_packet, validate_review_packet
+from piton.browser_qualification import (
+    qualify_browser_observation,
+    validate_browser_qualification,
+)
 from piton.service import CommandAdmissionError, LocalDaemonCommandAdapter
 from piton.portfolio.partner_scaffold_t001 import (
     PartnerScaffoldT001Receipt,
@@ -54,6 +58,8 @@ if not callable(build_review_packet) or not callable(validate_review_packet):
     raise SystemExit("installed review-packet API is unavailable")
 if ReviewPacket.__name__ != "ReviewPacket":
     raise SystemExit("installed review-packet type is unavailable")
+if not callable(qualify_browser_observation) or not callable(validate_browser_qualification):
+    raise SystemExit("installed browser-qualification API is unavailable")
 package_root = files("piton")
 viewer_assets = ("index.html", "viewer.js", "viewer.css", "THIRD_PARTY_NOTICES.txt")
 for asset_name in viewer_assets:
@@ -71,6 +77,7 @@ if "https://" in viewer_surface or "http://" in viewer_surface:
 for schema_name in (
     "draft-export-receipt-v1.schema.json",
     "review-packet-v1.schema.json",
+    "browser-qualification-receipt-v1.schema.json",
     "semantic-selection-map-v1.schema.json",
     "human-review-intake-v1.schema.json",
     "framework-packet-closure-v1.schema.json",
@@ -393,6 +400,7 @@ print(
             "launch_asset_package": launch_receipt["schema"],
             "draft_export_api": draft_export_payload["schema"],
             "review_packet_api": "piton.review-packet.v1",
+            "browser_qualification_api": "piton.browser-qualification-receipt.v1",
             "review_packet_schemas": [
                 "review-packet-v1.schema.json",
                 "semantic-selection-map-v1.schema.json",

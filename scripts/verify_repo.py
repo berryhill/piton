@@ -52,6 +52,7 @@ REQUIRED = [
     ROOT / "src/piton/launch_verification.py",
     ROOT / "src/piton/supply_chain.py",
     ROOT / "src/piton/review_packet.py",
+    ROOT / "src/piton/browser_qualification.py",
     ROOT / "src/piton/human_review.py",
     ROOT / "src/piton/service/daemon.py",
     ROOT / "src/piton/viewer_assets/index.html",
@@ -68,6 +69,7 @@ REQUIRED = [
     ROOT / "tests/integration/test_evidence_closure.py",
     ROOT / "tests/test_mesh_derivatives.py",
     ROOT / "tests/test_review_packet.py",
+    ROOT / "tests/test_browser_qualification.py",
     ROOT / "tests/test_human_review_intake.py",
     ROOT / "tests/test_framework_packet_closure.py",
     ROOT / "tests/integration/test_daemon_command_admission.py",
@@ -80,6 +82,7 @@ REQUIRED = [
     ROOT / "schemas/review-export-receipt-v1.schema.json",
     ROOT / "schemas/restore-forward-request-v1.schema.json",
     ROOT / "schemas/review-packet-v1.schema.json",
+    ROOT / "schemas/browser-qualification-receipt-v1.schema.json",
     ROOT / "schemas/semantic-selection-map-v1.schema.json",
     ROOT / "schemas/human-review-intake-v1.schema.json",
     ROOT / "schemas/framework-packet-closure-v1.schema.json",
@@ -94,6 +97,7 @@ REQUIRED = [
     ROOT / "src/piton/schemas/review-export-receipt-v1.schema.json",
     ROOT / "src/piton/schemas/restore-forward-request-v1.schema.json",
     ROOT / "src/piton/schemas/review-packet-v1.schema.json",
+    ROOT / "src/piton/schemas/browser-qualification-receipt-v1.schema.json",
     ROOT / "src/piton/schemas/semantic-selection-map-v1.schema.json",
     ROOT / "src/piton/schemas/human-review-intake-v1.schema.json",
     ROOT / "src/piton/schemas/framework-packet-closure-v1.schema.json",
@@ -138,6 +142,7 @@ for schema_name in (
     "review-export-receipt-v1.schema.json",
     "restore-forward-request-v1.schema.json",
     "review-packet-v1.schema.json",
+    "browser-qualification-receipt-v1.schema.json",
     "semantic-selection-map-v1.schema.json",
     "human-review-intake-v1.schema.json",
     "framework-packet-closure-v1.schema.json",
@@ -302,6 +307,7 @@ draft_export_validator = load_validator("draft-export-receipt-v1.schema.json")
 review_export_validator = load_validator("review-export-receipt-v1.schema.json")
 restore_forward_validator = load_validator("restore-forward-request-v1.schema.json")
 load_validator("review-packet-v1.schema.json")
+load_validator("browser-qualification-receipt-v1.schema.json")
 load_validator("semantic-selection-map-v1.schema.json")
 human_review_intake_validator = load_validator("human-review-intake-v1.schema.json")
 framework_packet_closure_validator = load_validator(

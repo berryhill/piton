@@ -200,6 +200,53 @@ release authority.
    not review acceptance, exact-geometry proof, approval, export, fabrication
    release, or machine actuation.
 
+### Record browser-qualification diagnostics
+
+Use `qualify_browser_observation` only to preserve one immutable diagnostic
+receipt outside the packet. The observation must name the exact source-fixed
+browser/OS/kernel/software-renderer/viewport/device-scale/CPU/memory/tool row;
+nearest-platform substitution and omitted measurements fail closed. Keep the
+browser context offline, abort and count request events, open packet-local
+`index.html` by `file:` URL, exercise every declared interaction and golden-path
+step, verify CAD `Z=0` on the physical grid, inject the three declared graceful
+failure cases, and record every source-fixed budget measurement.
+
+```python
+from piton.browser_qualification import (
+    qualify_browser_observation,
+    validate_browser_qualification,
+)
+
+receipt = qualify_browser_observation(
+    "/tmp/piton-review-packet",
+    observed_browser_run,
+    "/tmp/piton-browser-qualification.json",
+)
+verified_receipt = validate_browser_qualification(
+    "/tmp/piton-browser-qualification.json"
+)
+assert verified_receipt == receipt
+assert verified_receipt["schema"] == "piton.browser-qualification-receipt.v1"
+assert verified_receipt["status"] == "failed"
+assert "provenance.controlled_browser_execution_missing" in verified_receipt[
+    "failed_checks"
+]
+assert verified_receipt["truth"]["fabrication_release"] is False
+assert verified_receipt["truth"]["machine_actuation"] is False
+```
+
+The current API ingests caller-supplied observations and therefore cannot prove
+that a controlled browser harness actually executed them. It deliberately
+records `provenance.controlled_browser_execution_missing`; caller literals,
+passing measurements, or a recomputed digest cannot remove that failure. Treat
+`piton.browser-qualification-receipt.v1` as derived review qualification evidence
+only, never as successful platform qualification, review acceptance, approval,
+export, release, channel transition, or actuation. The packet remains
+immutable and the receipt remains outside it with
+`review_state=needs_human_review`, `fabrication_release=false`,
+`machine_actuation=false`, `release_state=unreleased`, and
+`channel_transition=false`.
+
 ### Admit framework-only human-review work
 
 After packet validation succeeds, construct an immutable intake from the
