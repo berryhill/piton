@@ -16,6 +16,8 @@ from piton.assurance import (
     GovernedAlphaEvidence,
     P4AssuranceEvidence,
     P4AssurancePolicy,
+    P4AssuranceReceipt,
+    emit_unavailable_p4_receipts,
     validate_p4_evidence_policy_binding,
 )
 from piton.human_review import FrameworkPacketClosure, HumanReviewIntake
@@ -84,9 +86,11 @@ REQUIRED = [
     ROOT / "schemas/governed-alpha-evidence-v1.schema.json",
     ROOT / "schemas/p4-assurance-policy-v1.schema.json",
     ROOT / "schemas/p4-assurance-evidence-v1.schema.json",
+    ROOT / "schemas/p4-assurance-receipt-v1.schema.json",
     ROOT / "src/piton/schemas/governed-alpha-evidence-v1.schema.json",
     ROOT / "src/piton/schemas/p4-assurance-policy-v1.schema.json",
     ROOT / "src/piton/schemas/p4-assurance-evidence-v1.schema.json",
+    ROOT / "src/piton/schemas/p4-assurance-receipt-v1.schema.json",
     ROOT / "src/piton/schemas/review-export-receipt-v1.schema.json",
     ROOT / "src/piton/schemas/restore-forward-request-v1.schema.json",
     ROOT / "src/piton/schemas/review-packet-v1.schema.json",
@@ -140,6 +144,7 @@ for schema_name in (
     "governed-alpha-evidence-v1.schema.json",
     "p4-assurance-policy-v1.schema.json",
     "p4-assurance-evidence-v1.schema.json",
+    "p4-assurance-receipt-v1.schema.json",
 ):
     repository_schema = (ROOT / "schemas" / schema_name).read_bytes()
     packaged_schema = (ROOT / "src" / "piton" / "schemas" / schema_name).read_bytes()
@@ -241,8 +246,10 @@ required_assurance_documentation = (
     "GovernedAlphaEvidence",
     "P4AssurancePolicy",
     "P4AssuranceEvidence",
+    "P4AssuranceReceipt",
     "DEFAULT_P4_ASSURANCE_POLICY",
     "validate_p4_evidence_policy_binding",
+    "emit_unavailable_p4_receipts",
     "exact-realization",
     "exact-exchange",
     "review-only",
@@ -303,12 +310,35 @@ framework_packet_closure_validator = load_validator(
 governed_alpha_validator = load_validator("governed-alpha-evidence-v1.schema.json")
 p4_policy_validator = load_validator("p4-assurance-policy-v1.schema.json")
 p4_evidence_validator = load_validator("p4-assurance-evidence-v1.schema.json")
+p4_receipt_validator = load_validator("p4-assurance-receipt-v1.schema.json")
 p4_policy_round_trip = P4AssurancePolicy.from_primitive(
     DEFAULT_P4_ASSURANCE_POLICY.to_primitive()
 )
 if p4_policy_round_trip.digest != DEFAULT_P4_ASSURANCE_POLICY.digest:
     raise SystemExit("source-fixed P4 assurance policy canonical round trip drifted")
 p4_policy_validator.validate(p4_policy_round_trip.to_primitive())
+unavailable_receipts = emit_unavailable_p4_receipts()
+if tuple(receipt.requirement_id for receipt in unavailable_receipts) != tuple(
+    requirement.requirement_id
+    for requirement in DEFAULT_P4_ASSURANCE_POLICY.requirements
+):
+    raise SystemExit("unavailable P4 receipts do not preserve policy declaration order")
+for receipt in unavailable_receipts:
+    primitive = receipt.to_primitive()
+    p4_receipt_validator.validate(primitive)
+    if P4AssuranceReceipt.from_primitive(primitive).digest != receipt.digest:
+        raise SystemExit("unavailable P4 assurance receipt canonical round trip drifted")
+    for field, unsafe_value in (
+        ("availability", "available"),
+        ("threshold_passed", True),
+        ("evidence_refs", ["sha256:" + "0" * 64]),
+    ):
+        try:
+            p4_receipt_validator.validate({**primitive, field: unsafe_value})
+        except ValidationError:
+            pass
+        else:
+            raise SystemExit(f"P4 assurance receipt schema accepted unsafe {field}")
 for template_name, template in launch_templates.items():
     governed_alpha_validator.validate(template["governed_alpha_evidence"])
     p4_evidence_validator.validate(template["p4_assurance"]["evidence"])
