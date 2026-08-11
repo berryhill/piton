@@ -39,6 +39,9 @@ declared weaker `trusted-local` isolation class. It verifies attempt-bound exact
 and review output closure. Request issuance also freezes three deterministic
 attempt-bound checks; the daemon can atomically publish their immutable receipts
 and one project-scoped `EvidenceClosure` only after exact custody readback.
+A frozen `FrameworkPacketClosure` can then confirm, without persistence, that
+one independently validated packet and its separate exact/review artifact
+digests remain `needs_human_review`; it cannot record a human decision.
 This does not prove network or credential isolation and does not grant authored-
 state, channel, human-review, approval, export, fabrication-release, or machine-
 actuation authority.

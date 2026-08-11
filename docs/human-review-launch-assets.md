@@ -240,6 +240,50 @@ receipt, approval, export, release, or machine state. Confirm those durable
 row counts are unchanged when auditing an integration. Treat an identity,
 digest, packet-truth, or schema mismatch as a blocking custody failure.
 
+### Close a framework packet as needs_human_review
+
+After intake and packet validation, create the immutable closure from exact
+custodied values only and ask the service to re-read both authorities:
+
+```python
+from piton import FrameworkPacketClosure
+
+framework_closure = FrameworkPacketClosure(
+    closure_id="framework-packet-closure-one",
+    project_id=closure.project_id,
+    revision_id=closure.revision_id,
+    attempt_id=closure.attempt_id,
+    evidence_closure_digest=closure.closure_digest,
+    review_packet_digest=verified.packet_digest,
+    worker_result_digest=verified.worker_result_digest,
+    declaration_digest=verified.declaration_digest,
+    generation=verified.generation,
+    fence=verified.fence,
+    lease_id=verified.lease_id,
+    exact_brep_digest=verified.artifacts["exact_brep"]["digest"],
+    step_digest=verified.artifacts["step"]["digest"],
+    review_glb_digest=verified.artifacts["review_glb"]["digest"],
+    review_selection_map_digest=verified.artifacts["review_selection_map"]["digest"],
+)
+closed = service.close_framework_packet(
+    framework_closure, "/tmp/piton-review-packet"
+)
+assert closed is framework_closure
+assert closed.review_state == "needs_human_review"
+assert closed.fabrication_release is False
+assert closed.machine_actuation is False
+assert closed.release_state == "unreleased"
+assert closed.channel_transition is False
+```
+
+The service performs exact project-scoped `EvidenceClosure` readback, validates
+the packet file inventory and bytes again, and rejects any mismatch in project,
+revision, attempt, closure, packet, worker result, declaration,
+generation/fence/lease, exact B-rep/STEP, or review-only GLB/selection-map
+digests. The operation is non-persistent and does not modify packet bytes.
+Framework closure is not review acceptance, engineering approval, channel
+promotion, export, fabrication release, or machine actuation.
+
 ## Restore-forward request (no rollback mutation)
 
 1. Preserve the accepted project and history byte-for-byte. Prepare the desired prior design as a new canonical candidate directory with truthful source digests.
