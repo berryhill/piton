@@ -24,6 +24,13 @@ APPROVED_ACTIONS = MappingProxyType(
     }
 )
 APPROVED_WORKFLOWS = (".github/workflows/ci.yml",)
+APPROVED_WORKFLOW_DIGESTS = MappingProxyType(
+    {
+        ".github/workflows/ci.yml": (
+            "sha256:328dd163aea89578a176894070768ae7ae27f7a421547739412e1539cd57fda3"
+        )
+    }
+)
 APPROVED_INSTALL_COMMANDS = (
     "python3 -m pip install uv==0.11.6",
     "uv pip install --python /tmp/piton-wheel-venv/bin/python dist/*.whl",
@@ -265,6 +272,12 @@ def _verify_workflow(root: Path, path: Path) -> bytes:
     if install_commands != APPROVED_INSTALL_COMMANDS:
         raise SupplyChainViolation(
             f"workflow install command inventory changed: {install_commands!r}"
+        )
+    relative_path = path.relative_to(root).as_posix()
+    approved_digest = APPROVED_WORKFLOW_DIGESTS.get(relative_path)
+    if approved_digest is None or _digest(content) != approved_digest:
+        raise SupplyChainViolation(
+            f"workflow does not match its approved content digest: {relative_path}"
         )
     return content
 

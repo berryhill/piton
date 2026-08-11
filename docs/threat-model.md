@@ -116,6 +116,7 @@ The gate fails closed unless:
 - every registry package comes only from the declared PyPI simple index and has at least one SHA-256-bound distribution from the approved artifact origin;
 - the only editable package is this repository at `.`;
 - workflow inventory is exactly predeclared;
+- every workflow is byte-for-byte bound to its separately predeclared SHA-256 content digest, so an unreviewed permission, command, step, trigger, runner, environment, or other workflow mutation fails closed even when a structural scanner does not recognize its syntax;
 - every action is on the first-party allowlist and pinned to its exact approved immutable 40-hex commit;
 - workflow repository permission remains `contents: read`;
 - CI performs `uv sync --frozen --all-extras`; and
