@@ -33,6 +33,26 @@ ROOT = Path(__file__).resolve().parents[2]
 DIGEST = "sha256:" + "7" * 64
 
 
+def database_snapshot(connection: sqlite3.Connection) -> dict[str, tuple[tuple[object, ...], ...]]:
+    """Capture every application table so a rejected closure proves zero DB mutation."""
+    tables = (
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_schema "
+            "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        ).fetchall()
+    )
+    return {
+        table: tuple(
+            sorted(
+                (tuple(row) for row in connection.execute(f'SELECT * FROM "{table}"')),
+                key=repr,
+            )
+        )
+        for table in tables
+    }
+
+
 def prepared(tmp_path: Path, *, precision_clock=None):
     inputs = RealizationInputs.from_repository(ROOT, DEFAULT_PARAMETERS)
     service = PitonApplicationService.open(
@@ -222,11 +242,14 @@ def test_lease_expiry_during_checks_publishes_no_evidence_or_state_change(
     service, database, inputs = prepared(tmp_path, precision_clock=clock)
     request = service.issue_precision_worker_request("project_one", "attempt_one")
     result = service.run_precision_worker(request)
+    with database.read() as connection:
+        before = database_snapshot(connection)
 
     with pytest.raises(EvidenceClosureError, match="lease.*expired"):
         service.close_precision_worker_evidence(request, result)
 
     with database.read() as connection:
+        after = database_snapshot(connection)
         assert connection.execute("SELECT count(*) FROM evidence_closures").fetchone()[0] == 0
         assert (
             connection.execute("SELECT count(*) FROM evidence_check_receipts").fetchone()[0]
@@ -246,6 +269,7 @@ def test_lease_expiry_during_checks_publishes_no_evidence_or_state_change(
         channels = connection.execute(
             "SELECT revision_id,generation FROM channel_pointers"
         ).fetchall()
+    assert after == before
     assert all(tuple(row) == (inputs.revision.revision_id, 0) for row in channels)
 
 
