@@ -314,3 +314,25 @@ OS/GPU or a signed desktop/daemon route; budgets for model-size,
 startup, memory, CPU, battery, interaction-latency, output-size,
 graceful failure; WCAG 2.2 AA evidence with named browser/
 assistive-technology combinations.
+
+### Browser-qualification evidence boundary
+
+`piton.browser-qualification-receipt.v1` is a closed, derived diagnostic
+receipt for one exact packet digest and one exact declared browser row. The
+reader recomputes packet custody, rejects missing or substituted environment
+fields, applies source-fixed size/startup/interaction/memory/CPU/failure
+budgets, and records disconnected-network, visible-identity, interaction,
+build-plane, golden-path, and failure-injection observations. It has no
+authored-source, revision, lifecycle, review-decision, channel, export, release,
+or machine authority.
+
+The current API accepts caller-supplied observations only. Such observations
+cannot prove controlled browser execution, so every emitted receipt includes
+`provenance.controlled_browser_execution_missing` and remains `status=failed`.
+This is derived review qualification evidence, not a successful supported-row
+qualification. A future controlled harness requires a separate source-fixed
+admission boundary; callers cannot remove this failure with a flag or
+self-consistent digest. Regardless of diagnostic completeness, the receipt
+retains `review_state=needs_human_review`, `fabrication_release=false`,
+`machine_actuation=false`, `release_state=unreleased`, and
+`channel_transition=false`.

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piton.local/schemas/browser-qualification-receipt-v1.schema.json",
+  "title": "Piton browser qualification receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "status", "packet", "environment", "method", "budgets",
+    "measurements", "observation", "failed_checks", "p4_requirement_ids",
+    "invalidation_conditions", "authority", "truth", "evidence_digest"
+  ],
+  "properties": {
+    "schema": {"const": "piton.browser-qualification-receipt.v1"},
+    "status": {"const": "failed"},
+    "packet": {"type": "object"},
+    "environment": {"type": "object"},
+    "method": {"type": "object"},
+    "budgets": {"type": "object"},
+    "measurements": {"type": "object"},
+    "observation": {"type": "object"},
+    "failed_checks": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "p4_requirement_ids": {
+      "const": [
+        "offline-golden-path", "supported-platform-matrix",
+        "performance-budgets", "vendored-csp-license-privacy"
+      ]
+    },
+    "invalidation_conditions": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "authority": {
+      "const": "derived review qualification evidence only; not review acceptance, approval, export, release, or actuation"
+    },
+    "truth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["review_state", "fabrication_release", "machine_actuation", "release_state", "channel_transition"],
+      "properties": {
+        "review_state": {"const": "needs_human_review"},
+        "fabrication_release": {"const": false},
+        "machine_actuation": {"const": false},
+        "release_state": {"const": "unreleased"},
+        "channel_transition": {"const": false}
+      }
+    },
+    "evidence_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}
