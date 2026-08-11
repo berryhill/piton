@@ -40,6 +40,7 @@ from piton.launch_verification import (
 from piton.model import TruthBoundary
 from piton.project_format import PitonProject, ProjectAuthority, ProjectSafety, SourceFile
 from piton.review_packet import ReviewPacket, build_review_packet, validate_review_packet
+from piton.service import CommandAdmissionError, LocalDaemonCommandAdapter
 from piton.portfolio.partner_scaffold_t001 import (
     PartnerScaffoldT001Receipt,
     validate_partner_scaffold_t001,
@@ -312,6 +313,14 @@ if launch_receipt["safety"] != {
     raise SystemExit("installed launch-asset receipt violated safety truth")
 
 with tempfile.TemporaryDirectory() as temporary_directory:
+    daemon_adapter = LocalDaemonCommandAdapter.open(
+        Path(temporary_directory) / "daemon-smoke",
+        principal_ids_by_uid={},
+    )
+    if daemon_adapter.__class__ is not LocalDaemonCommandAdapter:
+        raise SystemExit("installed local-daemon command adapter is unavailable")
+    if not issubclass(CommandAdmissionError, ValueError):
+        raise SystemExit("installed command-admission error contract is unavailable")
     database = Database(Path(temporary_directory) / "piton.sqlite3")
     database.migrate()
     BuildAttemptCoordinator(database)
@@ -389,6 +398,7 @@ print(
                 "semantic-selection-map-v1.schema.json",
             ],
             "human_review_intake_api": human_review_intake.to_primitive()["schema"],
+            "local_daemon_command_admission": "installed-secretless-af-unix",
             "framework_packet_closure_api": framework_packet_closure.to_primitive()[
                 "schema"
             ],

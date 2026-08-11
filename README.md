@@ -48,8 +48,14 @@ attempt, evidence closure, framework/review packets, and separately scoped
 exact B-rep, STEP, GLB, and selection-map artifacts. These deep checks validate
 review evidence only and cannot confer advancement. Trusted durable human
 authorization issuance and verification are unavailable in this Stage-1 slice;
-every human-authority advancement fails closed until the later daemon-derived
-identity/admission task implements authenticated durable authority. P4 assurance thresholds,
+every human-authority advancement fails closed. Local Linux command admission
+is implemented separately: `LocalDaemonCommandAdapter` derives the connected
+peer UID from kernel-owned AF_UNIX `SO_PEERCRED`, resolves it through a copied
+server-owned UID-to-principal mapping, rejects unknown UIDs and extra fields,
+and admits only closed typed commands into `PitonApplicationService`. This
+secretless local identity boundary is not durable human-authorization issuance,
+custody, or verification and cannot grant approval, release, or machine
+authority. P4 assurance thresholds,
 named environments, methods, comparators, and invalidation conditions are
 predeclared in an immutable, content-digested `P4AssurancePolicy`; later P4
 evidence must bind that exact digest and cannot self-declare advancement.

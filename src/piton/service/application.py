@@ -11,10 +11,9 @@ import json
 from dataclasses import asdict, dataclass, fields, is_dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, Mapping
+from typing import TYPE_CHECKING, Callable, Mapping
 
 from ..evidence import EvidenceClosure, EvidenceClosureError, EvidenceRepository
-from ..feasibility import evaluate_exact_cad_feasibility
 from ..human_review import (
     FrameworkPacketClosure,
     FrameworkPacketClosureError,
@@ -34,14 +33,6 @@ from ..portfolio import (
     receipt_digest,
     verify_successor_admission,
 )
-from ..precision_worker import (
-    EXPECTED_OUTPUTS,
-    PRECISION_WORKER_PIN,
-    execute_precision_worker,
-    validate_precision_worker_bindings,
-    verify_precision_worker_result,
-)
-from ..realization import RealizationInputs
 from ..review_packet import ReviewPacket, build_review_packet, validate_review_packet
 from ..revision import DesignRevision
 from ..source_tree import SourceTree, SourceTreeFile
@@ -65,8 +56,11 @@ from .commands import (
 from .drafts import DraftRecord, DraftStore
 from ..worker_contracts import PrecisionWorkerRequest, PrecisionWorkerResult
 
+if TYPE_CHECKING:
+    from ..realization import RealizationInputs
+
 _PRINCIPAL_PROOF = object()
-ExactInputs = Callable[[str, str, str], RealizationInputs]
+ExactInputs = Callable[[str, str, str], "RealizationInputs"]
 Clock = Callable[[], datetime]
 
 
@@ -203,6 +197,9 @@ class PitonApplicationService:
     def _precision_worker_bindings(
         self, project_id: str, attempt_id: str
     ) -> tuple[DurableBuildAttempt, CoordinatorState, RealizationInputs]:
+        from ..precision_worker import validate_precision_worker_bindings
+        from ..realization import RealizationInputs
+
         attempt, state = self.__build_attempt_coordinator.get_execution_bindings(
             project_id, attempt_id
         )
@@ -227,6 +224,8 @@ class PitonApplicationService:
     def _compose_precision_worker_request(
         attempt: DurableBuildAttempt, state: CoordinatorState
     ) -> PrecisionWorkerRequest:
+        from ..precision_worker import EXPECTED_OUTPUTS, PRECISION_WORKER_PIN
+
         if state.lease_id is None:
             raise ValueError("coordinator lease is required")
         return PrecisionWorkerRequest(
@@ -262,6 +261,8 @@ class PitonApplicationService:
 
     def run_precision_worker(self, request: PrecisionWorkerRequest) -> PrecisionWorkerResult:
         """Rebind an issued request and select its attempt-scoped output internally."""
+        from ..precision_worker import execute_precision_worker
+
         if not isinstance(request, PrecisionWorkerRequest):
             raise TypeError("request must be a PrecisionWorkerRequest")
         attempt, state, inputs = self._precision_worker_bindings(
@@ -278,6 +279,8 @@ class PitonApplicationService:
         self, request: PrecisionWorkerRequest, result: PrecisionWorkerResult
     ) -> EvidenceClosure:
         """Verify current daemon custody, run fixed checks, and publish atomically."""
+        from ..precision_worker import verify_precision_worker_result
+
         if not isinstance(request, PrecisionWorkerRequest):
             raise TypeError("request must be a PrecisionWorkerRequest")
         if not isinstance(result, PrecisionWorkerResult):
@@ -501,6 +504,8 @@ class PitonApplicationService:
         qualification_receipt_path: Path,
     ) -> PhaseExitReceipt:
         """Issue P1 only from an authenticated receipt already held by this daemon."""
+        from ..feasibility import evaluate_exact_cad_feasibility
+
         predecessor = self._load_custodied_p0_receipt(predecessor_receipt_id)
         predecessor_admission = verify_successor_admission(predecessor, successor=Phase.P1)
         if (

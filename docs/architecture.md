@@ -41,6 +41,25 @@ intentionally removed because its caller-supplied current-revision argument
 could not establish daemon-owned currency. Derivation does not move a channel,
 commit a revision, approve a proposal, export, release, or actuate machinery.
 
+### Local daemon command admission
+
+`LocalDaemonCommandAdapter` is the implemented Linux-local transport boundary
+for typed custody commands. It accepts a connected AF_UNIX socket, derives the
+peer UID from kernel-owned `SO_PEERCRED`, and resolves that UID through a copied,
+server-owned UID-to-principal mapping. Unknown UIDs fail closed. The command
+envelope, every command payload, source-tree records, and parameter mappings are
+closed before the adapter invokes the sole `PitonApplicationService`; callers
+cannot add identity, credentials, grants, policy, approval, release,
+`fabrication_release`, or `machine_actuation` claims.
+
+The adapter is Linux-specific and intentionally has no fallback identity path
+when AF_UNIX peer credentials are unavailable. Socket creation and permissions,
+lifecycle management, and provisioning of the server-owned UID mapping remain
+deployment/composition responsibilities. Peer identity is command-admission
+evidence only: it is not durable human-authorization issuance, custody, or
+verification and cannot imply review acceptance, engineering approval, export,
+fabrication release, or machine actuation.
+
 ## Stage 1 durable lifecycle (ten distinct concepts)
 
 `ChangeProposal` → `ProposalDisposition` → `DesignRevision` → `BuildAttempt` → `EvidenceClosure` → `ChannelPointer` → `ApprovalRecord` → `DraftExport` → `FabricationRelease` → `ReleasedPackageProjection`.
@@ -222,10 +241,11 @@ packet byte is self-consistent.
 Trusted durable human authorization issuance and verification are not
 implemented in this Stage-1 slice. Every `Authority.HUMAN` advancement therefore
 fails closed with an explicit reason; caller-selected enums, records, verifier
-objects, database rows, and P3 evidence bundles are never authority. A later
-daemon-derived identity/admission task owns authenticated identity, durable
-issuance, custody, and verification. Until that task lands, P4 cannot be
-admitted from P3.
+objects, database rows, and P3 evidence bundles are never authority. The local
+daemon adapter now derives mapped AF_UNIX peer identity and admits closed typed
+commands, but that transport identity does not issue, custody, or verify durable
+human authorization. Until a separate durable human-authority mechanism lands,
+P4 cannot be admitted from P3.
 
 P4 has a separate, source-native policy authority. `P4AssurancePolicy` freezes
 policy identity, ordered requirements, method/comparator digests, thresholds,
