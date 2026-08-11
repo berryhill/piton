@@ -1,6 +1,6 @@
 # Piton Stage 1 threat model
 
-Version: 1.0
+Version: 1.1
 Status: review baseline
 Owner: Piton maintainers
 Security gate: `piton.first-party-supply-chain-gate.v1`
@@ -39,7 +39,7 @@ Out of scope for this version: deployed multi-tenant services, arbitrary third-p
 
 ## Trust boundaries
 
-TB-1 — Client/adapter to daemon. Requests and caller-created DTOs are untrusted data. Only daemon custody establishes project currency, attempt identity, and capabilities.
+TB-1 — Client/adapter to daemon. Requests and caller-created DTOs are untrusted data. Daemon command admission derives identity from kernel-owned Unix peer credentials and a composition-root-controlled server-owned UID mapping. Its closed command schema rejects caller-supplied identity, credential, grant, policy, approval, release, and machine-actuation fields. Only daemon custody establishes project currency, attempt identity, and capabilities.
 
 TB-2 — Authored source to precision worker. Source may be hostile executable code. The current worker truthfully reports weaker `trusted-local` isolation; it is not networkless, credentialless, containerized, or sandboxed by implication.
 
@@ -82,7 +82,7 @@ TB-10 — Human judgment to durable consequence. Authenticated durable human aut
 - Schema/template parsing and launch-asset validation.
 - `pyproject.toml`, `uv.lock`, package downloads, build isolation, wheel construction, and clean install.
 - `.github/workflows/*.yml`, pinned action execution, pull-request events, and repository merge controls.
-- CLI arguments, output paths, environment variables, local clocks, and filesystem links.
+- CLI arguments, daemon command admission over a connected local Unix socket, output paths, environment variables, local clocks, and filesystem links.
 - Future operator identity, approval, export, release, synchronization, and capability-package APIs.
 
 ## Threat register
@@ -101,6 +101,7 @@ TB-10 — Human judgment to durable consequence. Authenticated durable human aut
 | TM-10 | A person or caller-supplied record claims review, approval, export, release, or machine authority without authenticated durable issuance (TB-10). | All human-authority advancement fails closed; P3/P4 validity is evidence only; `fabrication_release=false`; `machine_actuation=false`; review remains `needs_human_review`. | `tests/test_assurance_admission_boundary.py`, `tests/test_assurance_policy.py`, `tests/test_lifecycle.py`. | Durable authenticated human issuance is intentionally absent, so advancement remains unavailable. | Identity/lifecycle owner | Human identity, signature, approval, export, release, or machine interface is introduced. |
 | TM-11 | Secrets enter source, fixtures, logs, artifacts, reports, prompts, or worker diagnostics. | Secret references only; bounded sanitized diagnostics; generated workers receive no claimed credential grant; repository review scans remain required. | Worker diagnostic tests and repository review. | No first-party secret scanner or protected runtime secret custody is implemented in this slice. | Security owner | Any credentialed integration, remote worker, signing service, registry credential, or deployment is introduced. |
 | TM-12 | Denial of service through pathological CAD, decompression, giant manifests, worker hangs, disk exhaustion, or repeated retries. | Bounded contracts/resource declarations, attempt isolation, leases, output roots, and bounded implementation-loop retries. | Worker contract and implementation-loop tests. | Comprehensive CPU/memory/disk/process enforcement and performance budgets are incomplete. | Worker/operations owner | External/untrusted workload admission, concurrency, artifact-size limits, or runtime budget changes. |
+| TM-13 | A local client forges principal identity or embeds authority-shaped fields in a daemon command, bypassing the sole custody service (TB-1/TB-9/TB-10). | The adapter accepts only connected `AF_UNIX` sockets, derives UID from kernel-owned Unix peer credentials, resolves it through a copied server-owned UID mapping, rejects unknown UIDs, parses a closed command schema, and routes typed commands through the one application service. | `tests/integration/test_daemon_command_admission.py`; `scripts/verify_repo.py` requires the daemon source and acceptance test. | Processes sharing one mapped OS UID are intentionally indistinguishable; socket creation/permissions, process supervision, and a durable authenticated human-principal issuer are not implemented by this adapter. | Daemon/security owner | Socket transport, peer-credential mechanism, UID/principal mapping ownership, admitted command inventory/schema, composition root, or application-service route changes. |
 
 No threat-register row is closed solely because a test passes. Tests establish current implementation evidence at one candidate head; human review decides whether residual risk is acceptable for the stated non-production scope.
 
@@ -134,7 +135,7 @@ uv run --frozen python scripts/verify_repo.py
 uv run --frozen python -m pytest -q
 ```
 
-The focused tests prove the current repository passes and representative mutations fail: mutable action tag, unapproved action publisher, non-exact direct dependency, missing locked artifact hash, symlinked policy input, and an unapproved install hidden in a multiline workflow run block. `scripts/verify_repo.py` executes the same gate in CI and requires the threat model, gate source, and tests to exist.
+The focused tests prove the current repository passes and representative mutations fail: mutable action tag, unapproved action publisher, non-exact direct dependency, missing locked artifact hash, symlinked policy input, and an unapproved install hidden in a multiline workflow run block. `tests/integration/test_daemon_command_admission.py` separately proves the current secretless local command boundary derives its principal from the peer UID, rejects unmapped peers and authority-shaped fields, and reaches the one typed custody service. `scripts/verify_repo.py` executes the supply-chain gate in CI and requires the threat model, gate source, daemon source, and both acceptance-test surfaces to exist.
 
 Evidence interpretation:
 
@@ -154,6 +155,7 @@ Evidence interpretation:
 8. Browser/GPU/accessibility matrices and performance/resource acceptance targets are incomplete.
 9. Durable authenticated human authorization does not exist; this safely blocks advancement but leaves the product flow incomplete.
 10. The required 25/25 end-to-end and 1,000 fault/concurrency Stage 1 gates are not claimed complete.
+11. Local processes sharing an authorized UID share its mapped daemon principal; the adapter does not provide per-process or per-human authentication.
 
 ## Owners
 
@@ -177,7 +179,7 @@ Re-review and issue a new threat-model version before relying on this baseline i
 - worker implementation pin, request/result contract, output roles, isolation class, network/credential policy, remote execution, or resource limits;
 - exact kernel, Python version, build backend, direct/transitive dependency, package registry, lock format, action, workflow, runner, or CI permission;
 - review packet, viewer asset, semantic map, topology identity, coordinate mapping, measurement, or derivative format;
-- authentication, secrets, signing, operator grant, human-review decision, approval, export, fabrication release, or machine interface;
+- authentication, daemon socket/peer credentials, server-owned UID mapping, command admission schema, secrets, signing, operator grant, human-review decision, approval, export, fabrication release, or machine interface;
 - deployment, multi-user/multi-tenant operation, cloud custody, plugin/capability marketplace, external API, or untrusted code admission;
 - a silent wrong binding, cross-project read, missing referenced artifact, secret exposure, unauthorized lifecycle transition, or supply-chain compromise is observed.
 

@@ -273,8 +273,30 @@ def test_threat_model_closes_required_scope_and_invalidation_contract():
         "operator and human-review boundary",
     ):
         assert scope in threat_model
-    for threat_id in ("TM-01", "TM-02", "TM-03", "TM-04", "TM-05", "TM-06", "TM-07", "TM-08", "TM-09", "TM-10"):
+    for threat_id in (
+        "TM-01",
+        "TM-02",
+        "TM-03",
+        "TM-04",
+        "TM-05",
+        "TM-06",
+        "TM-07",
+        "TM-08",
+        "TM-09",
+        "TM-10",
+        "TM-11",
+        "TM-12",
+        "TM-13",
+    ):
         assert threat_id in threat_model
+    for daemon_boundary in (
+        "daemon command admission",
+        "kernel-owned Unix peer credentials",
+        "server-owned UID mapping",
+        "closed command schema",
+        "tests/integration/test_daemon_command_admission.py",
+    ):
+        assert daemon_boundary in threat_model
     assert "fabrication_release=false" in threat_model
     assert "machine_actuation=false" in threat_model
     assert "review_state=needs_human_review" in threat_model
