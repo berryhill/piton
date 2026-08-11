@@ -33,6 +33,19 @@ _TRUTH = {
     "machine_actuation": False,
     "review_state": "needs_human_review",
 }
+_WORKER_PYTHON_PAYLOAD = (
+    "launch_verification.py",
+    "mesh_derivatives.py",
+    "parts/l_bracket.py",
+    "precision_worker.py",
+    "precision_worker_child.py",
+    "precision_worker_launch.py",
+    "realization.py",
+    "revision.py",
+    "storage/build_attempts.py",
+    "storage/db.py",
+    "worker_contracts.py",
+)
 
 
 def _manifest_digest(namespace: str, value: Mapping[str, Any]) -> str:
@@ -54,8 +67,15 @@ def _file_closure_digest(namespace: str, entries: list[dict[str, Any]]) -> str:
 def _files(root: Path, *, python_payload: bool = False) -> list[tuple[str, bytes]]:
     entries: list[tuple[str, bytes]] = []
     package_root = root / "src" / "piton"
-    search_root = package_root if python_payload else root
-    for path in sorted(search_root.rglob("*")):
+    if python_payload:
+        for relative in _WORKER_PYTHON_PAYLOAD:
+            path = package_root / relative
+            metadata = path.lstat()
+            if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+                raise ValueError("precision worker payload must contain only regular files")
+            entries.append((relative, path.read_bytes()))
+        return entries
+    for path in sorted(root.rglob("*")):
 
         metadata = path.lstat()
         if stat.S_ISLNK(metadata.st_mode):
@@ -65,13 +85,6 @@ def _files(root: Path, *, python_payload: bool = False) -> list[tuple[str, bytes
         if not stat.S_ISREG(metadata.st_mode):
             raise ValueError("precision worker input bundle must contain only regular files")
         relative = path.relative_to(root).as_posix()
-        if python_payload:
-            if path.suffix != ".py" or not path.is_relative_to(package_root):
-                continue
-            package_relative = path.relative_to(package_root).as_posix()
-            if package_relative == "worker_admission.py" or package_relative.startswith("service/"):
-                continue
-            relative = package_relative
         entries.append((relative, path.read_bytes()))
     return entries
 

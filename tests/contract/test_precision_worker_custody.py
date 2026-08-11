@@ -92,10 +92,17 @@ def test_staged_child_archive_excludes_daemon_only_python_authority(tmp_path: Pa
         assert not (staged_package / "worker_admission.py").exists()
         assert not (staged_package / "service").exists()
         assert {path.relative_to(staged_package).as_posix() for path in staged_package.rglob("*.py")} == {
-            path.relative_to(ROOT / "src" / "piton").as_posix()
-            for path in (ROOT / "src" / "piton").rglob("*.py")
-            if path.name != "worker_admission.py"
-            and not path.is_relative_to(ROOT / "src" / "piton" / "service")
+            "launch_verification.py",
+            "mesh_derivatives.py",
+            "parts/l_bracket.py",
+            "precision_worker.py",
+            "precision_worker_child.py",
+            "precision_worker_launch.py",
+            "realization.py",
+            "revision.py",
+            "storage/build_attempts.py",
+            "storage/db.py",
+            "worker_contracts.py",
         }
     finally:
         remove_input_bundle(bundle)
