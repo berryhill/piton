@@ -618,4 +618,3 @@ def test_browser_qualification_contract_is_in_repository_and_installed_proof_sur
     ):
         assert required_claim in architecture
         assert required_claim in instructions
-
