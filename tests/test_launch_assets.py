@@ -580,6 +580,15 @@ def test_ci_provisions_the_required_precision_worker_sandbox_before_tests():
     assert ci.index(install) < ci.index(test)
 
 
+def test_ci_pins_and_preflights_the_runner_namespace_policy() -> None:
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    assert "runs-on: ubuntu-24.04" in ci
+    assert "kernel.apparmor_restrict_unprivileged_userns=0" in ci
+    assert "bwrap --unshare-all" in ci
+    assert "precision-worker sandbox preflight failed" in ci
+
+
 def test_browser_qualification_contract_is_in_repository_and_installed_proof_surfaces():
     schema_name = "browser-qualification-receipt-v1.schema.json"
     repository_schema = ROOT / "schemas" / schema_name

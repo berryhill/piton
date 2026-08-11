@@ -273,11 +273,14 @@ class PitonApplicationService:
         )
         from ..precision_worker_launch import (
             SANDBOX_BOOTSTRAP,
+            bounded_diagnostic_fd,
             bundle_file_manifest,
+            classify_sandbox_failure,
             create_isolated_output_root,
             execution_archive,
             execution_manifest,
             publish_isolated_attempt,
+            read_bounded_diagnostic,
             remove_input_bundle,
             sandbox_mount_arguments,
             sealed_archive_fd,
@@ -404,12 +407,13 @@ class PitonApplicationService:
             shutil.rmtree(sandbox_output_root, ignore_errors=True)
             raise
         environment = {"PATH": os.defpath}
+        diagnostic_fd = bounded_diagnostic_fd()
         try:
             completed = subprocess.run(
                 command,
                 input=canonical_json_bytes(manifest),
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                stderr=diagnostic_fd,
                 cwd="/",
                 env=environment,
                 close_fds=True,
@@ -417,14 +421,17 @@ class PitonApplicationService:
                 check=False,
                 timeout=300,
             )
+            diagnostic = read_bounded_diagnostic(diagnostic_fd)
         except Exception:
             shutil.rmtree(sandbox_output_root, ignore_errors=True)
             raise
         finally:
+            os.close(diagnostic_fd)
             os.close(archive_fd)
         try:
             if completed.returncode != 0 or len(completed.stdout) > 1024 * 1024:
-                raise RuntimeError("precision worker child failed without a valid bounded result")
+                failure_class = classify_sandbox_failure(completed.returncode, diagnostic)
+                raise RuntimeError(f"precision worker child failed: {failure_class}")
             try:
                 result = PrecisionWorkerResult.from_manifest(
                     json.loads(completed.stdout.decode("utf-8", errors="strict"))

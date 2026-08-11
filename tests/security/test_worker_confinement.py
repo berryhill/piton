@@ -144,3 +144,57 @@ def test_canonical_build_attempt_tree_is_never_a_writable_sandbox_mount() -> Non
     ]
     assert str(canonical) not in writable_sources
     assert writable_sources == [str(isolated)]
+
+
+def test_sandbox_failure_diagnostics_are_bounded_and_sanitized() -> None:
+    from piton.precision_worker_launch import (
+        bounded_diagnostic_fd,
+        classify_sandbox_failure,
+        read_bounded_diagnostic,
+    )
+
+    secret = b"credential-value-must-not-be-reported"
+    namespace = classify_sandbox_failure(
+        1, b"bwrap: No permissions to create new namespace\n" + secret
+    )
+    mount = classify_sandbox_failure(
+        1, b"bwrap: Can't bind mount /runtime on /runtime: No such file or directory\n" + secret
+    )
+    child = classify_sandbox_failure(7, b"Traceback from isolated child: " + secret)
+
+    assert namespace == "sandbox_namespace_policy_rejected"
+    assert mount == "sandbox_mount_or_runtime_binding_failed"
+    assert child == "isolated_worker_child_failed"
+    assert secret.decode() not in namespace + mount + child
+
+    fd = bounded_diagnostic_fd(32)
+    try:
+        assert os.write(fd, b"x" * 32) == 32
+        with pytest.raises(OSError):
+            os.write(fd, b"y")
+        assert read_bounded_diagnostic(fd, 32) == b"x" * 32
+    finally:
+        os.close(fd)
+
+
+def test_namespace_policy_rejection_fails_closed_without_publishing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import subprocess
+
+    from tests.contract.test_precision_worker_custody import _configured_service
+
+    def reject_namespace(*args, **kwargs):
+        os.write(kwargs["stderr"], b"bwrap: No permissions to create new namespace")
+        return subprocess.CompletedProcess(args[0], 1, stdout=b"", stderr=None)
+
+    monkeypatch.setattr(subprocess, "run", reject_namespace)
+    service = _configured_service(tmp_path)
+    request = service.issue_precision_worker_request("project_one", "attempt_one")
+
+    with pytest.raises(RuntimeError, match="sandbox_namespace_policy_rejected"):
+        service.run_precision_worker(request)
+
+    assert not (
+        tmp_path / ".piton" / "build-attempts" / "project_one" / "attempt_one"
+    ).exists()

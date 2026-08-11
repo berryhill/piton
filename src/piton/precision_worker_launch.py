@@ -290,6 +290,44 @@ def sealed_archive_fd(content: bytes) -> int:
         raise
 
 
+def bounded_diagnostic_fd(limit: int = 8192) -> int:
+    """Return a fixed-capacity memfd for untrusted sandbox diagnostics."""
+    import fcntl
+
+    if type(limit) is not int or limit <= 0:
+        raise ValueError("diagnostic capture limit must be a positive integer")
+    libc = ctypes.CDLL(None, use_errno=True)
+    create = getattr(libc, "memfd_create", None)
+    if create is None:
+        raise RuntimeError("bounded diagnostic capture is unavailable")
+    create.argtypes = [ctypes.c_char_p, ctypes.c_uint]
+    create.restype = ctypes.c_int
+    fd = create(b"piton-worker-diagnostic", 0x0001 | 0x0002)
+    if fd < 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number))
+    try:
+        os.ftruncate(fd, limit)
+        seals = (
+            getattr(fcntl, "F_SEAL_GROW", 0x0004)
+            | getattr(fcntl, "F_SEAL_SHRINK", 0x0002)
+            | getattr(fcntl, "F_SEAL_SEAL", 0x0001)
+        )
+        fcntl.fcntl(fd, getattr(fcntl, "F_ADD_SEALS", 1033), seals)
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def read_bounded_diagnostic(fd: int, limit: int = 8192) -> bytes:
+    """Read only bytes actually written to a fixed-capacity diagnostic memfd."""
+    if type(fd) is not int or type(limit) is not int or limit <= 0:
+        raise ValueError("bounded diagnostic read requires a file descriptor and positive limit")
+    written = min(os.lseek(fd, 0, os.SEEK_CUR), limit)
+    return os.pread(fd, written, 0)
+
+
 def execution_manifest(
     request: PrecisionWorkerRequest,
     revision: DesignRevision,
@@ -348,6 +386,34 @@ def sandbox_environment_evidence(*, network_namespace_unshared: bool) -> dict[st
         "credential_isolation_proven": False,
         "truth": dict(_TRUTH),
     }
+
+
+def classify_sandbox_failure(returncode: int, stderr: bytes) -> str:
+    """Reduce bounded child diagnostics to a credential-safe failure class."""
+    if type(returncode) is not int or not isinstance(stderr, bytes):
+        raise TypeError("sandbox failure evidence must be an integer and bytes")
+    diagnostic = stderr[:8192].lower()
+    mount_markers = (
+        b"bind mount",
+        b"can't mkdir parents",
+        b"cannot mkdir parents",
+        b"mount source",
+        b"no such file or directory",
+    )
+    namespace_markers = (
+        b"new namespace",
+        b"user namespace",
+        b"userns",
+        b"uid map",
+        b"gid map",
+        b"namespace creation",
+        b"operation not permitted",
+    )
+    if any(marker in diagnostic for marker in mount_markers):
+        return "sandbox_mount_or_runtime_binding_failed"
+    if any(marker in diagnostic for marker in namespace_markers):
+        return "sandbox_namespace_policy_rejected"
+    return "isolated_worker_child_failed"
 
 
 SANDBOX_BOOTSTRAP = r'''
