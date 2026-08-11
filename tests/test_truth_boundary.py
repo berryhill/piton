@@ -21,15 +21,38 @@ class TruthBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "actuate machines"):
             TruthBoundary(machine_actuation=True)
 
-    def test_stage1_export_fails_closed_and_copies_artifacts(self):
-        artifacts = {"step": DIGEST}
-        export = DraftExport("exp_1", REVISION_ID, "attempt_1", artifacts)
-        artifacts["step"] = "changed"
-        self.assertEqual(DIGEST, export.artifact_digests["step"])
-        with self.assertRaises(TypeError):
-            export.artifact_digests["step"] = "changed"
+    def test_stage1_export_fails_closed_with_immutable_warnings(self):
+        export = DraftExport(
+            receipt_id="receipt_1",
+            export_id="exp_1",
+            project_id="project_1",
+            revision_id=REVISION_ID,
+            attempt_id="attempt_1",
+            authority_profile="source-native/v0",
+            exact_body_digest=DIGEST,
+            step_digest=DIGEST,
+            units="mm",
+            warnings=("framework only",),
+            environment_lock_digest=DIGEST,
+            validation_report_digest=DIGEST,
+        )
+        self.assertEqual(("framework only",), export.warnings)
         with self.assertRaisesRegex(ValueError, "visibly unreleased"):
-            DraftExport("exp_2", REVISION_ID, "attempt_1", {"step": DIGEST}, unreleased=False)
+            DraftExport(
+                receipt_id="receipt_2",
+                export_id="exp_2",
+                project_id="project_1",
+                revision_id=REVISION_ID,
+                attempt_id="attempt_1",
+                authority_profile="source-native/v0",
+                exact_body_digest=DIGEST,
+                step_digest=DIGEST,
+                units="mm",
+                warnings=(),
+                environment_lock_digest=DIGEST,
+                validation_report_digest=DIGEST,
+                unreleased=False,
+            )
 
     def test_build_attempt_copies_artifacts(self):
         artifacts = {"exact": DIGEST}

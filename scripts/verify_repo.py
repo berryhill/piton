@@ -20,6 +20,7 @@ from piton.launch_assets import (
     validate_review_export,
 )
 from piton.launch_verification import validate_launch_worker_contract
+from piton.model import DraftExport
 from piton.precision_worker import EXPECTED_OUTPUTS, PRECISION_WORKER_PIN
 from piton.project_format import load_project_directory
 from piton.revision import DesignRevision
@@ -59,6 +60,7 @@ REQUIRED = [
     ROOT / "schemas/retry-error-packet-v1.schema.json",
     ROOT / "schemas/design-revision-v1.schema.json",
     ROOT / "schemas/piton-project-v1.schema.json",
+    ROOT / "schemas/draft-export-receipt-v1.schema.json",
     ROOT / "schemas/review-export-receipt-v1.schema.json",
     ROOT / "schemas/restore-forward-request-v1.schema.json",
     ROOT / "schemas/review-packet-v1.schema.json",
@@ -69,6 +71,7 @@ REQUIRED = [
     ROOT / "src/piton/schemas/review-packet-v1.schema.json",
     ROOT / "src/piton/schemas/semantic-selection-map-v1.schema.json",
     ROOT / "src/piton/schemas/human-review-intake-v1.schema.json",
+    ROOT / "src/piton/schemas/draft-export-receipt-v1.schema.json",
     ROOT / "scripts/review_export.py",
     ROOT / "scripts/restore_forward.py",
     ROOT / "scripts/build_part.py",
@@ -93,6 +96,7 @@ except ValueError as error:
     raise SystemExit(str(error)) from error
 
 for schema_name in (
+    "draft-export-receipt-v1.schema.json",
     "review-export-receipt-v1.schema.json",
     "restore-forward-request-v1.schema.json",
     "review-packet-v1.schema.json",
@@ -183,12 +187,28 @@ def load_validator(name: str) -> Draft202012Validator:
 design_validator = load_validator("design-revision-v1.schema.json")
 retry_validator = load_validator("retry-error-packet-v1.schema.json")
 project_validator = load_validator("piton-project-v1.schema.json")
+draft_export_validator = load_validator("draft-export-receipt-v1.schema.json")
 review_export_validator = load_validator("review-export-receipt-v1.schema.json")
 restore_forward_validator = load_validator("restore-forward-request-v1.schema.json")
 load_validator("review-packet-v1.schema.json")
 load_validator("semantic-selection-map-v1.schema.json")
 human_review_intake_validator = load_validator("human-review-intake-v1.schema.json")
 digest = "sha256:" + "0" * 64
+draft_export = DraftExport(
+    receipt_id="verify-draft-receipt",
+    export_id="verify-draft-export",
+    project_id="verify-project",
+    revision_id="rev_" + "0" * 64,
+    attempt_id="verify-attempt",
+    authority_profile="source-native/v0",
+    exact_body_digest=digest,
+    step_digest=digest,
+    units="mm",
+    warnings=("Framework-only unreleased draft export.",),
+    environment_lock_digest=digest,
+    validation_report_digest=digest,
+)
+draft_export_validator.validate(draft_export.to_primitive())
 human_review_intake = HumanReviewIntake(
     intake_id="verify-intake",
     project_id="verify-project",
@@ -256,6 +276,16 @@ for validator, payload, field in (
         pass
     else:
         raise SystemExit(f"launch schema accepted unsafe {field}=true mutation")
+
+for field in ("fabrication_release", "machine_actuation"):
+    mutated_draft = draft_export.to_primitive()
+    mutated_draft[field] = True
+    try:
+        draft_export_validator.validate(mutated_draft)
+    except ValidationError:
+        pass
+    else:
+        raise SystemExit(f"draft export schema accepted unsafe {field}=true mutation")
 
 tampered_review = json.loads(json.dumps(review_receipt))
 tampered_review["project_manifest_digest"] = "sha256:" + "3" * 64

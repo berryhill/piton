@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "piton.draft-export-receipt.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "receipt_id", "export_id", "project_id", "revision_id", "attempt_id", "authority_profile", "exact_body_digest", "step_digest", "units", "warnings", "environment_lock_digest", "validation_report_digest", "review_state", "fabrication_release", "machine_actuation", "release_state", "unreleased"],
+  "properties": {
+    "schema": {"const": "piton.draft-export-receipt.v1"},
+    "receipt_id": {"$ref": "#/$defs/identifier"},
+    "export_id": {"$ref": "#/$defs/identifier"},
+    "project_id": {"$ref": "#/$defs/identifier"},
+    "revision_id": {"type": "string", "pattern": "^rev_[0-9a-f]{64}$"},
+    "attempt_id": {"$ref": "#/$defs/identifier"},
+    "authority_profile": {"const": "source-native/v0"},
+    "exact_body_digest": {"$ref": "#/$defs/digest"},
+    "step_digest": {"$ref": "#/$defs/digest"},
+    "units": {"type": "string", "minLength": 1},
+    "warnings": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "environment_lock_digest": {"$ref": "#/$defs/digest"},
+    "validation_report_digest": {"$ref": "#/$defs/digest"},
+    "review_state": {"const": "needs_human_review"},
+    "fabrication_release": {"const": false},
+    "machine_actuation": {"const": false},
+    "release_state": {"const": "unreleased"},
+    "unreleased": {"const": true}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}
