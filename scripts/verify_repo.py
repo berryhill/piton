@@ -11,6 +11,13 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from jsonschema import Draft202012Validator, ValidationError
+from piton.assurance import (
+    DEFAULT_P4_ASSURANCE_POLICY,
+    GovernedAlphaEvidence,
+    P4AssuranceEvidence,
+    P4AssurancePolicy,
+    validate_p4_evidence_policy_binding,
+)
 from piton.human_review import FrameworkPacketClosure, HumanReviewIntake
 from piton.implementation_loop import RetryErrorPacket
 from piton.launch_assets import (
@@ -37,6 +44,7 @@ REQUIRED = [
     ROOT / "src/piton/worker_contracts.py",
     ROOT / "src/piton/precision_worker.py",
     ROOT / "src/piton/evidence.py",
+    ROOT / "src/piton/assurance.py",
     ROOT / "src/piton/mesh_derivatives.py",
     ROOT / "src/piton/launch_verification.py",
     ROOT / "src/piton/review_packet.py",
@@ -57,6 +65,7 @@ REQUIRED = [
     ROOT / "tests/test_review_packet.py",
     ROOT / "tests/test_human_review_intake.py",
     ROOT / "tests/test_framework_packet_closure.py",
+    ROOT / "tests/test_assurance_policy.py",
     ROOT / "flows/piton_implementation_loop_v1.json",
     ROOT / "schemas/retry-error-packet-v1.schema.json",
     ROOT / "schemas/design-revision-v1.schema.json",
@@ -88,6 +97,7 @@ REQUIRED = [
     ROOT / "scripts/install_verify.py",
     ROOT / "templates/evidence-record-v1.json",
     ROOT / "templates/artifact-manifest-v1.json",
+    ROOT / "docs/architecture.md",
     ROOT / "docs/human-review-launch-assets.md",
     ROOT / "docs/rollback.md",
     ROOT / "docs/fabrication-safety.md",
@@ -172,9 +182,69 @@ evidence_record = json.loads(
 )
 if evidence_record.get("review_packet", {}).get("packet_schema") != "piton.review-packet.v1":
     raise SystemExit("evidence record omits review-packet identity")
+launch_templates = {
+    "artifact manifest": artifact_manifest,
+    "evidence record": evidence_record,
+}
+for template_name, template in launch_templates.items():
+    try:
+        governed_alpha = GovernedAlphaEvidence.from_primitive(
+            template["governed_alpha_evidence"]
+        )
+        assurance = template["p4_assurance"]
+        p4_evidence = P4AssuranceEvidence.from_primitive(assurance["evidence"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise SystemExit(
+            f"{template_name} omits representative P3/P4 bindings: {error}"
+        ) from error
+    if (
+        assurance.get("policy_id") != DEFAULT_P4_ASSURANCE_POLICY.policy_id
+        or assurance.get("policy_digest") != DEFAULT_P4_ASSURANCE_POLICY.digest
+        or validate_p4_evidence_policy_binding(
+            DEFAULT_P4_ASSURANCE_POLICY, p4_evidence
+        )
+    ):
+        raise SystemExit(f"{template_name} P4 policy authority binding drifted")
+    if (
+        governed_alpha.review_state != "needs_human_review"
+        or governed_alpha.fabrication_release is not False
+        or governed_alpha.machine_actuation is not False
+        or template.get("safety")
+        != {
+            "review_state": "needs_human_review",
+            "fabrication_release": False,
+            "machine_actuation": False,
+        }
+    ):
+        raise SystemExit(f"{template_name} violates the launch safety truth")
+
+architecture = (ROOT / "docs" / "architecture.md").read_text(encoding="utf-8")
 review_instructions = (ROOT / "docs" / "human-review-launch-assets.md").read_text(
     encoding="utf-8"
 )
+required_assurance_documentation = (
+    "GovernedAlphaEvidence",
+    "P4AssurancePolicy",
+    "P4AssuranceEvidence",
+    "DEFAULT_P4_ASSURANCE_POLICY",
+    "validate_p4_evidence_policy_binding",
+    "exact-realization",
+    "exact-exchange",
+    "review-only",
+    "needs_human_review",
+)
+for document_name, document in (
+    ("architecture", architecture),
+    ("human review instructions", review_instructions),
+):
+    missing_content = [
+        content for content in required_assurance_documentation if content not in document
+    ]
+    if missing_content:
+        raise SystemExit(
+            f"{document_name} omits P3/P4 authority content: "
+            + ", ".join(missing_content)
+        )
 for required_instruction in (
     "project-scoped readback",
     "generation`, monotonic `fence`, and",
@@ -188,6 +258,10 @@ for required_instruction in (
     "non-persistent",
     "Close a framework packet as needs_human_review",
     "close_framework_packet",
+    "verify_successor_admission",
+    "policy_digest",
+    "evaluated_requirement_ids",
+    "Stop review",
 ):
     if required_instruction not in review_instructions:
         raise SystemExit("human review instructions omit evidence-closure custody")
@@ -211,6 +285,18 @@ human_review_intake_validator = load_validator("human-review-intake-v1.schema.js
 framework_packet_closure_validator = load_validator(
     "framework-packet-closure-v1.schema.json"
 )
+governed_alpha_validator = load_validator("governed-alpha-evidence-v1.schema.json")
+p4_policy_validator = load_validator("p4-assurance-policy-v1.schema.json")
+p4_evidence_validator = load_validator("p4-assurance-evidence-v1.schema.json")
+p4_policy_round_trip = P4AssurancePolicy.from_primitive(
+    DEFAULT_P4_ASSURANCE_POLICY.to_primitive()
+)
+if p4_policy_round_trip.digest != DEFAULT_P4_ASSURANCE_POLICY.digest:
+    raise SystemExit("source-fixed P4 assurance policy canonical round trip drifted")
+p4_policy_validator.validate(p4_policy_round_trip.to_primitive())
+for template_name, template in launch_templates.items():
+    governed_alpha_validator.validate(template["governed_alpha_evidence"])
+    p4_evidence_validator.validate(template["p4_assurance"]["evidence"])
 digest = "sha256:" + "0" * 64
 draft_export = DraftExport(
     receipt_id="verify-draft-receipt",

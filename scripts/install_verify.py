@@ -9,7 +9,16 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 import piton.storage as storage
-from piton import DraftExport, FrameworkPacketClosure, HumanReviewIntake
+from piton import (
+    DEFAULT_P4_ASSURANCE_POLICY,
+    DraftExport,
+    FrameworkPacketClosure,
+    GovernedAlphaEvidence,
+    HumanReviewIntake,
+    P4AssuranceEvidence,
+    P4AssurancePolicy,
+    validate_p4_evidence_policy_binding,
+)
 from piton.implementation_loop import PITON_IMPLEMENTATION_LOOP
 from piton.launch_assets import build_review_export
 from piton.launch_verification import (
@@ -71,6 +80,55 @@ if not validate_partner_scaffold_t001(receipt):
     raise SystemExit("installed T001 scaffold failed zero-claim validation")
 
 digest = "sha256:" + "0" * 64
+governed_alpha = GovernedAlphaEvidence(
+    project_id="install-smoke",
+    revision_id="rev_" + "0" * 64,
+    build_attempt_id="attempt_smoke",
+    evidence_closure_digest=digest,
+    framework_packet_closure_digest=digest,
+    review_packet_digest=digest,
+    exact_brep_digest=digest,
+    exact_brep_claim_scope="exact-realization",
+    step_digest=digest,
+    step_claim_scope="exact-exchange",
+    review_glb_digest=digest,
+    review_glb_claim_scope="review-only",
+    review_selection_map_digest=digest,
+    review_selection_map_claim_scope="review-only",
+)
+governed_alpha_schema = json.loads(
+    package_root.joinpath(
+        "schemas", "governed-alpha-evidence-v1.schema.json"
+    ).read_text(encoding="utf-8")
+)
+Draft202012Validator(governed_alpha_schema).validate(governed_alpha.to_primitive())
+
+p4_policy = DEFAULT_P4_ASSURANCE_POLICY
+p4_policy_round_trip = P4AssurancePolicy.from_primitive(p4_policy.to_primitive())
+p4_policy_schema = json.loads(
+    package_root.joinpath("schemas", "p4-assurance-policy-v1.schema.json").read_text(
+        encoding="utf-8"
+    )
+)
+Draft202012Validator(p4_policy_schema).validate(p4_policy_round_trip.to_primitive())
+if p4_policy_round_trip.digest != p4_policy.digest:
+    raise SystemExit("installed P4 assurance policy canonical digest is unstable")
+p4_evidence = P4AssuranceEvidence(
+    policy_digest=p4_policy.digest,
+    evaluated_requirement_ids=tuple(
+        requirement.requirement_id for requirement in p4_policy.requirements
+    ),
+    result="hold",
+)
+p4_evidence_schema = json.loads(
+    package_root.joinpath(
+        "schemas", "p4-assurance-evidence-v1.schema.json"
+    ).read_text(encoding="utf-8")
+)
+Draft202012Validator(p4_evidence_schema).validate(p4_evidence.to_primitive())
+if validate_p4_evidence_policy_binding(p4_policy, p4_evidence):
+    raise SystemExit("installed P4 assurance evidence failed policy binding")
+
 draft_export = DraftExport(
     receipt_id="install-smoke-draft-receipt",
     export_id="install-smoke-draft-export",
@@ -267,6 +325,10 @@ print(
             "framework_packet_closure_api": framework_packet_closure.to_primitive()[
                 "schema"
             ],
+            "governed_alpha_evidence_api": governed_alpha.to_primitive()["schema"],
+            "p4_assurance_policy_id": p4_policy.policy_id,
+            "p4_assurance_policy_digest": p4_policy.digest,
+            "p4_assurance_binding": "verified-hold",
             "viewer_assets": list(viewer_assets),
             "precision_worker_request": worker_request.schema,
             "precision_worker_pin": worker_request.worker_pin,
