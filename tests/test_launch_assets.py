@@ -13,6 +13,13 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 
+from piton.launch_verification import (
+    CURRENT_PRECISION_WORKER_OUTPUTS,
+    CURRENT_PRECISION_WORKER_PIN,
+    validate_launch_worker_contract,
+    validate_precision_worker_source,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples" / "minimal-project"
 
@@ -150,6 +157,124 @@ def test_templates_have_explicit_scopes_and_false_safety():
             "fabrication_release": False,
             "machine_actuation": False,
         }
+
+
+def test_launch_manifest_closes_current_exact_and_review_roles_with_independent_receipts():
+    payload = json.loads((ROOT / "templates/artifact-manifest-v1.json").read_text(encoding="utf-8"))
+
+    assert payload["revision_id"].startswith("rev_")
+    assert payload["build_attempt_id"].startswith("attempt_")
+    assert payload["worker_pin"] == CURRENT_PRECISION_WORKER_PIN
+    assert set(payload["artifact_digests"]) == set(CURRENT_PRECISION_WORKER_OUTPUTS)
+    assert set(payload["artifact_byte_lengths"]) == set(CURRENT_PRECISION_WORKER_OUTPUTS)
+    assert all(value is None for value in payload["artifact_byte_lengths"].values())
+    assert payload["closure"]["status"] == "template_incomplete_unverified"
+    assert set(payload["closure"]["exact_roles"]) == {
+        "exact_brep",
+        "inspection_receipt",
+        "step",
+    }
+    assert set(payload["closure"]["review_roles"]) == {
+        "review_glb",
+        "review_glb_receipt",
+        "review_selection_map",
+        "review_selection_map_receipt",
+    }
+    assert payload["closure"]["review_geometry_is_exact"] is False
+    assert set(payload["independent_receipts"]) == {
+        "exact_inspection",
+        "review_glb",
+        "review_selection_map",
+    }
+    for receipt in payload["independent_receipts"].values():
+        assert receipt["binds_revision_and_attempt"] is True
+        assert receipt["receipt_role"] in payload["artifact_digests"]
+        assert set(receipt["binds_artifact_roles"]) <= set(payload["artifact_digests"])
+    assert payload["independent_receipts"]["review_selection_map"]["identity_scope"] == (
+        "artifact-local; no durable topology identity; no nearest fallback"
+    )
+    assert payload["build_plane_evidence"] == {
+        "exact_brep_z_min_mm": None,
+        "review_glb_z_min_mm": None,
+        "artifact_to_cad_translation_mm": None,
+        "review_to_threejs_world_mapping": "(x,y,z)->(x,z,-y)",
+        "review_z_zero_on_visible_grid": False,
+        "exact_geometry_was_translated_for_review": None,
+        "verification_state": "template_incomplete_unverified",
+        "evidence_ref": "REPLACE_WITH_ATTEMPT_BOUND_EVIDENCE_REFERENCE",
+    }
+
+
+@pytest.mark.parametrize(
+    ("worker_pin", "outputs"),
+    [
+        ("precision_worker_one:piton.realization.v1", CURRENT_PRECISION_WORKER_OUTPUTS),
+        (CURRENT_PRECISION_WORKER_PIN, ("exact_brep", "inspection_receipt", "step")),
+    ],
+)
+def test_launch_verification_rejects_stale_v1_or_three_role_assets(
+    worker_pin: str, outputs: tuple[str, ...]
+):
+    with pytest.raises(ValueError, match="stale"):
+        validate_launch_worker_contract(worker_pin, outputs)
+
+
+@pytest.mark.parametrize(
+    "extra_source",
+    [
+        '\nif True:\n    PRECISION_WORKER_PIN = "precision_worker_one:piton.realization.v1"\n',
+        '\nEXPECTED_OUTPUTS = ("exact_brep", "inspection_receipt", "step")\n',
+        '\nEXPECTED_OUTPUTS: tuple[str, ...] = ("exact_brep", "inspection_receipt", "step")\n',
+        "\ndef PRECISION_WORKER_PIN():\n    return None\n",
+        "\nclass EXPECTED_OUTPUTS:\n    pass\n",
+        "\nfrom stale_worker import pin as PRECISION_WORKER_PIN\n",
+        "\nfrom stale_worker import *\n",
+        "\ndel EXPECTED_OUTPUTS\n",
+        "\ntry:\n    pass\nexcept Exception as EXPECTED_OUTPUTS:\n    pass\n",
+        "\nmatch object():\n    case PRECISION_WORKER_PIN:\n        pass\n",
+    ],
+)
+def test_launch_source_verification_rejects_runtime_or_duplicate_rebinding(
+    tmp_path: Path, extra_source: str
+):
+    source = tmp_path / "precision_worker.py"
+    source.write_text(
+        f'PRECISION_WORKER_PIN = {CURRENT_PRECISION_WORKER_PIN!r}\n'
+        f'EXPECTED_OUTPUTS = {CURRENT_PRECISION_WORKER_OUTPUTS!r}\n'
+        + extra_source,
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="one module-level binding"):
+        validate_precision_worker_source(source)
+
+
+def test_launch_source_verification_rejects_nonliteral_or_missing_constants(tmp_path: Path):
+    nonliteral = tmp_path / "nonliteral.py"
+    nonliteral.write_text(
+        f'PRECISION_WORKER_PIN = {CURRENT_PRECISION_WORKER_PIN!r}\n'
+        'EXPECTED_OUTPUTS = tuple(["exact_brep"])\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="not a literal value"):
+        validate_precision_worker_source(nonliteral)
+
+    missing = tmp_path / "missing.py"
+    missing.write_text(f'PRECISION_WORKER_PIN = {CURRENT_PRECISION_WORKER_PIN!r}\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="one module-level binding"):
+        validate_precision_worker_source(missing)
+
+
+def test_install_and_repository_verifiers_pin_current_seven_role_closure():
+    install = run_script("install_verify.py")
+    assert install.returncode == 0, install.stderr
+    receipt = json.loads(install.stdout)
+    assert receipt["precision_worker_pin"] == CURRENT_PRECISION_WORKER_PIN
+    assert tuple(receipt["precision_worker_roles"]) == CURRENT_PRECISION_WORKER_OUTPUTS
+
+    verifier = (ROOT / "scripts" / "verify_repo.py").read_text(encoding="utf-8")
+    assert 'ROOT / "src/piton/mesh_derivatives.py"' in verifier
+    assert 'ROOT / "tests/test_mesh_derivatives.py"' in verifier
+    assert 'validate_precision_worker_source(ROOT / "src/piton/precision_worker.py")' in verifier
 
 
 def test_reference_build_cli_rejects_authority_injection_and_names_closure_digest(tmp_path: Path):

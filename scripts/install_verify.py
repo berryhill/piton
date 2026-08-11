@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+import importlib.util
 import json
 import tempfile
 from dataclasses import fields
@@ -8,6 +9,11 @@ from pathlib import Path
 import piton.storage as storage
 from piton.implementation_loop import PITON_IMPLEMENTATION_LOOP
 from piton.launch_assets import build_review_export
+from piton.launch_verification import (
+    CURRENT_PRECISION_WORKER_OUTPUTS,
+    CURRENT_PRECISION_WORKER_PIN,
+    validate_precision_worker_source,
+)
 from piton.model import TruthBoundary
 from piton.project_format import PitonProject, ProjectAuthority, ProjectSafety, SourceFile
 from piton.portfolio.partner_scaffold_t001 import (
@@ -19,6 +25,13 @@ from piton.worker_contracts import PrecisionWorkerRequest
 
 PITON_IMPLEMENTATION_LOOP.validate()
 TruthBoundary().assert_safe()
+worker_spec = importlib.util.find_spec("piton.precision_worker")
+if worker_spec is None or worker_spec.origin is None:
+    raise SystemExit("installed precision-worker source is missing")
+try:
+    validate_precision_worker_source(Path(worker_spec.origin))
+except (OSError, SyntaxError, ValueError) as error:
+    raise SystemExit(str(error)) from error
 receipt = PartnerScaffoldT001Receipt()
 if not validate_partner_scaffold_t001(receipt):
     raise SystemExit("installed T001 scaffold failed zero-claim validation")
@@ -39,9 +52,9 @@ worker_request = PrecisionWorkerRequest(
     expected_outputs_digest=digest,
     request_signature_ref=digest,
     worker_id="precision_worker_one",
-    worker_pin="precision_worker_one:piton.realization.v1",
+    worker_pin=CURRENT_PRECISION_WORKER_PIN,
     isolation_class="trusted-local",
-    expected_outputs=("exact_brep", "inspection_receipt", "step"),
+    expected_outputs=CURRENT_PRECISION_WORKER_OUTPUTS,
 )
 if PrecisionWorkerRequest.from_manifest(worker_request.to_manifest()) != worker_request:
     raise SystemExit("installed precision-worker request contract failed canonical round trip")
@@ -110,6 +123,8 @@ print(
             "build_attempt_replacement_guard": sorted(durable_triggers),
             "launch_asset_package": launch_receipt["schema"],
             "precision_worker_request": worker_request.schema,
+            "precision_worker_pin": worker_request.worker_pin,
+            "precision_worker_roles": list(worker_request.expected_outputs),
             "steps": len(PITON_IMPLEMENTATION_LOOP.steps),
             "t001_zero_claim": True,
         },

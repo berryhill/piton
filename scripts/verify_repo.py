@@ -18,6 +18,7 @@ from piton.launch_assets import (
     validate_restore_forward,
     validate_review_export,
 )
+from piton.launch_verification import validate_precision_worker_source
 from piton.project_format import load_project_directory
 from piton.revision import DesignRevision
 
@@ -32,11 +33,14 @@ REQUIRED = [
     ROOT / "src/piton/storage/build_attempts.py",
     ROOT / "src/piton/worker_contracts.py",
     ROOT / "src/piton/precision_worker.py",
+    ROOT / "src/piton/mesh_derivatives.py",
+    ROOT / "src/piton/launch_verification.py",
     ROOT / "src/piton/storage/migrations/0005_durable_build_attempts.sql",
     ROOT / "tests/test_build_attempt_admission.py",
     ROOT / "tests/contract/test_precision_worker_custody.py",
     ROOT / "tests/contract/test_worker_contracts.py",
     ROOT / "tests/geometry/test_precision_worker.py",
+    ROOT / "tests/test_mesh_derivatives.py",
     ROOT / "flows/piton_implementation_loop_v1.json",
     ROOT / "schemas/retry-error-packet-v1.schema.json",
     ROOT / "schemas/design-revision-v1.schema.json",
@@ -62,6 +66,11 @@ REQUIRED = [
 missing = [str(path.relative_to(ROOT)) for path in REQUIRED if not path.is_file()]
 if missing:
     raise SystemExit("missing required files: " + ", ".join(missing))
+
+try:
+    validate_precision_worker_source(ROOT / "src/piton/precision_worker.py")
+except (OSError, SyntaxError, ValueError) as error:
+    raise SystemExit(str(error)) from error
 
 for schema_name in (
     "review-export-receipt-v1.schema.json",

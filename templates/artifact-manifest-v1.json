@@ -1,9 +1,84 @@
 {
   "schema": "piton.artifact-manifest.v1",
-  "artifact_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "revision_id": "rev_0000000000000000000000000000000000000000000000000000000000000000",
+  "build_attempt_id": "attempt_REPLACE_WITH_DURABLE_ATTEMPT_ID",
+  "worker_pin": "precision_worker_one:piton.realization-and-review.v2",
+  "isolation_class": "trusted-local",
   "tracked_input_closure_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-  "claim_scope": "nonauthoritative_review_artifact",
-  "claim_scope_exclusions": ["source_authority", "approval", "fabrication_release", "machine_actuation"],
+  "claim_scope": "attempt_bound_exact_and_review_evidence_closure",
+  "claim_scope_exclusions": [
+    "source_authority",
+    "review_acceptance",
+    "approval",
+    "fabrication_release",
+    "machine_actuation"
+  ],
+  "artifact_digests": {
+    "exact_brep": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "inspection_receipt": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "review_glb": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "review_glb_receipt": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "review_selection_map": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "review_selection_map_receipt": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "step": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "artifact_byte_lengths": {
+    "exact_brep": null,
+    "inspection_receipt": null,
+    "review_glb": null,
+    "review_glb_receipt": null,
+    "review_selection_map": null,
+    "review_selection_map_receipt": null,
+    "step": null
+  },
+  "closure": {
+    "status": "template_incomplete_unverified",
+    "exact_roles": ["exact_brep", "inspection_receipt", "step"],
+    "review_roles": [
+      "review_glb",
+      "review_glb_receipt",
+      "review_selection_map",
+      "review_selection_map_receipt"
+    ],
+    "review_geometry_is_exact": false
+  },
+  "independent_receipts": {
+    "exact_inspection": {
+      "receipt_role": "inspection_receipt",
+      "binds_artifact_roles": ["exact_brep", "step"],
+      "binds_revision_and_attempt": true
+    },
+    "review_glb": {
+      "receipt_role": "review_glb_receipt",
+      "binds_artifact_roles": [
+        "review_glb",
+        "review_selection_map",
+        "exact_brep",
+        "inspection_receipt"
+      ],
+      "binds_revision_and_attempt": true
+    },
+    "review_selection_map": {
+      "receipt_role": "review_selection_map_receipt",
+      "binds_artifact_roles": [
+        "review_selection_map",
+        "exact_brep",
+        "inspection_receipt"
+      ],
+      "binds_revision_and_attempt": true,
+      "identity_scope": "artifact-local; no durable topology identity; no nearest fallback"
+    }
+  },
+  "build_plane_evidence": {
+    "exact_brep_z_min_mm": null,
+    "review_glb_z_min_mm": null,
+    "artifact_to_cad_translation_mm": null,
+    "review_to_threejs_world_mapping": "(x,y,z)->(x,z,-y)",
+    "review_z_zero_on_visible_grid": false,
+    "exact_geometry_was_translated_for_review": null,
+    "verification_state": "template_incomplete_unverified",
+    "evidence_ref": "REPLACE_WITH_ATTEMPT_BOUND_EVIDENCE_REFERENCE"
+  },
   "release_state": "unreleased",
   "safety": {
     "review_state": "needs_human_review",
