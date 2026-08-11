@@ -186,6 +186,21 @@ state. An admitted intake therefore remains
 `machine_actuation=false`; admission is not a human decision or lifecycle
 transition.
 
+### Framework-packet closure
+
+`FrameworkPacketClosure` is a frozen, canonical, non-persistent confirmation
+that one exact validated packet remains ready for human review. Its packaged
+`piton.framework-packet-closure.v1` schema rejects unknown fields and fixes
+`review_state=needs_human_review`, `fabrication_release=false`,
+`machine_actuation=false`, `release_state=unreleased`, and
+`channel_transition=false`. `PitonApplicationService.close_framework_packet`
+re-reads the exact project-scoped `EvidenceClosure`, independently validates the
+packet file inventory and bytes, and requires exact agreement for project,
+revision, attempt, closure, packet, worker result, declaration,
+generation/fence/lease, exact B-rep/STEP, and review-only GLB/selection-map
+digests. Closure is not review acceptance, engineering approval, channel
+promotion, export, fabrication release, or machine actuation.
+
 ## Stage 1 custody
 
 Git-friendly local directory of deterministic UTF-8 source/manifests and

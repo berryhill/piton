@@ -9,7 +9,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 import piton.storage as storage
-from piton import DraftExport, HumanReviewIntake
+from piton import DraftExport, FrameworkPacketClosure, HumanReviewIntake
 from piton.implementation_loop import PITON_IMPLEMENTATION_LOOP
 from piton.launch_assets import build_review_export
 from piton.launch_verification import (
@@ -52,6 +52,7 @@ for schema_name in (
     "review-packet-v1.schema.json",
     "semantic-selection-map-v1.schema.json",
     "human-review-intake-v1.schema.json",
+    "framework-packet-closure-v1.schema.json",
 ):
     schema = json.loads(package_root.joinpath("schemas", schema_name).read_text(encoding="utf-8"))
     Draft202012Validator.check_schema(schema)
@@ -111,6 +112,31 @@ if (
     or human_review_intake.machine_actuation is not False
 ):
     raise SystemExit("installed human-review intake API violated safety truth")
+framework_packet_closure = FrameworkPacketClosure(
+    closure_id="install-smoke-framework-closure",
+    project_id="install-smoke",
+    revision_id="rev_" + "0" * 64,
+    attempt_id="attempt_smoke",
+    evidence_closure_digest=digest,
+    review_packet_digest=digest,
+    worker_result_digest=digest,
+    declaration_digest=digest,
+    generation=0,
+    fence=0,
+    lease_id="lease_smoke",
+    exact_brep_digest=digest,
+    step_digest=digest,
+    review_glb_digest=digest,
+    review_selection_map_digest=digest,
+)
+framework_closure_schema = json.loads(
+    package_root.joinpath(
+        "schemas", "framework-packet-closure-v1.schema.json"
+    ).read_text(encoding="utf-8")
+)
+Draft202012Validator(framework_closure_schema).validate(
+    framework_packet_closure.to_primitive()
+)
 worker_request = PrecisionWorkerRequest(
     project_id="install-smoke",
     revision_id="rev_" + "0" * 64,
@@ -235,6 +261,9 @@ print(
                 "semantic-selection-map-v1.schema.json",
             ],
             "human_review_intake_api": human_review_intake.to_primitive()["schema"],
+            "framework_packet_closure_api": framework_packet_closure.to_primitive()[
+                "schema"
+            ],
             "viewer_assets": list(viewer_assets),
             "precision_worker_request": worker_request.schema,
             "precision_worker_pin": worker_request.worker_pin,

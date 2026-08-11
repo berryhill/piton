@@ -15,7 +15,12 @@ from typing import Callable, Mapping
 
 from ..evidence import EvidenceClosure, EvidenceClosureError, EvidenceRepository
 from ..feasibility import evaluate_exact_cad_feasibility
-from ..human_review import HumanReviewIntake, HumanReviewIntakeError
+from ..human_review import (
+    FrameworkPacketClosure,
+    FrameworkPacketClosureError,
+    HumanReviewIntake,
+    HumanReviewIntakeError,
+)
 from ..model import ChangeProposal, _derive_change_candidate
 from ..portfolio import (
     Authority,
@@ -404,6 +409,87 @@ class PitonApplicationService:
                 "human-review intake packet violates the root truth boundary"
             )
         return intake
+
+    def close_framework_packet(
+        self, closure: FrameworkPacketClosure, packet_directory: str | Path
+    ) -> FrameworkPacketClosure:
+        """Confirm one exact packet remains ready for, but not accepted by, a human."""
+        if not isinstance(closure, FrameworkPacketClosure):
+            raise TypeError("closure must be a FrameworkPacketClosure")
+        evidence = self.__evidence_repository.get_closure(
+            closure.project_id, closure.evidence_closure_digest
+        )
+        packet = validate_review_packet(packet_directory)
+        bindings = (
+            ("project", closure.project_id, evidence.project_id, packet.project_id),
+            ("revision", closure.revision_id, evidence.revision_id, packet.revision_id),
+            ("attempt", closure.attempt_id, evidence.attempt_id, packet.build_attempt_id),
+            (
+                "evidence closure",
+                closure.evidence_closure_digest,
+                evidence.closure_digest,
+                packet.evidence_closure_digest,
+            ),
+            (
+                "review packet",
+                closure.review_packet_digest,
+                packet.packet_digest,
+                packet.packet_digest,
+            ),
+            (
+                "worker result",
+                closure.worker_result_digest,
+                evidence.worker_result_digest,
+                packet.worker_result_digest,
+            ),
+            (
+                "declaration",
+                closure.declaration_digest,
+                evidence.declaration_digest,
+                packet.declaration_digest,
+            ),
+            ("generation", closure.generation, evidence.generation, packet.generation),
+            ("fence", closure.fence, evidence.fence, packet.fence),
+            ("lease", closure.lease_id, evidence.lease_id, packet.lease_id),
+        )
+        for label, asserted, custodied, packet_value in bindings:
+            if asserted != custodied or asserted != packet_value:
+                raise FrameworkPacketClosureError(
+                    f"framework-packet closure {label} identity is not exact"
+                )
+        artifact_bindings = {
+            "exact_brep": closure.exact_brep_digest,
+            "step": closure.step_digest,
+            "review_glb": closure.review_glb_digest,
+            "review_selection_map": closure.review_selection_map_digest,
+        }
+        artifact_claims = {
+            "exact_brep": "exact_occt_brep_derived_realization",
+            "step": "derived_exchange_representation",
+            "review_glb": "review-only",
+            "review_selection_map": "artifact-local-review-selection-only",
+        }
+        if any(
+            digest != evidence.artifacts[role]["digest"]
+            or digest != packet.artifacts[role]["digest"]
+            or evidence.artifacts[role]["claim_scope"] != artifact_claims[role]
+            or packet.artifacts[role]["claim_scope"] != artifact_claims[role]
+            for role, digest in artifact_bindings.items()
+        ):
+            raise FrameworkPacketClosureError(
+                "framework-packet closure artifact identity or claim scope is not exact"
+            )
+        if dict(packet.truth) != {
+            "review_state": "needs_human_review",
+            "fabrication_release": False,
+            "machine_actuation": False,
+            "release_state": "unreleased",
+            "channel_transition": False,
+        }:
+            raise FrameworkPacketClosureError(
+                "framework-packet closure violates the root truth boundary"
+            )
+        return closure
 
     def issue_autonomous_p1_engineering_disposition(
         self,
