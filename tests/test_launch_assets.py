@@ -275,6 +275,12 @@ def test_launch_verification_rejects_stale_v1_or_three_role_assets(
         validate_launch_worker_contract(worker_pin, outputs)
 
 
+def test_launch_verification_documents_current_v3_seven_role_contract():
+    assert "reviewed v3 seven-role worker" in (
+        validate_launch_worker_contract.__doc__ or ""
+    )
+
+
 def test_install_and_repository_verifiers_pin_current_seven_role_closure():
     install = run_script("install_verify.py")
     assert install.returncode == 0, install.stderr

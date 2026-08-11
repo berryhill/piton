@@ -19,7 +19,7 @@ CURRENT_PRECISION_WORKER_OUTPUTS = (
 
 
 def validate_launch_worker_contract(worker_pin: str, outputs: tuple[str, ...]) -> None:
-    """Fail closed unless launch assets cover the reviewed v2 seven-role worker."""
+    """Fail closed unless launch assets cover the reviewed v3 seven-role worker."""
     if worker_pin != CURRENT_PRECISION_WORKER_PIN:
         raise ValueError("launch verification precision-worker pin is stale")
     if outputs != CURRENT_PRECISION_WORKER_OUTPUTS:
