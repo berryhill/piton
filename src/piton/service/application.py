@@ -36,6 +36,7 @@ from ..precision_worker import (
     verify_precision_worker_result,
 )
 from ..realization import RealizationInputs
+from ..review_packet import ReviewPacket, build_review_packet
 from ..revision import DesignRevision
 from ..source_tree import SourceTree, SourceTreeFile
 from ..storage.blobs import BlobStore
@@ -347,6 +348,23 @@ class PitonApplicationService:
     ) -> EvidenceClosure:
         """Read and revalidate one exact project-scoped immutable closure."""
         return self.__evidence_repository.get_closure(project_id, closure_digest)
+
+    def build_precision_review_packet(
+        self,
+        project_id: str,
+        closure_digest: str,
+        result: PrecisionWorkerResult,
+        output_directory: str | Path,
+    ) -> ReviewPacket:
+        """Project one successful custodied closure into a read-only review packet."""
+        closure = self.__evidence_repository.get_closure(project_id, closure_digest)
+        artifact_root = (
+            self.__precision_control_root
+            / "build-attempts"
+            / closure.project_id
+            / closure.attempt_id
+        )
+        return build_review_packet(closure, result, artifact_root, output_directory)
 
     def issue_autonomous_p1_engineering_disposition(
         self,
