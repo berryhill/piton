@@ -136,12 +136,11 @@ def stage_input_bundle(
             raise ValueError("precision worker source package is not a real directory")
         if any(path.is_symlink() for path in source_package.rglob("*")):
             raise ValueError("precision worker source package cannot contain symbolic links")
-        shutil.copytree(
-            source_package,
-            bundle / "src" / "piton",
-            symlinks=False,
-            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
-        )
+        staged_package = bundle / "src" / "piton"
+        for package_relative, content in _files(repository_root, python_payload=True):
+            destination = staged_package / package_relative
+            destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            destination.write_bytes(content)
         for name in ("uv.lock", "pyproject.toml"):
             source = repository_root / name
             if source.is_symlink() or not source.is_file():

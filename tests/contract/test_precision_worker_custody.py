@@ -82,6 +82,25 @@ def test_current_worker_pin_admits_the_exact_staged_executable_payload(tmp_path:
         remove_input_bundle(bundle)
 
 
+def test_staged_child_archive_excludes_daemon_only_python_authority(tmp_path: Path) -> None:
+    from piton.precision_worker_launch import remove_input_bundle, stage_input_bundle
+
+    inputs = RealizationInputs.from_repository(ROOT, DEFAULT_PARAMETERS)
+    bundle, _ = stage_input_bundle(ROOT, tmp_path / ".piton", inputs.revision)
+    try:
+        staged_package = bundle / "src" / "piton"
+        assert not (staged_package / "worker_admission.py").exists()
+        assert not (staged_package / "service").exists()
+        assert {path.relative_to(staged_package).as_posix() for path in staged_package.rglob("*.py")} == {
+            path.relative_to(ROOT / "src" / "piton").as_posix()
+            for path in (ROOT / "src" / "piton").rglob("*.py")
+            if path.name != "worker_admission.py"
+            and not path.is_relative_to(ROOT / "src" / "piton" / "service")
+        }
+    finally:
+        remove_input_bundle(bundle)
+
+
 def test_worker_authority_is_owned_by_application_service(tmp_path: Path) -> None:
     import piton.precision_worker as worker
 
