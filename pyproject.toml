@@ -20,7 +20,7 @@ cad = ["build123d==0.11.1", "cadquery-ocp-novtk==7.9.3.1"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"piton" = ["schemas/*.json"]
+"piton" = ["schemas/*.json", "viewer_assets/*.html", "viewer_assets/*.js", "viewer_assets/*.css", "viewer_assets/*.txt"]
 "piton.storage" = ["migrations/*.sql"]
 
 [tool.pytest.ini_options]

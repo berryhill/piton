@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Piton pinned Part review</title>
+  <link rel="stylesheet" href="viewer.css">
+</head>
+<body data-packet-base64="__PACKET_BASE64__" data-selection-base64="__SELECTION_BASE64__" data-glb-base64="__GLB_BASE64__">
+<header>
+  <div><strong>Piton · Part fixture</strong><span id="loaded-status" role="status">Blocked / unverified</span></div>
+  <div class="truth" aria-label="Safety and review state">
+    <b>review_state=needs_human_review</b><b>fabrication_release=false</b><b>machine_actuation=false</b><b>release_state=unreleased</b><b>channel_transition=false</b>
+    <span>Review geometry is not exact geometry. Mesh measurements are review-only. Viewer success is not acceptance, approval, export, release, or actuation.</span>
+  </div>
+</header>
+<main>
+  <aside>
+    <section><h2>Model tree</h2><button id="source-part">Source-Part · L-bracket</button><button id="occurrence">Occurrence · L-bracket:1</button></section>
+    <section><h2>Selection mode</h2><div class="row"><button data-mode="Smart">Smart</button><button data-mode="Face">Face</button><button data-mode="Component">Component</button></div></section>
+    <section><h2>Current selection</h2><output id="current-selection">None</output><h3>Attached context</h3><output id="attached-context">None</output></section>
+    <section id="source-parameters"><h2>Source parameters</h2><dl></dl></section>
+    <section id="selected-zone"><h2>Selected-zone callout</h2><output>None</output></section>
+  </aside>
+  <section class="stage">
+    <nav aria-label="Camera controls"><button data-view="iso">Iso</button><button data-view="front">Front</button><button data-view="top">Top</button><button data-view="fit">Fit</button><button id="roll">Roll</button><button id="reset">Reset</button></nav>
+    <canvas id="review-canvas" width="960" height="640" tabindex="0" aria-label="L-bracket review mesh; use Enter to select the whole Part"></canvas>
+    <div id="physical-grid" aria-label="Visible physical grid and desk plane">Review Z=0 physical grid / desk plane</div>
+  </section>
+  <aside>
+    <section id="identity"><h2>Pinned identity</h2><dl></dl></section>
+    <section id="bounding-box"><h2>Bounding box</h2><output></output><button id="bbox-reset">Reset bounding box</button></section>
+    <section id="build-volume"><h2>Build-volume context</h2><output>Controlled review envelope; no slicer or machine route</output></section>
+    <section id="validation-issues"><h2>Validation / issues</h2><ul></ul></section>
+    <section><h2>Measurement</h2><output id="measurement">Review mesh only</output></section>
+  </aside>
+</main>
+<script src="viewer.js"></script>
+</body>
+</html>

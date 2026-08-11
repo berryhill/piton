@@ -37,6 +37,11 @@ REQUIRED = [
     ROOT / "src/piton/evidence.py",
     ROOT / "src/piton/mesh_derivatives.py",
     ROOT / "src/piton/launch_verification.py",
+    ROOT / "src/piton/review_packet.py",
+    ROOT / "src/piton/viewer_assets/index.html",
+    ROOT / "src/piton/viewer_assets/viewer.js",
+    ROOT / "src/piton/viewer_assets/viewer.css",
+    ROOT / "src/piton/viewer_assets/THIRD_PARTY_NOTICES.txt",
     ROOT / "src/piton/storage/migrations/0005_durable_build_attempts.sql",
     ROOT / "src/piton/storage/migrations/0006_evidence_closure.sql",
     ROOT / "tests/test_build_attempt_admission.py",
@@ -46,14 +51,19 @@ REQUIRED = [
     ROOT / "tests/unit/test_check_receipts.py",
     ROOT / "tests/integration/test_evidence_closure.py",
     ROOT / "tests/test_mesh_derivatives.py",
+    ROOT / "tests/test_review_packet.py",
     ROOT / "flows/piton_implementation_loop_v1.json",
     ROOT / "schemas/retry-error-packet-v1.schema.json",
     ROOT / "schemas/design-revision-v1.schema.json",
     ROOT / "schemas/piton-project-v1.schema.json",
     ROOT / "schemas/review-export-receipt-v1.schema.json",
     ROOT / "schemas/restore-forward-request-v1.schema.json",
+    ROOT / "schemas/review-packet-v1.schema.json",
+    ROOT / "schemas/semantic-selection-map-v1.schema.json",
     ROOT / "src/piton/schemas/review-export-receipt-v1.schema.json",
     ROOT / "src/piton/schemas/restore-forward-request-v1.schema.json",
+    ROOT / "src/piton/schemas/review-packet-v1.schema.json",
+    ROOT / "src/piton/schemas/semantic-selection-map-v1.schema.json",
     ROOT / "scripts/review_export.py",
     ROOT / "scripts/restore_forward.py",
     ROOT / "scripts/build_part.py",
@@ -80,6 +90,8 @@ except ValueError as error:
 for schema_name in (
     "review-export-receipt-v1.schema.json",
     "restore-forward-request-v1.schema.json",
+    "review-packet-v1.schema.json",
+    "semantic-selection-map-v1.schema.json",
 ):
     repository_schema = (ROOT / "schemas" / schema_name).read_bytes()
     packaged_schema = (ROOT / "src" / "piton" / "schemas" / schema_name).read_bytes()
@@ -120,6 +132,23 @@ if closure_template.get("channel_transition") is not False or closure_template.g
     "release_consequence"
 ) != "none":
     raise SystemExit("artifact manifest implies a forbidden closure consequence")
+packet_evidence = artifact_manifest.get("review_packet_evidence", {})
+if (
+    packet_evidence.get("packet_schema") != "piton.review-packet.v1"
+    or packet_evidence.get("semantic_map_schema") != "piton.semantic-selection-map.v1"
+    or packet_evidence.get("identity_scope")
+    != "artifact-local; no durable topology identity; no nearest fallback"
+    or set(packet_evidence.get("viewer_asset_digests", {}))
+    != {"viewer.js", "viewer.css", "THIRD_PARTY_NOTICES.txt"}
+    or "disconnected_load_evidence" not in packet_evidence
+    or "viewer_loaded_state" not in packet_evidence
+):
+    raise SystemExit("artifact manifest omits review-packet/viewer evidence custody")
+evidence_record = json.loads(
+    (ROOT / "templates" / "evidence-record-v1.json").read_text(encoding="utf-8")
+)
+if evidence_record.get("review_packet", {}).get("packet_schema") != "piton.review-packet.v1":
+    raise SystemExit("evidence record omits review-packet identity")
 review_instructions = (ROOT / "docs" / "human-review-launch-assets.md").read_text(
     encoding="utf-8"
 )
@@ -127,6 +156,10 @@ for required_instruction in (
     "project-scoped readback",
     "generation`, monotonic `fence`, and",
     "channel_transition=false",
+    "validate_review_packet",
+    "packet file inventory",
+    "disconnected browser",
+    "visible loaded state",
 ):
     if required_instruction not in review_instructions:
         raise SystemExit("human review instructions omit evidence-closure custody")
@@ -143,6 +176,8 @@ retry_validator = load_validator("retry-error-packet-v1.schema.json")
 project_validator = load_validator("piton-project-v1.schema.json")
 review_export_validator = load_validator("review-export-receipt-v1.schema.json")
 restore_forward_validator = load_validator("restore-forward-request-v1.schema.json")
+load_validator("review-packet-v1.schema.json")
+load_validator("semantic-selection-map-v1.schema.json")
 digest = "sha256:" + "0" * 64
 revision = DesignRevision(
     parent_revision_id=None,

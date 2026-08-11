@@ -4,6 +4,23 @@
   "subject_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
   "claim_scope": "review_evidence_only",
   "claim_scope_exclusions": ["approval", "fabrication_release", "machine_actuation"],
+  "review_packet": {
+    "packet_schema": "piton.review-packet.v1",
+    "packet_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "semantic_map_schema": "piton.semantic-selection-map.v1",
+    "semantic_map_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "semantic_identity_scope": "artifact-local; no durable topology identity; no nearest fallback",
+    "viewer_asset_digests": {
+      "viewer.js": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "viewer.css": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "THIRD_PARTY_NOTICES.txt": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "packet_file_inventory_verified": false,
+    "disconnected_csp_verified": false,
+    "network_requests_observed": null,
+    "viewer_loaded_state_verified": false,
+    "viewer_loaded_state_evidence_ref": "REPLACE_WITH_VIEWER_LOADED_STATE_EVIDENCE"
+  },
   "observations": [],
   "limitations": ["Template values must be replaced and independently checked by a human reviewer."],
   "safety": {

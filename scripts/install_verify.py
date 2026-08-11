@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 import tempfile
 from dataclasses import fields
+from importlib.resources import files
 from pathlib import Path
+
+from jsonschema import Draft202012Validator
 
 import piton.storage as storage
 from piton.implementation_loop import PITON_IMPLEMENTATION_LOOP
@@ -15,6 +18,7 @@ from piton.launch_verification import (
 )
 from piton.model import TruthBoundary
 from piton.project_format import PitonProject, ProjectAuthority, ProjectSafety, SourceFile
+from piton.review_packet import ReviewPacket, build_review_packet, validate_review_packet
 from piton.portfolio.partner_scaffold_t001 import (
     PartnerScaffoldT001Receipt,
     validate_partner_scaffold_t001,
@@ -24,6 +28,27 @@ from piton.worker_contracts import PrecisionWorkerRequest
 
 PITON_IMPLEMENTATION_LOOP.validate()
 TruthBoundary().assert_safe()
+if not callable(build_review_packet) or not callable(validate_review_packet):
+    raise SystemExit("installed review-packet API is unavailable")
+if ReviewPacket.__name__ != "ReviewPacket":
+    raise SystemExit("installed review-packet type is unavailable")
+package_root = files("piton")
+viewer_assets = ("index.html", "viewer.js", "viewer.css", "THIRD_PARTY_NOTICES.txt")
+for asset_name in viewer_assets:
+    asset_bytes = package_root.joinpath("viewer_assets", asset_name).read_bytes()
+    if not asset_bytes:
+        raise SystemExit(f"installed viewer asset is empty: {asset_name}")
+viewer_surface = (
+    package_root.joinpath("viewer_assets", "index.html").read_text(encoding="utf-8")
+    + package_root.joinpath("viewer_assets", "viewer.js").read_text(encoding="utf-8")
+)
+if "default-src 'none'" not in viewer_surface or "connect-src 'none'" not in viewer_surface:
+    raise SystemExit("installed viewer assets omit disconnected CSP")
+if "https://" in viewer_surface or "http://" in viewer_surface:
+    raise SystemExit("installed viewer assets contain a network URL")
+for schema_name in ("review-packet-v1.schema.json", "semantic-selection-map-v1.schema.json"):
+    schema = json.loads(package_root.joinpath("schemas", schema_name).read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(schema)
 try:
     validate_launch_worker_contract(
         CURRENT_PRECISION_WORKER_PIN,
@@ -153,6 +178,12 @@ print(
                 table for table in durable_tables if table.startswith("evidence_")
             ),
             "launch_asset_package": launch_receipt["schema"],
+            "review_packet_api": "piton.review-packet.v1",
+            "review_packet_schemas": [
+                "review-packet-v1.schema.json",
+                "semantic-selection-map-v1.schema.json",
+            ],
+            "viewer_assets": list(viewer_assets),
             "precision_worker_request": worker_request.schema,
             "precision_worker_pin": worker_request.worker_pin,
             "precision_worker_roles": list(worker_request.expected_outputs),
