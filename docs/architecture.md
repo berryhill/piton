@@ -147,6 +147,26 @@ performs no SQL write, CAS publication, coordinator update, channel movement,
 review decision, approval, export, release, or actuation.
 Every request, result, and exact receipt preserves the root truth boundary.
 
+### Predeclared checks and evidence closure
+
+Request issuance durably binds exactly three source-fixed checks to the admitted
+attempt before worker execution: exact artifact closure, one-valid-solid receipt
+observation, and review-artifact binding. Each declaration fixes checker and
+comparator digests, method, units, tolerance, evidence roles, claim scope, and
+invalidation conditions. Callers cannot submit or substitute a check list.
+
+`close_precision_worker_evidence` re-reads the exact project, revision, attempt,
+running generation/fence/lease, declaration, canonical worker result, and all
+seven artifact bytes. It then emits three deterministic immutable check receipts.
+One daemon-owned transaction records verified artifact metadata, ordered receipt
+links, the immutable `EvidenceClosure`, and the successful coordinator state. A
+missing, duplicate, undeclared, failed, stale, tampered, or partially published
+fact blocks closure and moves no channel. Project-scoped readback reconstructs
+and revalidates the successful attempt, declaration, receipts, artifact metadata,
+claim scopes, environment, units, tolerances, warnings, uncertainty, and root
+truths. Evidence closure remains review preparation only: it is not human
+acceptance, approval, export, fabrication release, or machine actuation.
+
 ## Stage 1 custody
 
 Git-friendly local directory of deterministic UTF-8 source/manifests and

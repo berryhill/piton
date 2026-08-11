@@ -224,11 +224,59 @@ def test_install_and_repository_verifiers_pin_current_seven_role_closure():
     receipt = json.loads(install.stdout)
     assert receipt["precision_worker_pin"] == CURRENT_PRECISION_WORKER_PIN
     assert tuple(receipt["precision_worker_roles"]) == CURRENT_PRECISION_WORKER_OUTPUTS
+    assert set(receipt["evidence_closure_custody"]) == {
+        "evidence_check_declarations",
+        "evidence_check_receipts",
+        "evidence_closures",
+        "evidence_closure_receipts",
+        "evidence_closure_artifacts",
+    }
 
     verifier = (ROOT / "scripts" / "verify_repo.py").read_text(encoding="utf-8")
     assert 'ROOT / "src/piton/mesh_derivatives.py"' in verifier
     assert 'ROOT / "tests/test_mesh_derivatives.py"' in verifier
     assert "validate_launch_worker_contract(PRECISION_WORKER_PIN, EXPECTED_OUTPUTS)" in verifier
+
+
+def test_launch_manifest_and_instructions_bind_attempt_evidence_closure():
+    payload = json.loads(
+        (ROOT / "templates/artifact-manifest-v1.json").read_text(encoding="utf-8")
+    )
+    closure = payload["evidence_closure"]
+    assert closure["verification_state"] == "template_incomplete_unverified"
+    assert closure["project_scoped_readback_verified"] is False
+    assert closure["replay_byte_identical"] is False
+    assert closure["channel_transition"] is False
+    assert closure["release_consequence"] == "none"
+    receipts = closure["ordered_check_receipts"]
+    assert [item["check_id"] for item in receipts] == [
+        "exact-artifact-closure",
+        "one-valid-solid",
+        "review-artifact-binding",
+    ]
+    for item in receipts:
+        assert item["status"] == "REPLACE_WITH_PASS"
+        assert item["method"]
+        assert item["units"]
+        assert "tolerance" in item
+        assert item["environment_digest"].startswith("sha256:")
+        assert item["evidence_roles"]
+        assert item["invalidation_conditions"]
+
+    instructions = (ROOT / "docs/human-review-launch-assets.md").read_text(
+        encoding="utf-8"
+    )
+    for binding in (
+        "declaration digest",
+        "worker-result digest",
+        "closure digest",
+        "generation",
+        "fence",
+        "lease_id",
+        "project-scoped",
+        "channel_transition=false",
+    ):
+        assert binding in instructions
 
 
 def test_reference_build_cli_rejects_authority_injection_and_names_closure_digest(tmp_path: Path):

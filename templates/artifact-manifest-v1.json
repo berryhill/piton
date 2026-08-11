@@ -42,6 +42,75 @@
     ],
     "review_geometry_is_exact": false
   },
+  "evidence_closure": {
+    "verification_state": "template_incomplete_unverified",
+    "project_id": "REPLACE_WITH_PROJECT_ID",
+    "declaration_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "worker_result_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "closure_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "generation": null,
+    "fence": null,
+    "lease_id": "REPLACE_WITH_ATTEMPT_BOUND_LEASE_ID",
+    "project_scoped_readback_verified": false,
+    "replay_byte_identical": false,
+    "ordered_check_receipts": [
+      {
+        "check_id": "exact-artifact-closure",
+        "status": "REPLACE_WITH_PASS",
+        "receipt_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "method": "canonical digest and exact-receipt binding comparison",
+        "units": "mm",
+        "tolerance": null,
+        "checker_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "comparator_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "environment_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "evidence_roles": ["exact_brep", "step", "inspection_receipt"],
+        "invalidation_conditions": [
+          "revision, attempt, worker result, artifact digest, checker, comparator, or policy changes",
+          "pinned toolchain or declared execution environment changes"
+        ]
+      },
+      {
+        "check_id": "one-valid-solid",
+        "status": "REPLACE_WITH_PASS",
+        "receipt_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "method": "pinned OCCT inspection receipt field comparison",
+        "units": "count",
+        "tolerance": "0",
+        "checker_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "comparator_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "environment_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "evidence_roles": ["exact_brep", "inspection_receipt"],
+        "invalidation_conditions": [
+          "revision, attempt, worker result, artifact digest, checker, comparator, or policy changes",
+          "pinned toolchain or declared execution environment changes"
+        ]
+      },
+      {
+        "check_id": "review-artifact-binding",
+        "status": "REPLACE_WITH_PASS",
+        "receipt_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "method": "review derivative receipt and artifact-local selection binding comparison",
+        "units": "mm",
+        "tolerance": null,
+        "checker_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "comparator_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "environment_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "evidence_roles": [
+          "review_glb",
+          "review_selection_map",
+          "review_glb_receipt",
+          "review_selection_map_receipt"
+        ],
+        "invalidation_conditions": [
+          "revision, attempt, worker result, artifact digest, checker, comparator, or policy changes",
+          "pinned toolchain or declared execution environment changes"
+        ]
+      }
+    ],
+    "channel_transition": false,
+    "release_consequence": "none"
+  },
   "independent_receipts": {
     "exact_inspection": {
       "receipt_role": "inspection_receipt",

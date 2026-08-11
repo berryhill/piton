@@ -95,20 +95,49 @@ with tempfile.TemporaryDirectory() as temporary_directory:
             row[0]
             for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' "
-                "AND name IN ('build_attempts','build_coordinator_state')"
+                "AND name IN ('build_attempts','build_coordinator_state',"
+                "'evidence_check_declarations','evidence_check_receipts',"
+                "'evidence_closures','evidence_closure_receipts',"
+                "'evidence_closure_artifacts')"
             )
         }
         durable_triggers = {
             row[0]
             for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='trigger' "
-                "AND name='build_attempts_no_duplicate_insert'"
+                "AND (name='build_attempts_no_duplicate_insert' "
+                "OR name GLOB 'evidence_*_no_*')"
             )
         }
-    if durable_tables != {"build_attempts", "build_coordinator_state"}:
-        raise SystemExit("installed build-attempt custody schema is incomplete")
-    if durable_triggers != {"build_attempts_no_duplicate_insert"}:
-        raise SystemExit("installed build-attempt replacement guard is incomplete")
+    expected_tables = {
+        "build_attempts",
+        "build_coordinator_state",
+        "evidence_check_declarations",
+        "evidence_check_receipts",
+        "evidence_closures",
+        "evidence_closure_receipts",
+        "evidence_closure_artifacts",
+    }
+    expected_triggers = {
+        "build_attempts_no_duplicate_insert",
+        "evidence_check_declarations_no_update",
+        "evidence_check_declarations_no_duplicate_insert",
+        "evidence_check_declarations_no_delete",
+        "evidence_closures_no_update",
+        "evidence_closures_no_duplicate_insert",
+        "evidence_closures_no_delete",
+        "evidence_check_receipts_no_update",
+        "evidence_check_receipts_no_duplicate_insert",
+        "evidence_check_receipts_no_delete",
+        "evidence_closure_receipts_no_update",
+        "evidence_closure_receipts_no_delete",
+        "evidence_closure_artifacts_no_update",
+        "evidence_closure_artifacts_no_delete",
+    }
+    if durable_tables != expected_tables:
+        raise SystemExit("installed build-attempt/evidence-closure custody schema is incomplete")
+    if durable_triggers != expected_triggers:
+        raise SystemExit("installed build-attempt/evidence-closure immutability guards are incomplete")
 
 print(
     json.dumps(
@@ -120,6 +149,9 @@ print(
             "review_state": receipt.review_state,
             "build_attempt_custody": sorted(durable_tables),
             "build_attempt_replacement_guard": sorted(durable_triggers),
+            "evidence_closure_custody": sorted(
+                table for table in durable_tables if table.startswith("evidence_")
+            ),
             "launch_asset_package": launch_receipt["schema"],
             "precision_worker_request": worker_request.schema,
             "precision_worker_pin": worker_request.worker_pin,
