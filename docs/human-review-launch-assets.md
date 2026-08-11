@@ -4,6 +4,12 @@ These assets prepare evidence for a person; they do not approve, export for fabr
 
 ## Review-only project receipt
 
+This procedure emits `piton.review-export-receipt.v1`. Despite the historical
+“export” name, that receipt only proves canonical project/source closure without
+executing source. It does not represent a lifecycle `DraftExport`, does not bind
+an exact body or STEP produced by a successful governed build, and must not be
+used as evidence that deliverables were exported.
+
 1. Work from a copy of the canonical Piton project directory. Do not run its Python source as part of receipt generation.
 2. Emit a receipt outside that directory:
 
@@ -20,6 +26,24 @@ These assets prepare evidence for a person; they do not approve, export for fabr
 4. Confirm validation succeeded, then inspect every `source_closure` path and digest against the intended revision. Confirm `source_executed=false`, `channel_transition=false`, `release_state=unreleased`, and all three safety values.
 5. Re-run to a second path and compare bytes. A difference is a blocking custody failure.
 6. Treat the receipt only as proof that declared tracked inputs passed canonical format and digest checks. It makes no geometry, manufacturability, approval, release, or actuation claim.
+
+## Framework-only lifecycle DraftExport receipt
+
+`piton.draft-export-receipt.v1` is the separate canonical representation of the
+`DraftExport` lifecycle record. It binds one exact revision and successful build
+attempt to exact-body and STEP digests, source-native authority profile, units,
+warnings, environment lock, and a validation-report digest. The validation
+report must already be held by the build's evidence closure, and both artifact
+digests must match that build. This contract does not replace or upgrade
+`piton.review-export-receipt.v1`.
+
+Stage 1 currently exposes the immutable Python receipt and packaged JSON Schema
+only; it has no operator CLI or endpoint that writes deliverables. Canonical
+serialization must validate against `piton.draft-export-receipt.v1` and retain
+`review_state=needs_human_review`, `fabrication_release=false`,
+`machine_actuation=false`, `release_state=unreleased`, and `unreleased=true`.
+Creating or validating this receipt does not approve engineering, move a
+channel, qualify a STEP receiver, release fabrication, or actuate machinery.
 
 ## Geometry/reference-build review
 

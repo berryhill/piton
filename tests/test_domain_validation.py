@@ -42,7 +42,20 @@ class DomainValidationTests(unittest.TestCase):
                 "closure_1", REVISION_ID, "attempt_1", ("req_1",), ("receipt",), DIGEST
             )
         with self.assertRaisesRegex(ValueError, "shaped"):
-            DraftExport("export_1", REVISION_ID, "attempt_1", {"": DIGEST})
+            DraftExport(
+                receipt_id="",
+                export_id="export_1",
+                project_id="project_1",
+                revision_id=REVISION_ID,
+                attempt_id="attempt_1",
+                authority_profile="source-native/v0",
+                exact_body_digest=DIGEST,
+                step_digest=DIGEST,
+                units="mm",
+                warnings=(),
+                environment_lock_digest=DIGEST,
+                validation_report_digest=DIGEST,
+            )
 
 
 if __name__ == "__main__":

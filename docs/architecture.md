@@ -20,7 +20,7 @@ with `docs/mvi-doctrine.md`, the doctrine wins.
 - Printable CSG: separate OpenSCAD source-native authority profile (not interchangeable with precision authority).
 - Imported geometry without reproducible source: authoritative only as a pinned imported artifact; no feature history is invented.
 - Human state: request changes or accept for MVI review (acceptance is not engineering approval).
-- Fabric/release state: distinct `DraftExport` (visibly unreleased), `ApprovalRecord` (signed scoped), `FabricationRelease` (separate signed human act); none implemented in Stage 1.
+- Fabric/release state: distinct `DraftExport` (visibly unreleased), `ApprovalRecord` (signed scoped), and `FabricationRelease` (separate signed human act). Stage 1 implements only the immutable, canonical `DraftExport` framework receipt (`piton.draft-export-receipt.v1`); it implements no deliverable-writing endpoint, engineering-approval issuance, fabrication release, or machine actuation.
 
 ## Stage 1 wedge
 

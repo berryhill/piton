@@ -9,7 +9,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 import piton.storage as storage
-from piton import HumanReviewIntake
+from piton import DraftExport, HumanReviewIntake
 from piton.implementation_loop import PITON_IMPLEMENTATION_LOOP
 from piton.launch_assets import build_review_export
 from piton.launch_verification import (
@@ -48,6 +48,7 @@ if "default-src 'none'" not in viewer_surface or "connect-src 'none'" not in vie
 if "https://" in viewer_surface or "http://" in viewer_surface:
     raise SystemExit("installed viewer assets contain a network URL")
 for schema_name in (
+    "draft-export-receipt-v1.schema.json",
     "review-packet-v1.schema.json",
     "semantic-selection-map-v1.schema.json",
     "human-review-intake-v1.schema.json",
@@ -66,6 +67,29 @@ if not validate_partner_scaffold_t001(receipt):
     raise SystemExit("installed T001 scaffold failed zero-claim validation")
 
 digest = "sha256:" + "0" * 64
+draft_export = DraftExport(
+    receipt_id="install-smoke-draft-receipt",
+    export_id="install-smoke-draft-export",
+    project_id="install-smoke",
+    revision_id="rev_" + "0" * 64,
+    attempt_id="attempt_smoke",
+    authority_profile="source-native/v0",
+    exact_body_digest=digest,
+    step_digest=digest,
+    units="mm",
+    warnings=("Framework-only unreleased draft export.",),
+    environment_lock_digest=digest,
+    validation_report_digest=digest,
+)
+draft_export_schema = json.loads(
+    package_root.joinpath("schemas", "draft-export-receipt-v1.schema.json").read_text(
+        encoding="utf-8"
+    )
+)
+draft_export_payload = json.loads(draft_export.canonical_bytes)
+Draft202012Validator(draft_export_schema).validate(draft_export_payload)
+if draft_export_payload != draft_export.to_primitive():
+    raise SystemExit("installed DraftExport canonical serialization is unstable")
 human_review_intake = HumanReviewIntake(
     intake_id="install-smoke-intake",
     project_id="install-smoke",
@@ -204,6 +228,7 @@ print(
                 table for table in durable_tables if table.startswith("evidence_")
             ),
             "launch_asset_package": launch_receipt["schema"],
+            "draft_export_api": draft_export_payload["schema"],
             "review_packet_api": "piton.review-packet.v1",
             "review_packet_schemas": [
                 "review-packet-v1.schema.json",

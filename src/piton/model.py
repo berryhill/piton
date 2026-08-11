@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Mapping, Tuple
 
-from .revision import DesignRevision
+from .revision import AUTHORITY_PROFILE, DesignRevision, canonical_json_bytes
 
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
 _REVISION_PATTERN = re.compile(r"^rev_[0-9a-f]{64}$")
@@ -305,25 +306,109 @@ class EvidenceClosure:
 
 @dataclass(frozen=True)
 class DraftExport:
+    """Immutable framework receipt for one visibly unreleased STEP draft.
+
+    This record binds existing build evidence. It does not write deliverables,
+    move a channel, issue engineering approval or fabrication release, or
+    expose any machine-actuation capability.
+    """
+
+    receipt_id: str
     export_id: str
+    project_id: str
     revision_id: str
     attempt_id: str
-    artifact_digests: Mapping[str, str]
+    authority_profile: str
+    exact_body_digest: str
+    step_digest: str
+    units: str
+    warnings: Tuple[str, ...]
+    environment_lock_digest: str
+    validation_report_digest: str
+    review_state: str = "needs_human_review"
+    fabrication_release: bool = False
+    machine_actuation: bool = False
+    release_state: str = "unreleased"
     unreleased: bool = True
 
     def __post_init__(self) -> None:
+        _require_identifier("receipt_id", self.receipt_id)
         _require_identifier("export_id", self.export_id)
+        _require_identifier("project_id", self.project_id)
         _require_revision_id("revision_id", self.revision_id)
         _require_identifier("attempt_id", self.attempt_id)
+        for name in ("authority_profile", "units"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{name} must be a non-empty string")
+            object.__setattr__(self, name, unicodedata.normalize("NFC", value))
+        if self.authority_profile != AUTHORITY_PROFILE:
+            raise ValueError("draft export authority_profile must match source-native authority")
+        for name in (
+            "exact_body_digest",
+            "step_digest",
+            "environment_lock_digest",
+            "validation_report_digest",
+        ):
+            _require_digest(name, getattr(self, name))
+        normalized_warnings = tuple(
+            unicodedata.normalize("NFC", warning) if isinstance(warning, str) else warning
+            for warning in self.warnings
+        )
+        object.__setattr__(
+            self,
+            "warnings",
+            _immutable_string_tuple("warnings", normalized_warnings),
+        )
         self.assert_unreleased()
-        artifacts = _immutable_digest_map("artifact_digests", self.artifact_digests)
-        if not artifacts:
-            raise ValueError("draft export requires at least one artifact")
-        object.__setattr__(self, "artifact_digests", artifacts)
 
     def assert_unreleased(self) -> None:
-        if self.unreleased is not True:
+        if self.review_state != "needs_human_review":
+            raise ValueError("draft export review_state must remain needs_human_review")
+        if self.fabrication_release is not False:
+            raise ValueError("draft export cannot issue fabrication release")
+        if self.machine_actuation is not False:
+            raise ValueError("draft export cannot actuate machines")
+        if self.release_state != "unreleased" or self.unreleased is not True:
             raise ValueError("Stage 1 exports must remain visibly unreleased")
+
+    def to_primitive(self) -> dict[str, object]:
+        return {
+            "schema": "piton.draft-export-receipt.v1",
+            "receipt_id": self.receipt_id,
+            "export_id": self.export_id,
+            "project_id": self.project_id,
+            "revision_id": self.revision_id,
+            "attempt_id": self.attempt_id,
+            "authority_profile": self.authority_profile,
+            "exact_body_digest": self.exact_body_digest,
+            "step_digest": self.step_digest,
+            "units": self.units,
+            "warnings": list(self.warnings),
+            "environment_lock_digest": self.environment_lock_digest,
+            "validation_report_digest": self.validation_report_digest,
+            "review_state": self.review_state,
+            "fabrication_release": self.fabrication_release,
+            "machine_actuation": self.machine_actuation,
+            "release_state": self.release_state,
+            "unreleased": self.unreleased,
+        }
+
+    @property
+    def canonical_bytes(self) -> bytes:
+        return canonical_json_bytes(self.to_primitive())
+
+    @property
+    def issues_engineering_approval(self) -> bool:
+        return False
+
+    @property
+    def issues_fabrication_release(self) -> bool:
+        return False
+
+    @property
+    def moves_channel(self) -> bool:
+        return False
 
 
 def validate_lifecycle(
@@ -345,6 +430,18 @@ def validate_lifecycle(
             raise ValueError("derived record must match its revision and build attempt")
 
     if draft_export is not None:
-        for name, digest in draft_export.artifact_digests.items():
+        if draft_export.authority_profile != revision.authority_profile:
+            raise ValueError("draft export authority profile must match its revision")
+        if evidence is None:
+            raise ValueError("draft export requires validation evidence from the successful build")
+        if draft_export.validation_report_digest not in evidence.receipt_digests:
+            raise ValueError("draft export validation report must be bound by evidence custody")
+        expected_artifacts = {
+            "exact_brep": draft_export.exact_body_digest,
+            "step": draft_export.step_digest,
+        }
+        for name, digest in expected_artifacts.items():
             if attempt.artifact_digests.get(name) != digest:
                 raise ValueError("draft export artifacts must come from the successful build")
+        if draft_export.environment_lock_digest != attempt.environment_digest:
+            raise ValueError("draft export environment lock must match the successful build")
