@@ -22,8 +22,10 @@ from piton import (
     HumanReviewIntake,
     P4AssuranceEvidence,
     P4AssurancePolicy,
+    P4AssuranceReceipt,
     Phase,
     SafetyState,
+    emit_unavailable_p4_receipts,
     issue_phase_exit_receipt,
 
     validate_p4_evidence_policy_binding,
@@ -74,6 +76,7 @@ for schema_name in (
     "governed-alpha-evidence-v1.schema.json",
     "p4-assurance-policy-v1.schema.json",
     "p4-assurance-evidence-v1.schema.json",
+    "p4-assurance-receipt-v1.schema.json",
 ):
     schema = json.loads(package_root.joinpath("schemas", schema_name).read_text(encoding="utf-8"))
     Draft202012Validator.check_schema(schema)
@@ -137,6 +140,36 @@ p4_evidence_schema = json.loads(
 Draft202012Validator(p4_evidence_schema).validate(p4_evidence.to_primitive())
 if validate_p4_evidence_policy_binding(p4_policy, p4_evidence):
     raise SystemExit("installed P4 assurance evidence failed policy binding")
+p4_receipt_schema = json.loads(
+    package_root.joinpath(
+        "schemas", "p4-assurance-receipt-v1.schema.json"
+    ).read_text(encoding="utf-8")
+)
+p4_receipt_validator = Draft202012Validator(p4_receipt_schema)
+p4_unavailable_receipts = emit_unavailable_p4_receipts()
+if tuple(receipt.requirement_id for receipt in p4_unavailable_receipts) != tuple(
+    requirement.requirement_id for requirement in p4_policy.requirements
+):
+    raise SystemExit("installed unavailable P4 receipts changed policy declaration order")
+for assurance_receipt, requirement in zip(
+    p4_unavailable_receipts, p4_policy.requirements, strict=True
+):
+    primitive = assurance_receipt.to_primitive()
+    p4_receipt_validator.validate(primitive)
+    if P4AssuranceReceipt.from_primitive(primitive) != assurance_receipt:
+        raise SystemExit("installed unavailable P4 receipt canonical round trip drifted")
+    if (
+        assurance_receipt.policy_digest != p4_policy.digest
+        or assurance_receipt.method_digest != requirement.method_digest
+        or assurance_receipt.comparator_digest != requirement.comparator_digest
+        or assurance_receipt.threshold != requirement.threshold
+        or assurance_receipt.environment_ids != requirement.environment_ids
+        or assurance_receipt.invalidation_conditions != requirement.invalidation_conditions
+        or assurance_receipt.availability != "unavailable"
+        or assurance_receipt.threshold_passed is not False
+        or assurance_receipt.evidence_refs
+    ):
+        raise SystemExit("installed unavailable P4 receipt failed closed policy binding")
 
 draft_export = DraftExport(
     receipt_id="install-smoke-draft-receipt",
@@ -363,6 +396,16 @@ print(
             "p4_assurance_policy_id": p4_policy.policy_id,
             "p4_assurance_policy_digest": p4_policy.digest,
             "p4_assurance_binding": "verified-hold",
+            "p4_assurance_receipt_api": P4AssuranceReceipt.schema,
+            "p4_assurance_unavailable_receipt_count": len(p4_unavailable_receipts),
+            "p4_assurance_unavailable_receipt_ids": [
+                receipt.requirement_id for receipt in p4_unavailable_receipts
+            ],
+            "p4_assurance_unavailable_state": {
+                "availability": "unavailable",
+                "threshold_passed": False,
+                "evidence_refs": [],
+            },
             "viewer_assets": list(viewer_assets),
             "precision_worker_request": worker_request.schema,
             "precision_worker_pin": worker_request.worker_pin,

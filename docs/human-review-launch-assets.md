@@ -396,7 +396,14 @@ application service therefore cannot turn serialized human/P3 claims, database
 rows, or caller objects into authority.
 
 The P4 result vocabulary is intentionally fail-closed and cannot self-declare
-advancement. `P4AssurancePolicy`, `P4AssuranceEvidence`, schema validity, a
+advancement. When manual evidence is unavailable,
+`emit_unavailable_p4_receipts` returns one closed `P4AssuranceReceipt` per
+source-fixed requirement in exact declaration order. Validate each receipt
+against `piton.p4-assurance-receipt.v1`; it must preserve the policy and
+requirement bindings and fix `availability=unavailable`,
+`threshold_passed=false`, and `evidence_refs=[]`. An unavailable receipt records
+a gap and never counts as completed evaluation. `P4AssurancePolicy`,
+`P4AssuranceEvidence`, schema validity, a
 matching policy digest, completed checks, or CI success cannot grant review,
 approval, export, release, or machine authority. `DEFAULT_P4_ASSURANCE_POLICY`
 is source-fixed policy authority; a caller-created policy that validates and

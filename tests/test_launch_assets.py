@@ -291,6 +291,19 @@ def test_install_and_repository_verifiers_pin_current_seven_role_closure():
     assert receipt["p4_assurance_policy_id"] == DEFAULT_P4_ASSURANCE_POLICY.policy_id
     assert receipt["p4_assurance_policy_digest"] == DEFAULT_P4_ASSURANCE_POLICY.digest
     assert receipt["p4_assurance_binding"] == "verified-hold"
+    assert receipt["p4_assurance_receipt_api"] == "piton.p4-assurance-receipt.v1"
+    assert receipt["p4_assurance_unavailable_receipt_count"] == len(
+        DEFAULT_P4_ASSURANCE_POLICY.requirements
+    )
+    assert receipt["p4_assurance_unavailable_receipt_ids"] == [
+        requirement.requirement_id
+        for requirement in DEFAULT_P4_ASSURANCE_POLICY.requirements
+    ]
+    assert receipt["p4_assurance_unavailable_state"] == {
+        "availability": "unavailable",
+        "evidence_refs": [],
+        "threshold_passed": False,
+    }
 
     verifier = (ROOT / "scripts" / "verify_repo.py").read_text(encoding="utf-8")
     assert 'ROOT / "src/piton/mesh_derivatives.py"' in verifier
