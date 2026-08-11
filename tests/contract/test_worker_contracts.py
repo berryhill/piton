@@ -116,6 +116,18 @@ def test_identity_bearing_mutation_changes_identity_or_is_rejected(tmp_path: Pat
         PrecisionWorkerRequest.from_manifest(manifest)
 
 
+@pytest.mark.parametrize("unsafe_false", [0, 0.0, None])
+def test_root_safety_truth_rejects_false_like_non_booleans(
+    tmp_path: Path, unsafe_false: object
+) -> None:
+    original = request(tmp_path)
+    for field in ("fabrication_release", "machine_actuation"):
+        manifest = json.loads(original.canonical_bytes)
+        manifest["truth"][field] = unsafe_false
+        with pytest.raises((TypeError, ValueError)):
+            PrecisionWorkerRequest.from_manifest(manifest)
+
+
 @pytest.mark.parametrize(
     ("attempt_changes", "state_changes", "message"),
     (

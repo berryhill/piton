@@ -2,7 +2,7 @@
   "schema": "piton.artifact-manifest.v1",
   "revision_id": "rev_0000000000000000000000000000000000000000000000000000000000000000",
   "build_attempt_id": "attempt_REPLACE_WITH_DURABLE_ATTEMPT_ID",
-  "worker_pin": "precision_worker_one:piton.realization-and-review.v2",
+  "worker_pin": "precision_worker_one:piton.realization-and-review.v3",
   "isolation_class": "trusted-local",
   "tracked_input_closure_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
   "claim_scope": "attempt_bound_exact_and_review_evidence_closure",

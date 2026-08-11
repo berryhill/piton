@@ -73,6 +73,8 @@ PINNED_CAPABILITY_DIGEST = _manifest_digest(
     "piton.precision-worker-capabilities.v1",
     {
         "isolation_class": "trusted-local",
+        # Capabilities describe the directly callable worker. Network isolation
+        # is launch-specific evidence, not an intrinsic worker capability.
         "network_isolation_proven": False,
         "credential_isolation_proven": False,
         "database_access": False,
@@ -288,6 +290,42 @@ def _attempt_entry_kind(parent_fd: int, attempt_id: str) -> str:
     return "existing"
 
 
+def preflight_precision_output_custody(
+    request: PrecisionWorkerRequest, control_root: Path
+) -> PrecisionWorkerResult | None:
+    """Fail closed before sandbox work when the canonical destination is unavailable."""
+    try:
+        parent_fd = _open_attempt_parent(control_root, request)
+    except WorkerOutputCustodyError:
+        return _result(
+            request,
+            status="blocked",
+            toolchain={},
+            environment={},
+            artifacts={},
+            diagnostics=("attempt output custody is unsafe",),
+        )
+    try:
+        entry_kind = _attempt_entry_kind(parent_fd, request.attempt_id)
+    finally:
+        os.close(parent_fd)
+    if entry_kind == "missing":
+        return None
+    diagnostic = (
+        "attempt output custody is unsafe"
+        if entry_kind == "unsafe"
+        else "attempt output already exists"
+    )
+    return _result(
+        request,
+        status="blocked",
+        toolchain={},
+        environment={},
+        artifacts={},
+        diagnostics=(diagnostic,),
+    )
+
+
 def execute_precision_worker(
     request: PrecisionWorkerRequest,
     revision: DesignRevision,
@@ -416,6 +454,18 @@ def execute_precision_worker(
             toolchain=receipt["toolchain"],
             environment={
                 **receipt["environment"],
+                "worker_pid": os.getpid(),
+                "credential_environment_present": any(
+                    name.upper().startswith(("AWS_", "GITHUB_", "INFISICAL_"))
+                    or any(
+                        marker in name.upper()
+                        for marker in ("CREDENTIAL", "PASSWORD", "SECRET", "TOKEN")
+                    )
+                    for name in os.environ
+                ),
+                # Ambient child state is not launch authority. The worker
+                # reports no network-isolation claim; the trusted parent may
+                # add launch evidence only after successful sandbox execution.
                 "network_isolation_proven": False,
                 "credential_isolation_proven": False,
             },

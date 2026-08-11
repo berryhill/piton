@@ -139,17 +139,26 @@ pathname-based recursive cleanup that could delete an attacker-swapped entry.
 The worker module does not own repositories, clocks, request issuance, or output-root
 selection. It exposes bounded binding validation, realization, and result
 verification over an already-composed immutable request. Python name deletion and
-closure cells are not treated as an authority boundary.
+closure cells are not treated as an authority boundary. Before launch, the daemon
+copies the admitted source package and lockfiles into a private symlink-free snapshot,
+verifies the revision-bound source and lock digests, closes every snapshot file into
+an input-bundle digest, and passes only sandbox-internal input and output paths.
 The request binds the exact project, revision, source manifest, recipe,
 Python/build123d/OCP toolchain, capability/resource/output manifests, request
 signature reference, and `precision_worker_one` implementation pin. The first
-implementation truthfully reports `trusted-local`; it does not claim container,
-microVM, WASM, network, credential, or result-signature isolation that is not
-implemented.
+implementation remains `trusted-local`, not container, microVM, or WASM. The daemon
+launches that snapshot through Bubblewrap with a read-only input mount, read-only
+runtime mounts, a writable build-attempt root, private process/network namespaces,
+an empty temporary home, and a closed environment. The child cannot attest this
+boundary from ambient variables. Both the child and parent-visible result conservatively
+retain `network_isolation_proven=false`; successful namespace setup is not promoted
+into a durable authority claim in this slice. Broad read-only runtime mounts remain
+unmanifested, so `credential_isolation_proven` also remains false. No result-signature
+claim is made.
 
 `PrecisionWorkerResult` is a frozen, canonical, attempt/request-bound execution
 fact. Success requires exact closure over all seven roles from
-`precision_worker_one:piton.realization-and-review.v2`: exact BREP, STEP, exact
+`precision_worker_one:piton.realization-and-review.v3`: exact BREP, STEP, exact
 inspection receipt, review GLB, artifact-local review selection map, GLB receipt,
 and selection-map receipt. Every file has a verified size and SHA-256 digest.
 The exact inspection receipt independently binds the BREP and STEP to the exact

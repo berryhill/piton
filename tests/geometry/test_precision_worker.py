@@ -16,6 +16,7 @@ from piton.precision_worker import (
     PINNED_RESOURCE_LIMITS_DIGEST,
     PINNED_TOOLCHAIN_DIGEST,
     PRECISION_WORKER_ID,
+    execute_precision_worker,
     verify_precision_worker_result,
 )
 from piton.realization import RealizationInputs
@@ -86,6 +87,17 @@ def test_worker_closes_exact_outputs_and_result_is_deeply_immutable(tmp_path: Pa
     assert result.isolation_class == "trusted-local"
     assert result.authenticated is False
     assert result.result_signature_ref is None
+    assert result.environment["network_isolation_proven"] is False
+    assert result.environment["credential_isolation_proven"] is False
+    forged = replace(
+        result,
+        environment={
+            **result.environment,
+            "network_isolation_proven": True,
+        },
+    )
+    with pytest.raises(ValueError, match="overclaims network isolation"):
+        verify_precision_worker_result(request, forged, output)
     assert set(result.artifacts) == {
         "exact_brep",
         "inspection_receipt",
@@ -110,6 +122,26 @@ def test_worker_closes_exact_outputs_and_result_is_deeply_immutable(tmp_path: Pa
         result.artifacts["extra"] = result.artifacts["step"]  # type: ignore[index]
     with pytest.raises(TypeError):
         result.environment["network_isolation"] = True  # type: ignore[index]
+
+
+def test_direct_worker_cannot_mint_network_isolation_from_ambient_state(
+    monkeypatch, tmp_path: Path
+) -> None:
+    inputs, attempt, state, request, dispatcher = context(tmp_path)
+    monkeypatch.setenv("PITON_SANDBOX_NETWORK", "unshared")
+
+    result = execute_precision_worker(
+        request, inputs.revision, inputs, tmp_path / ".piton"
+    )
+
+    assert result.status == "succeeded"
+    assert result.environment["network_isolation_proven"] is False
+    assert "isolation_evidence_source" not in result.environment
+    verify_precision_worker_result(
+        request,
+        result,
+        tmp_path / ".piton" / "build-attempts" / "project_one" / "attempt_one",
+    )
 
 
 def test_stale_or_cross_attempt_request_is_rejected_before_geometry(tmp_path: Path) -> None:
@@ -250,13 +282,21 @@ def test_toolchain_mismatch_fails_before_creating_output(monkeypatch, tmp_path: 
     )
     output = tmp_path / ".piton" / "build-attempts" / "project_one" / "attempt_one"
 
-    result = dispatcher.run_precision_worker(request)
+    result = execute_precision_worker(
+        request, inputs.revision, inputs, tmp_path / ".piton"
+    )
 
     assert result.status == "failed"
     assert result.artifacts == {}
     assert result.expected_output_closure is False
     assert result.diagnostics == ("exact realization blocked by toolchain mismatch",)
     assert not output.exists()
+    with pytest.raises(ValueError, match="overclaims network isolation"):
+        verify_precision_worker_result(
+            request,
+            replace(result, environment={"network_isolation_proven": True}),
+            output,
+        )
 
 
 def test_symlinked_project_output_ancestor_fails_before_any_external_write(
@@ -276,3 +316,9 @@ def test_symlinked_project_output_ancestor_fails_before_any_external_write(
     assert result.expected_output_closure is False
     assert result.diagnostics == ("attempt output custody is unsafe",)
     assert list(outside.iterdir()) == []
+    with pytest.raises(ValueError, match="overclaims credential isolation"):
+        verify_precision_worker_result(
+            request,
+            replace(result, environment={"credential_isolation_proven": True}),
+            outside,
+        )

@@ -6,7 +6,7 @@ launch scripts compare its effective runtime exports back to this contract.
 """
 from __future__ import annotations
 
-CURRENT_PRECISION_WORKER_PIN = "precision_worker_one:piton.realization-and-review.v2"
+CURRENT_PRECISION_WORKER_PIN = "precision_worker_one:piton.realization-and-review.v3"
 CURRENT_PRECISION_WORKER_OUTPUTS = (
     "exact_brep",
     "inspection_receipt",
