@@ -563,3 +563,43 @@ def test_installed_launch_asset_surface_has_runtime_dependency_and_packaged_sche
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "uv pip install --python /tmp/piton-wheel-venv/bin/python dist/*.whl" in ci
     assert "--no-deps dist/*.whl" not in ci
+
+
+def test_browser_qualification_contract_is_in_repository_and_installed_proof_surfaces():
+    schema_name = "browser-qualification-receipt-v1.schema.json"
+    repository_schema = ROOT / "schemas" / schema_name
+    packaged_schema = ROOT / "src" / "piton" / "schemas" / schema_name
+    assert repository_schema.read_bytes() == packaged_schema.read_bytes()
+
+    repository_verifier = (ROOT / "scripts" / "verify_repo.py").read_text(encoding="utf-8")
+    for required_path in (
+        'ROOT / "src/piton/browser_qualification.py"',
+        'ROOT / "tests/test_browser_qualification.py"',
+        'ROOT / "schemas/browser-qualification-receipt-v1.schema.json"',
+        'ROOT / "src/piton/schemas/browser-qualification-receipt-v1.schema.json"',
+    ):
+        assert required_path in repository_verifier
+    assert '"browser-qualification-receipt-v1.schema.json"' in repository_verifier
+
+    install_verifier = (ROOT / "scripts" / "install_verify.py").read_text(encoding="utf-8")
+    for installed_proof in (
+        "qualify_browser_observation",
+        "validate_browser_qualification",
+        '"browser-qualification-receipt-v1.schema.json"',
+        '"browser_qualification_api"',
+    ):
+        assert installed_proof in install_verifier
+
+    architecture = (ROOT / "docs" / "architecture.md").read_text(encoding="utf-8")
+    instructions = (ROOT / "docs" / "human-review-launch-assets.md").read_text(
+        encoding="utf-8"
+    )
+    for required_claim in (
+        "piton.browser-qualification-receipt.v1",
+        "provenance.controlled_browser_execution_missing",
+        "derived review qualification evidence",
+        "fabrication_release=false",
+        "machine_actuation=false",
+    ):
+        assert required_claim in architecture
+        assert required_claim in instructions

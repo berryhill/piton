@@ -149,6 +149,7 @@ def test_viewer_assets_are_disconnected_csp_bound_and_keep_disclosures_visible(t
         assert control in html
     for behavior in ("artifactToWorld", "selected-zone", "source-parameters", "bounding-box", "build-volume", "validation-issues"):
         assert behavior in html + script
+    assert "packet_digest:packet.packet_digest" in script
     assert "fetch(" not in script
     assert "WebSocket" not in script
 

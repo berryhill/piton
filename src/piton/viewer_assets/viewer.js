@@ -43,7 +43,7 @@
   document.getElementById("reset").addEventListener("click",()=>{Object.assign(state,{view:"iso",roll:0,selected:false});draw();});
   document.getElementById("bbox-reset").addEventListener("click",draw);
   const addDl=(selector,items)=>{const dl=document.querySelector(selector);Object.entries(items).forEach(([k,v])=>{const dt=document.createElement("dt"),dd=document.createElement("dd");dt.textContent=k;dd.textContent=typeof v==="object"?JSON.stringify(v):String(v);dl.append(dt,dd);});};
-  addDl("#identity dl",{project_id:packet.project_id,revision_id:packet.revision_id,build_attempt_id:packet.build_attempt_id,evidence_closure_digest:packet.evidence_closure_digest,worker_pin:packet.worker_pin});
+  addDl("#identity dl",{project_id:packet.project_id,revision_id:packet.revision_id,build_attempt_id:packet.build_attempt_id,evidence_closure_digest:packet.evidence_closure_digest,worker_pin:packet.worker_pin,packet_digest:packet.packet_digest});
   addDl("#source-parameters dl",packet.source_parameters);
   document.querySelector("#bounding-box output").textContent=JSON.stringify(packet.review_geometry.bounding_box_mm);
   packet.validation_issues.forEach(issue=>{const li=document.createElement("li");li.textContent=`${issue.status}: ${issue.message}`;document.querySelector("#validation-issues ul").append(li);});
