@@ -30,7 +30,6 @@ _EXCLUSIONS = (
     "backup or restore success is not review acceptance, approval, export, fabrication release, or machine actuation",
 )
 _SIGNATURE = re.compile(r"^[0-9a-f]{64}$")
-_BACKUP_AUTHORITY_PROOF = object()
 
 
 class BackupValidationError(RuntimeError):
@@ -77,37 +76,32 @@ def _identity_body(manifest_digest: str, project_id: str) -> bytes:
     )
 
 
-class _BackupIdentityAuthority:
-    """Opaque daemon-composition authority for backup identity authentication."""
+def _make_backup_identity_operations():
+    """Keep identity key and signing primitive out of the module namespace."""
+    key = secrets.token_bytes(32)
 
-    __slots__ = ("__key", "__proof")
-
-    def __new__(cls, proof: object = None) -> "_BackupIdentityAuthority":
-        if proof is not _BACKUP_AUTHORITY_PROOF:
-            raise TypeError("backup identity authority is server-issued only")
-        instance = super().__new__(cls)
-        instance.__key = secrets.token_bytes(32)
-        instance.__proof = proof
-        return instance
-
-    def _sign(self, manifest_digest: str, project_id: str) -> BackupIdentity:
+    def issue(manifest_bytes: bytes, project_id: str) -> BackupIdentity:
+        manifest_digest = "sha256:" + hashlib.sha256(manifest_bytes).hexdigest()
         signature = hmac.new(
-            self.__key,
+            key,
             _identity_body(manifest_digest, project_id),
             hashlib.sha256,
         ).hexdigest()
         return BackupIdentity(manifest_digest, project_id, signature)
 
-    def _verifies(self, identity: BackupIdentity) -> bool:
+    def verifies(identity: BackupIdentity) -> bool:
         expected = hmac.new(
-            self.__key,
+            key,
             _identity_body(identity.manifest_digest, identity.project_id),
             hashlib.sha256,
         ).hexdigest()
         return hmac.compare_digest(identity.signature, expected)
 
+    return issue, verifies
 
-_SERVER_BACKUP_IDENTITY_AUTHORITY = _BackupIdentityAuthority(_BACKUP_AUTHORITY_PROOF)
+
+_issue_backup_identity_for_manifest, _verify_backup_identity = _make_backup_identity_operations()
+del _make_backup_identity_operations
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,7 +209,7 @@ class ProjectCustody:
             or not _SIGNATURE.fullmatch(identity.signature)
         ):
             raise BackupValidationError("trusted identity signature is invalid")
-        if not _SERVER_BACKUP_IDENTITY_AUTHORITY._verifies(identity):
+        if not _verify_backup_identity(identity):
             raise BackupValidationError("trusted identity signature is invalid")
         return identity
 
@@ -426,7 +420,9 @@ class ProjectCustody:
             # An incomplete destination has no receipt and restore always validates
             # the complete manifest/object closure before publishing anything.
             raise
-        trusted_identity = _SERVER_BACKUP_IDENTITY_AUTHORITY._sign(manifest_digest, project_id)
+        trusted_identity = _issue_backup_identity_for_manifest(manifest_bytes, project_id)
+        if trusted_identity.manifest_digest != manifest_digest:
+            raise BackupValidationError("backup identity digest changed during issuance")
         return BackupReceipt(
             project_id, manifest_digest, len(objects), str(destination), trusted_identity
         )

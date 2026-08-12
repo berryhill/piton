@@ -221,6 +221,13 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     custody = _custody(database, blobs)
     assert not hasattr(custody, "_ProjectCustody__issue_backup_identity")
     assert not hasattr(custody, "issue_backup_identity")
+    assert not hasattr(custody_module, "_SERVER_BACKUP_IDENTITY_AUTHORITY")
+    assert not hasattr(custody_module, "_BackupIdentityAuthority")
+    assert not any(
+        callable(value) and hasattr(value, "_sign")
+        for value in vars(custody_module).values()
+    )
+
 
 def test_retention_deletion_tombstones_authority_and_only_prunes_unreferenced_objects(tmp_path: Path):
     database, blobs, revision = _seed(tmp_path / "source")
