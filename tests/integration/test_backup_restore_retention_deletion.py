@@ -308,58 +308,15 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     with pytest.raises(PermissionError, match="custody backup operation"):
         forged(channel, arbitrary)
 
-    # Compromise of the in-process wrapper must not turn the helper into a
-    # generic manifest-signing oracle. Exercise the underlying IPC endpoint
-    # destructively: a safety-shaped caller manifest is not a complete backup.
+    # Compromise of the in-process wrapper must not expose the raw helper IPC
+    # endpoint through the callable closure. The former closure leak bypassed
+    # the exact-code caller check and made the helper a generic signing oracle.
     connections = [
         cell.cell_contents
-        for cell in (channel.__closure__ or ())
+        for cell in (getattr(channel, "__closure__", None) or ())
         if isinstance(cell.cell_contents, Connection)
     ]
-    assert len(connections) == 1
-    connections[0].send((str(arbitrary), "project_one"))
-    signed_digest, signature, helper_error = connections[0].recv()
-    assert signed_digest is None
-    assert signature is None
-    assert "portable authority objects are missing" in helper_error
-
-    # A self-consistent artifact row plus matching immutable bytes is still not
-    # project authority when no project-owned metadata reaches that artifact.
-    # Direct IPC access must not turn this orphan into a signed backup.
-    forged_payload = b"caller-controlled orphan"
-    forged_hex = hashlib.sha256(forged_payload).hexdigest()
-    forged_digest = "sha256:" + forged_hex
-    forged_relative = f"objects/sha256/{forged_hex[:2]}/{forged_hex[2:]}"
-    forged_path = arbitrary.parent / forged_relative
-    forged_path.parent.mkdir(parents=True)
-    forged_path.write_bytes(forged_payload)
-    forged_manifest = json.loads(arbitrary.read_bytes())
-    forged_manifest["metadata"].append(
-        {
-            "table": "artifacts",
-            "rows": [
-                {
-                    "digest": forged_digest,
-                    "byte_length": len(forged_payload),
-                    "media_type": "application/octet-stream",
-                }
-            ],
-        }
-    )
-    forged_manifest["objects"] = [
-        {
-            "digest": forged_digest,
-            "byte_length": len(forged_payload),
-            "media_type": "application/octet-stream",
-            "relative_path": forged_relative,
-        }
-    ]
-    arbitrary.write_text(json.dumps(forged_manifest, sort_keys=True, separators=(",", ":")))
-    connections[0].send((str(arbitrary), "project_one"))
-    signed_digest, signature, helper_error = connections[0].recv()
-    assert signed_digest is None
-    assert signature is None
-    assert "not reachable from project metadata" in helper_error
+    assert connections == []
 
     receipt = custody.backup(
         "project_one", tmp_path / "backup", created_at="2026-08-12T12:00:00Z"
@@ -371,6 +328,23 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     )
     with pytest.raises(BackupValidationError, match="signature"):
         custody._require_backup_identity(rebound)
+
+    # A previously valid backup is not a reusable signing authorization. Even
+    # when a caller keeps its closure complete and changes both duplicate
+    # display-name fields consistently, direct IPC cannot mint a new identity.
+    completed_manifest_path = tmp_path / "backup" / "manifest.json"
+    completed_manifest_path.chmod(0o600)
+    completed_manifest = json.loads(completed_manifest_path.read_bytes())
+    completed_manifest["project"]["display_name"] = "Caller rewritten"
+    completed_projects = next(
+        item for item in completed_manifest["metadata"] if item["table"] == "projects"
+    )
+    completed_projects["rows"][0]["display_name"] = "Caller rewritten"
+    completed_manifest_path.write_text(
+        json.dumps(completed_manifest, sort_keys=True, separators=(",", ":"))
+    )
+    with pytest.raises(PermissionError, match="custody backup operation"):
+        channel(completed_manifest_path, "project_one")
 
 
 def test_retention_deletion_tombstones_authority_and_only_prunes_unreferenced_objects(tmp_path: Path):
