@@ -42,6 +42,57 @@ def _identity_body(manifest_digest: str, project_id: str) -> bytes:
     )
 
 
+def _validate_portable_closure(
+    manifest: dict[str, Any], manifest_path: Path, expected_project_id: str
+) -> None:
+    """Reject signing requests that are not complete, self-verifying backups."""
+    metadata = manifest.get("metadata")
+    if not isinstance(metadata, list) or not metadata:
+        raise ValueError("manifest metadata inventory is missing")
+    project_sections = [
+        item
+        for item in metadata
+        if isinstance(item, dict) and item.get("table") == "projects"
+    ]
+    if len(project_sections) != 1 or not isinstance(project_sections[0].get("rows"), list):
+        raise ValueError("manifest projects metadata is invalid")
+    if not any(
+        isinstance(row, dict) and row.get("project_id") == expected_project_id
+        for row in project_sections[0]["rows"]
+    ):
+        raise ValueError("manifest projects metadata does not contain the project")
+
+    objects = manifest.get("objects")
+    if not isinstance(objects, list):
+        raise ValueError("manifest object inventory is missing")
+    seen_paths: set[str] = set()
+    for item in objects:
+        if not isinstance(item, dict):
+            raise ValueError("manifest object inventory is invalid")
+        digest = item.get("digest")
+        byte_length = item.get("byte_length")
+        relative_path = item.get("relative_path")
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 71
+            or not digest.startswith("sha256:")
+            or any(character not in "0123456789abcdef" for character in digest[7:])
+            or not isinstance(byte_length, int)
+            or byte_length < 0
+            or not isinstance(relative_path, str)
+            or relative_path != f"objects/sha256/{digest[7:9]}/{digest[9:]}"
+            or relative_path in seen_paths
+        ):
+            raise ValueError("manifest object inventory is invalid")
+        seen_paths.add(relative_path)
+        payload_path = manifest_path.parent / relative_path
+        if payload_path.is_symlink():
+            raise ValueError("backup payload path is a symlink")
+        payload = payload_path.read_bytes()
+        if len(payload) != byte_length or hashlib.sha256(payload).hexdigest() != digest[7:]:
+            raise ValueError("backup payload does not match its inventory")
+
+
 def _serve(connection: Connection) -> None:
     signer = Ed25519PrivateKey.generate()
     public_bytes = signer.public_key().public_bytes(
@@ -74,6 +125,7 @@ def _serve(connection: Connection) -> None:
                     "machine_actuation": False,
                 }:
                     raise ValueError("manifest safety state is invalid")
+                _validate_portable_closure(manifest, manifest_path, expected_project_id)
                 manifest_digest = "sha256:" + hashlib.sha256(manifest_bytes).hexdigest()
                 signature = signer.sign(
                     _identity_body(manifest_digest, expected_project_id)

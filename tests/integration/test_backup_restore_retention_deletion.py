@@ -4,6 +4,7 @@ import hashlib
 import json
 import secrets
 import types
+from multiprocessing.connection import Connection
 from pathlib import Path
 
 import pytest
@@ -291,6 +292,21 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     )
     with pytest.raises(PermissionError, match="custody backup operation"):
         forged(channel, arbitrary)
+
+    # Compromise of the in-process wrapper must not turn the helper into a
+    # generic manifest-signing oracle. Exercise the underlying IPC endpoint
+    # destructively: a safety-shaped caller manifest is not a complete backup.
+    connections = [
+        cell.cell_contents
+        for cell in (channel.__closure__ or ())
+        if isinstance(cell.cell_contents, Connection)
+    ]
+    assert len(connections) == 1
+    connections[0].send((str(arbitrary), "project_one"))
+    signed_digest, signature, helper_error = connections[0].recv()
+    assert signed_digest is None
+    assert signature is None
+    assert "metadata inventory is missing" in helper_error
 
     receipt = custody.backup(
         "project_one", tmp_path / "backup", created_at="2026-08-12T12:00:00Z"
