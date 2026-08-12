@@ -323,6 +323,44 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     assert signature is None
     assert "portable authority objects are missing" in helper_error
 
+    # A self-consistent artifact row plus matching immutable bytes is still not
+    # project authority when no project-owned metadata reaches that artifact.
+    # Direct IPC access must not turn this orphan into a signed backup.
+    forged_payload = b"caller-controlled orphan"
+    forged_hex = hashlib.sha256(forged_payload).hexdigest()
+    forged_digest = "sha256:" + forged_hex
+    forged_relative = f"objects/sha256/{forged_hex[:2]}/{forged_hex[2:]}"
+    forged_path = arbitrary.parent / forged_relative
+    forged_path.parent.mkdir(parents=True)
+    forged_path.write_bytes(forged_payload)
+    forged_manifest = json.loads(arbitrary.read_bytes())
+    forged_manifest["metadata"].append(
+        {
+            "table": "artifacts",
+            "rows": [
+                {
+                    "digest": forged_digest,
+                    "byte_length": len(forged_payload),
+                    "media_type": "application/octet-stream",
+                }
+            ],
+        }
+    )
+    forged_manifest["objects"] = [
+        {
+            "digest": forged_digest,
+            "byte_length": len(forged_payload),
+            "media_type": "application/octet-stream",
+            "relative_path": forged_relative,
+        }
+    ]
+    arbitrary.write_text(json.dumps(forged_manifest, sort_keys=True, separators=(",", ":")))
+    connections[0].send((str(arbitrary), "project_one"))
+    signed_digest, signature, helper_error = connections[0].recv()
+    assert signed_digest is None
+    assert signature is None
+    assert "not reachable from project metadata" in helper_error
+
     receipt = custody.backup(
         "project_one", tmp_path / "backup", created_at="2026-08-12T12:00:00Z"
     )

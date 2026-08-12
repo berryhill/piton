@@ -102,6 +102,7 @@ def _validate_portable_closure(
 
     seen_paths: set[str] = set()
     object_inventory: dict[str, tuple[int, str]] = {}
+    object_payloads: dict[str, bytes] = {}
     for item in objects:
         if not isinstance(item, dict):
             raise ValueError("manifest object inventory is invalid")
@@ -131,8 +132,49 @@ def _validate_portable_closure(
         payload = payload_path.read_bytes()
         if len(payload) != byte_length or hashlib.sha256(payload).hexdigest() != digest[7:]:
             raise ValueError("backup payload does not match its inventory")
+        object_payloads[digest] = payload
     if object_inventory != artifact_inventory:
         raise ValueError("manifest object inventory does not match artifact authority")
+
+    # Artifact rows are a global CAS catalogue, not project ownership.  Prove
+    # that every inventoried object is reachable from the project-selected
+    # metadata, following digest references through canonical JSON payloads.
+    # This prevents a caller with raw IPC access from signing an orphan artifact
+    # merely by making its row, bytes, and object inventory self-consistent.
+    reachable: set[str] = set()
+
+    def collect(value: Any) -> None:
+        if isinstance(value, str) and value in artifact_inventory:
+            reachable.add(value)
+        elif isinstance(value, list):
+            for child in value:
+                collect(child)
+        elif isinstance(value, dict):
+            for child in value.values():
+                collect(child)
+
+    for section in metadata:
+        if isinstance(section, dict) and section.get("table") != "artifacts":
+            collect(section.get("rows"))
+    pending = list(sorted(reachable))
+    expanded: set[str] = set()
+    while pending:
+        digest = pending.pop(0)
+        if digest in expanded:
+            continue
+        expanded.add(digest)
+        if artifact_inventory[digest][1] != "application/json":
+            continue
+        try:
+            value = json.loads(object_payloads[digest])
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError("referenced canonical JSON object is invalid") from error
+        before = set(reachable)
+        collect(value)
+        pending.extend(sorted(reachable - before))
+    unreachable = set(artifact_inventory) - reachable
+    if unreachable:
+        raise ValueError("manifest artifact authority is not reachable from project metadata")
 
 
 def _serve(connection: Connection) -> None:
