@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, BinaryIO, Callable, Iterator, Mapping, Sequence
 
 from .storage.build_attempts import CoordinatorState, DurableBuildAttempt
 from .storage.blobs import ArtifactRef, BlobStore
@@ -550,6 +554,47 @@ class EvidenceRepository:
             raise EvidenceClosureError("current coordinator lease expiry has no timezone")
         return parsed.astimezone(UTC)
 
+    @contextmanager
+    def _open_worker_artifact(
+        self, project_id: str, attempt_id: str, relative_path: str
+    ) -> Iterator[BinaryIO]:
+        """Open one worker artifact without following any output-scope symlink."""
+        if self._blobs is None:
+            raise EvidenceClosureError("artifact publication requires BlobStore custody")
+        parts = Path(relative_path).parts
+        if not parts or any(part in {"", ".", ".."} for part in parts):
+            raise EvidenceClosureError("worker artifact path is not a safe relative path")
+        components = (".piton", "build-attempts", project_id, attempt_id, *parts[:-1])
+        directory_fd = os.open(
+            self._blobs.project_root,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+        artifact_fd = -1
+        try:
+            for component in components:
+                child_fd = os.open(
+                    component,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                    dir_fd=directory_fd,
+                )
+                os.close(directory_fd)
+                directory_fd = child_fd
+            artifact_fd = os.open(
+                parts[-1],
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                dir_fd=directory_fd,
+            )
+            if not stat.S_ISREG(os.fstat(artifact_fd).st_mode):
+                raise EvidenceClosureError("worker artifact is not a regular file")
+            stream = os.fdopen(artifact_fd, "rb", closefd=True)
+            artifact_fd = -1
+            with stream:
+                yield stream
+        finally:
+            if artifact_fd >= 0:
+                os.close(artifact_fd)
+            os.close(directory_fd)
+
     def recover_incomplete_publications(self) -> tuple[str, ...]:
         """Fail closed and quarantine output scopes left in committing state."""
         if self._blobs is None:
@@ -815,19 +860,18 @@ class EvidenceRepository:
             )
         if self._blobs is None:
             raise EvidenceClosureError("artifact publication requires BlobStore custody")
-        output_root = (
-            self._blobs.control_root / "build-attempts" / attempt.project_id / attempt.attempt_id
-        )
         promoted: dict[str, ArtifactRef] = {}
         for role, artifact in result.artifacts.items():
-            content = (output_root / artifact.relative_path).read_bytes()
-            staged = self._blobs.stage_stream(
-                "evidence-" + attempt.attempt_id,
-                role,
-                (content,),
-                media_type=artifact.media_type,
-                max_bytes=artifact.byte_length,
-            )
+            with self._open_worker_artifact(
+                attempt.project_id, attempt.attempt_id, artifact.relative_path
+            ) as content:
+                staged = self._blobs.stage_stream(
+                    "evidence-" + attempt.attempt_id,
+                    role,
+                    iter(lambda: content.read(1024 * 1024), b""),
+                    media_type=artifact.media_type,
+                    max_bytes=artifact.byte_length,
+                )
             self._blobs.validate_staged(
                 staged,
                 expected_digest=artifact.digest,

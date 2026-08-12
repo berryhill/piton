@@ -372,6 +372,49 @@ def test_closure_transaction_failure_rolls_back_all_metadata_and_preserves_chann
     assert all(tuple(row) == (inputs.revision.revision_id, 0) for row in channels)
 
 
+def test_publication_refuses_substituted_symlink_without_copying_ambient_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, database, _ = prepared(tmp_path)
+    request = service.issue_precision_worker_request("project_one", "attempt_one")
+    result = service.run_precision_worker(request)
+    artifact = result.artifacts["exact_brep"]
+    output = (
+        tmp_path
+        / ".piton"
+        / "build-attempts"
+        / "project_one"
+        / "attempt_one"
+        / artifact.relative_path
+    )
+    ambient = tmp_path / "ambient.bin"
+    ambient.write_bytes(b"x" * artifact.byte_length)
+    execute_checks = EvidenceRepository.execute_checks
+
+    def substitute_after_checks(declaration, checked_result, inspection):
+        receipts = execute_checks(declaration, checked_result, inspection)
+        output.unlink()
+        output.symlink_to(ambient)
+        return receipts
+
+    monkeypatch.setattr(
+        EvidenceRepository, "execute_checks", staticmethod(substitute_after_checks)
+    )
+
+    with pytest.raises(OSError):
+        service.close_precision_worker_evidence(request, result)
+
+    staged_files = tuple(
+        path
+        for path in (tmp_path / ".piton" / "staging").rglob("*")
+        if path.is_file()
+    )
+    assert staged_files == ()
+    with database.read() as connection:
+        assert connection.execute("SELECT count(*) FROM evidence_closures").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM evidence_closure_artifacts").fetchone()[0] == 0
+
+
 def test_restart_quarantines_interrupted_committing_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
