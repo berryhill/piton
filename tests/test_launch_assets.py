@@ -275,6 +275,12 @@ def test_launch_verification_rejects_stale_v1_or_three_role_assets(
         validate_launch_worker_contract(worker_pin, outputs)
 
 
+def test_launch_verification_documents_current_v3_seven_role_contract():
+    assert "reviewed v3 seven-role worker" in (
+        validate_launch_worker_contract.__doc__ or ""
+    )
+
+
 def test_install_and_repository_verifiers_pin_current_seven_role_closure():
     install = run_script("install_verify.py")
     assert install.returncode == 0, install.stderr
@@ -563,6 +569,24 @@ def test_installed_launch_asset_surface_has_runtime_dependency_and_packaged_sche
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "uv pip install --python /tmp/piton-wheel-venv/bin/python dist/*.whl" in ci
     assert "--no-deps dist/*.whl" not in ci
+
+
+def test_ci_provisions_the_required_precision_worker_sandbox_before_tests():
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    install = "sudo apt-get install --yes --no-install-recommends bubblewrap"
+    test = "uv run --frozen python -m pytest -q"
+    assert install in ci
+    assert ci.index(install) < ci.index(test)
+
+
+def test_ci_pins_and_preflights_a_sandbox_capable_runner_without_policy_bypass() -> None:
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    assert "runs-on: ubuntu-22.04" in ci
+    assert "kernel.apparmor_restrict_unprivileged_userns" not in ci
+    assert "bwrap --unshare-all" in ci
+    assert "precision-worker sandbox preflight failed" in ci
 
 
 def test_browser_qualification_contract_is_in_repository_and_installed_proof_surfaces():

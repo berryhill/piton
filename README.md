@@ -34,7 +34,7 @@ One source-native Python/build123d Part, one bounded parameter mutation, one pin
 The current custody scaffold includes capability-gated durable build admission
 with server-derived attempt identity and exact project-scoped reads.
 `PitonApplicationService` executes the pinned
-`precision_worker_one:piton.realization-and-review.v2` worker under the honestly
+`precision_worker_one:piton.realization-and-review.v3` worker under the honestly
 declared weaker `trusted-local` isolation class. It verifies attempt-bound exact
 and review output closure. Request issuance also freezes three deterministic
 attempt-bound checks; the daemon can atomically publish their immutable receipts

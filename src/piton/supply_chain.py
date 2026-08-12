@@ -27,7 +27,7 @@ APPROVED_WORKFLOWS = (".github/workflows/ci.yml",)
 APPROVED_WORKFLOW_DIGESTS = MappingProxyType(
     {
         ".github/workflows/ci.yml": (
-            "sha256:328dd163aea89578a176894070768ae7ae27f7a421547739412e1539cd57fda3"
+            "sha256:1fa197b3d3ccd6bc77d84e0653c8d7f2bf4ec6504e49cd1d05234736a9bdd4c6"
         )
     }
 )

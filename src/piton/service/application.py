@@ -260,8 +260,36 @@ class PitonApplicationService:
         return self._compose_precision_worker_request(attempt, state)
 
     def run_precision_worker(self, request: PrecisionWorkerRequest) -> PrecisionWorkerResult:
-        """Rebind an issued request and select its attempt-scoped output internally."""
-        from ..precision_worker import execute_precision_worker
+        """Rebind an issued request and launch exact admitted bytes in a sandbox."""
+        import hashlib
+        import os
+        import shutil
+        import subprocess
+        import sys
+
+        from ..precision_worker import (
+            preflight_precision_output_custody,
+            verify_precision_worker_result,
+        )
+        from ..precision_worker_launch import (
+            SANDBOX_BOOTSTRAP,
+            bounded_diagnostic_fd,
+            bundle_file_manifest,
+            classify_sandbox_failure,
+            create_isolated_output_root,
+            execution_archive,
+            execution_manifest,
+            publish_isolated_attempt,
+            read_bounded_diagnostic,
+            remove_input_bundle,
+            sandbox_mount_arguments,
+            sealed_archive_fd,
+            stage_input_bundle,
+            validate_admitted_worker_payload,
+            worker_payload_digest,
+        )
+        from ..worker_admission import ADMITTED_WORKER_PAYLOADS
+        from ..worker_contracts import canonical_json_bytes
 
         if not isinstance(request, PrecisionWorkerRequest):
             raise TypeError("request must be a PrecisionWorkerRequest")
@@ -271,9 +299,153 @@ class PitonApplicationService:
         expected = self._compose_precision_worker_request(attempt, state)
         if request.canonical_bytes != expected.canonical_bytes:
             raise ValueError("request no longer matches durable attempt and coordinator bindings")
-        return execute_precision_worker(
-            request, inputs.revision, inputs, self.__precision_control_root
+        blocked = preflight_precision_output_custody(request, self.__precision_control_root)
+        if blocked is not None:
+            return blocked
+        sandbox = Path("/usr/bin/bwrap")
+        try:
+            sandbox_metadata = sandbox.stat()
+        except FileNotFoundError:
+            raise RuntimeError("precision worker sandbox is unavailable")
+        if (
+            not sandbox.is_file()
+            or sandbox_metadata.st_uid != 0
+            or sandbox_metadata.st_mode & 0o022
+            or not os.access(sandbox, os.X_OK)
+        ):
+            raise RuntimeError("precision worker sandbox executable is not trusted")
+        bundle, bundle_digest = stage_input_bundle(
+            inputs.repository_root, self.__precision_control_root, inputs.revision
         )
+        try:
+            payload_digest = worker_payload_digest(bundle)
+            validate_admitted_worker_payload(
+                request.worker_pin, payload_digest, ADMITTED_WORKER_PAYLOADS
+            )
+            bundle_files = bundle_file_manifest(bundle)
+            archive_bytes = execution_archive(bundle)
+            archive_fd = sealed_archive_fd(archive_bytes)
+        finally:
+            remove_input_bundle(bundle)
+        try:
+            archive_digest = "sha256:" + hashlib.sha256(archive_bytes).hexdigest()
+            manifest = execution_manifest(
+                request,
+                inputs.revision,
+                bundle_digest,
+                payload_digest,
+                archive_digest,
+                bundle_files,
+            )
+            output_root = self.__precision_control_root / "build-attempts"
+            runtime_root = Path(sys.base_prefix).resolve(strict=True)
+            virtual_environment = Path(sys.prefix).resolve(strict=True)
+        except Exception:
+            os.close(archive_fd)
+            raise
+        try:
+            sandbox_output_root = create_isolated_output_root(self.__precision_control_root)
+        except Exception:
+            os.close(archive_fd)
+            raise
+        command = [
+            str(sandbox),
+            "--die-with-parent",
+            "--new-session",
+            "--unshare-all",
+        ]
+        try:
+            command.extend(
+                sandbox_mount_arguments(
+                    archive_fd, sandbox_output_root, runtime_root, virtual_environment
+                )
+            )
+            command.extend(
+                (
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "--tmpfs",
+                "/tmp",
+                "--chdir",
+                "/tmp",
+                "--clearenv",
+                "--setenv",
+                "LANG",
+                "C.UTF-8",
+                "--setenv",
+                "LC_ALL",
+                "C.UTF-8",
+                "--setenv",
+                "PYTHONHASHSEED",
+                "0",
+                "--setenv",
+                "PYTHONNOUSERSITE",
+                "1",
+                "--setenv",
+                "PYTHONDONTWRITEBYTECODE",
+                "1",
+                "--setenv",
+                "HOME",
+                "/tmp",
+                "--setenv",
+                "XDG_CONFIG_HOME",
+                "/tmp/.config",
+                "--setenv",
+                "XDG_CACHE_HOME",
+                "/tmp/.cache",
+                str(Path(sys.executable).absolute()),
+                "-I",
+                "-B",
+                "-c",
+                SANDBOX_BOOTSTRAP,
+                )
+            )
+        except Exception:
+            os.close(archive_fd)
+            shutil.rmtree(sandbox_output_root, ignore_errors=True)
+            raise
+        environment = {"PATH": os.defpath}
+        diagnostic_fd = bounded_diagnostic_fd()
+        try:
+            completed = subprocess.run(
+                command,
+                input=canonical_json_bytes(manifest),
+                stdout=subprocess.PIPE,
+                stderr=diagnostic_fd,
+                cwd="/",
+                env=environment,
+                close_fds=True,
+                pass_fds=(archive_fd,),
+                check=False,
+                timeout=300,
+            )
+            diagnostic = read_bounded_diagnostic(diagnostic_fd)
+        except Exception:
+            shutil.rmtree(sandbox_output_root, ignore_errors=True)
+            raise
+        finally:
+            os.close(diagnostic_fd)
+            os.close(archive_fd)
+        try:
+            if completed.returncode != 0 or len(completed.stdout) > 1024 * 1024:
+                failure_class = classify_sandbox_failure(completed.returncode, diagnostic)
+                raise RuntimeError(f"precision worker child failed: {failure_class}")
+            try:
+                result = PrecisionWorkerResult.from_manifest(
+                    json.loads(completed.stdout.decode("utf-8", errors="strict"))
+                )
+            except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as error:
+                raise RuntimeError("precision worker child returned an invalid result") from error
+            staged_output = sandbox_output_root / request.project_id / request.attempt_id
+            verified = verify_precision_worker_result(request, result, staged_output)
+            output = publish_isolated_attempt(
+                sandbox_output_root, output_root, request.project_id, request.attempt_id
+            )
+            return verify_precision_worker_result(request, verified, output)
+        finally:
+            shutil.rmtree(sandbox_output_root, ignore_errors=True)
 
     def close_precision_worker_evidence(
         self, request: PrecisionWorkerRequest, result: PrecisionWorkerResult

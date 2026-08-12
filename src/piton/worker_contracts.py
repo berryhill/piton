@@ -92,11 +92,16 @@ def _primitive(value: Any) -> Any:
 
 def _truth(value: Mapping[str, Any]) -> Mapping[str, Any]:
     frozen = _freeze_json(value)
-    if dict(frozen) != _TRUTH:
-        if frozen.get("fabrication_release") is not False:
-            raise ValueError("fabrication_release must remain false")
-        if frozen.get("machine_actuation") is not False:
-            raise ValueError("machine_actuation must remain false")
+    if set(frozen) != set(_TRUTH):
+        raise ValueError("root safety truth fields do not match the closed contract")
+    if frozen["fabrication_release"] is not False:
+        raise ValueError("fabrication_release must remain false")
+    if frozen["machine_actuation"] is not False:
+        raise ValueError("machine_actuation must remain false")
+    if (
+        type(frozen["review_state"]) is not str
+        or frozen["review_state"] != "needs_human_review"
+    ):
         raise ValueError("review_state must remain needs_human_review")
     return frozen
 

@@ -56,7 +56,7 @@ channel, qualify a STEP receiver, release fabrication, or actuate machinery.
 ## Governed exact + review worker packet
 
 Use this procedure for a successful, durable `BuildAttempt` produced by the
-pinned `precision_worker_one:piton.realization-and-review.v2` trusted-local
+pinned `precision_worker_one:piton.realization-and-review.v3` trusted-local
 worker. Do not substitute the ungoverned reference build above.
 
 1. Freeze one `revision_id` and one successful `attempt_id`. Obtain the worker
