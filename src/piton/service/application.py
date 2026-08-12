@@ -158,8 +158,9 @@ class PitonApplicationService:
         self.__precision_inputs = precision_inputs
         self.__precision_clock = precision_clock or (lambda: datetime.now(UTC))
         self.__evidence_repository = EvidenceRepository(
-            database, trusted_clock=self.__precision_clock
+            database, blobs=blobs, trusted_clock=self.__precision_clock
         )
+        self.__evidence_repository.recover_incomplete_publications()
         self.__precision_control_root = blobs.control_root
 
     @classmethod
@@ -516,6 +517,7 @@ class PitonApplicationService:
             (output / result.artifacts["inspection_receipt"].relative_path).read_bytes()
         )
         receipts = self.__evidence_repository.execute_checks(declaration, result, inspection)
+        self.__evidence_repository.begin_publication(attempt, state, result)
         return self.__evidence_repository.publish(
             attempt=attempt,
             state=state,

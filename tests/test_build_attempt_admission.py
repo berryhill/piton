@@ -445,6 +445,33 @@ def test_repository_proof_tracks_build_attempt_assets_and_uses_pytest() -> None:
     assert "unittest discover" not in readme
 
 
+def test_repository_proof_tracks_crash_safe_publication_and_operator_recovery() -> None:
+    root = Path(__file__).resolve().parents[1]
+    verifier = (root / "scripts" / "verify_repo.py").read_text(encoding="utf-8")
+    architecture = (root / "docs" / "architecture.md").read_text(encoding="utf-8")
+
+    for required_contract in (
+        'ROOT / "src/piton/storage/migrations/0009_crash_safe_publication.sql"',
+        '"artifact_publications"',
+        '"artifact_publications_transition_guard"',
+        '"artifact_publications_no_delete"',
+        '"recover_incomplete_publications"',
+        '"evidence.closure.committed"',
+        '".piton/objects/sha256/"',
+    ):
+        assert required_contract in verifier
+    for operator_truth in (
+        "committing",
+        "quarantined",
+        "startup-incomplete-publication",
+        "evidence.closure.committed",
+        "delivery_attempts",
+        "fabrication_release=false",
+        "machine_actuation=false",
+    ):
+        assert operator_truth in architecture
+
+
 def test_install_verifier_exercises_public_api_and_fresh_schema() -> None:
     root = Path(__file__).resolve().parents[1]
     verifier = (root / "scripts" / "install_verify.py").read_text(encoding="utf-8")

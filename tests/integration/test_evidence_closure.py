@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from piton.evidence import EvidenceClosureError, PREDECLARED_CHECKS
+from piton.evidence import EvidenceClosureError, EvidenceRepository, PREDECLARED_CHECKS
 from piton.parts.l_bracket import DEFAULT_PARAMETERS
 from piton.precision_worker import (
     EXPECTED_OUTPUTS_DIGEST,
@@ -28,6 +28,7 @@ from piton.storage.build_attempts import (
     _issue_server_admission_capability,
 )
 from piton.storage.db import Database
+from piton.storage.blobs import BlobStore
 
 ROOT = Path(__file__).resolve().parents[2]
 DIGEST = "sha256:" + "7" * 64
@@ -180,6 +181,23 @@ def test_closure_is_predeclared_atomic_deterministic_and_project_scoped(
             "SELECT channel,revision_id,generation FROM channel_pointers ORDER BY channel"
         ).fetchall()
     assert all(tuple(row)[1:] == (inputs.revision.revision_id, 0) for row in channels)
+
+    with database.read() as connection:
+        publication = connection.execute(
+            "SELECT state FROM artifact_publications WHERE attempt_id='attempt_one'"
+        ).fetchone()
+        pending = connection.execute(
+            "SELECT topic, delivered_at, delivery_attempts FROM outbox "
+            "WHERE aggregate_id='attempt_one'"
+        ).fetchone()
+        artifact_paths = connection.execute(
+            "SELECT storage_relpath FROM artifacts "
+            "WHERE digest IN (SELECT artifact_digest FROM evidence_closure_artifacts)"
+        ).fetchall()
+    assert publication[0] == "committed"
+    assert tuple(pending) == ("evidence.closure.committed", None, 0)
+    assert artifact_paths
+    assert all(row[0].startswith(".piton/objects/sha256/") for row in artifact_paths)
     for statement in (
         "UPDATE evidence_closures SET review_state='needs_human_review'",
         "DELETE FROM evidence_check_receipts",
@@ -343,9 +361,40 @@ def test_closure_transaction_failure_rolls_back_all_metadata_and_preserves_chann
             connection.execute(
                 "SELECT state FROM build_coordinator_state WHERE attempt_id='attempt_one'"
             ).fetchone()[0]
-            == "running"
+            == "committing"
         )
+        assert connection.execute(
+            "SELECT state FROM artifact_publications WHERE attempt_id='attempt_one'"
+        ).fetchone()[0] == "committing"
         channels = connection.execute(
             "SELECT revision_id,generation FROM channel_pointers"
         ).fetchall()
     assert all(tuple(row) == (inputs.revision.revision_id, 0) for row in channels)
+
+
+def test_restart_quarantines_interrupted_committing_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, database, _ = prepared(tmp_path)
+    request = service.issue_precision_worker_request("project_one", "attempt_one")
+    result = service.run_precision_worker(request)
+
+    def injected_crash(self, **kwargs):
+        raise OSError("injected crash after committing marker")
+
+    monkeypatch.setattr(EvidenceRepository, "publish", injected_crash)
+    with pytest.raises(OSError, match="injected crash"):
+        service.close_precision_worker_evidence(request, result)
+    monkeypatch.undo()
+
+    EvidenceRepository(database, blobs=BlobStore(tmp_path)).recover_incomplete_publications()
+    with database.read() as connection:
+        assert connection.execute(
+            "SELECT state FROM build_coordinator_state WHERE attempt_id='attempt_one'"
+        ).fetchone()[0] == "failed"
+        assert connection.execute(
+            "SELECT state FROM artifact_publications WHERE attempt_id='attempt_one'"
+        ).fetchone()[0] == "quarantined"
+        assert connection.execute("SELECT count(*) FROM evidence_closures").fetchone()[0] == 0
+    quarantine = tmp_path / ".piton" / "quarantine" / "startup-incomplete-publication"
+    assert any(path.name.endswith("attempt_one") for path in quarantine.iterdir())

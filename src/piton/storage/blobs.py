@@ -424,6 +424,8 @@ class BlobStore:
                     json.load(stream)
             except (UnicodeDecodeError, json.JSONDecodeError):
                 valid = False
+        elif media_type == "model/vnd.occt-brep":
+            valid = header.startswith(b"DBRep_DrawableShape")
         elif media_type in ("model/step", "application/step"):
             valid = header.lstrip().startswith(b"ISO-10303-21;")
         elif media_type in ("model/gltf-binary", "application/gltf-buffer"):
