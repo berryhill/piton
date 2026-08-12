@@ -1,8 +1,9 @@
-"""Process-isolated backup receipt signing.
+"""Process-isolated backup receipt signing bootstrap.
 
-The Ed25519 private key exists only in the helper process.  The parent side can
-request a signature for bytes read back from a completed backup manifest; it
-cannot obtain a key object or submit a bare digest/project pair.
+The one-shot bootstrap is consumed while the trusted custody composition root is
+imported.  It removes itself from this module before returning, so importing
+callers cannot mint authority or invoke a generic signing endpoint.  The
+Ed25519 private key and signing operation remain inside the helper process.
 """
 
 from __future__ import annotations
@@ -11,44 +12,17 @@ import atexit
 import hashlib
 import json
 import multiprocessing
+import sys
 import threading
 from multiprocessing.connection import Connection
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
 )
-
-_CAPABILITY_PROOF = object()
-
-
-class BackupSigningCapability:
-    """Opaque daemon-issued authority to request a completed-backup receipt."""
-
-    __slots__ = ("_proof",)
-
-    def __new__(cls, proof: object = None) -> "BackupSigningCapability":
-        if proof is not _CAPABILITY_PROOF:
-            raise PermissionError("backup signing capability is server-issued only")
-        instance = super().__new__(cls)
-        instance._proof = proof
-        return instance
-
-
-def _issue_server_backup_capability() -> BackupSigningCapability:
-    """Issue authority only to the trusted daemon composition root."""
-    return BackupSigningCapability(_CAPABILITY_PROOF)
-
-
-def _require_capability(capability: object) -> None:
-    if (
-        type(capability) is not BackupSigningCapability
-        or getattr(capability, "_proof", None) is not _CAPABILITY_PROOF
-    ):
-        raise PermissionError("server-issued backup capability is required")
 
 
 def _canonical(value: Any) -> bytes:
@@ -110,47 +84,40 @@ def _serve(connection: Connection) -> None:
         connection.close()
 
 
-_context = multiprocessing.get_context("fork")
-_parent_connection, _child_connection = _context.Pipe()
-_process = _context.Process(target=_serve, args=(_child_connection,), daemon=True)
-_process.start()
-_child_connection.close()
-_public_key = Ed25519PublicKey.from_public_bytes(_parent_connection.recv_bytes())
-_lock = threading.Lock()
+def _take_backup_identity_authority() -> tuple[
+    Ed25519PublicKey, Callable[[Path, str], tuple[str, str]]
+]:
+    """Consume the process authority exactly once during custody composition."""
+    module = sys.modules[__name__]
+    delattr(module, "_take_backup_identity_authority")
 
+    context = multiprocessing.get_context("fork")
+    parent_connection, child_connection = context.Pipe()
+    process = context.Process(target=_serve, args=(child_connection,), daemon=True)
+    process.start()
+    child_connection.close()
+    verifier = Ed25519PublicKey.from_public_bytes(parent_connection.recv_bytes())
+    lock = threading.Lock()
 
-def public_key() -> Ed25519PublicKey:
-    """Return only the helper's non-signing verification key."""
-    return _public_key
+    def sign_completed_manifest(manifest_path: Path, project_id: str) -> tuple[str, str]:
+        with lock:
+            if not process.is_alive():
+                raise RuntimeError("backup identity helper is unavailable")
+            parent_connection.send((str(manifest_path), project_id))
+            manifest_digest, signature, error = parent_connection.recv()
+        if error is not None:
+            raise RuntimeError(error)
+        return manifest_digest, signature
 
+    def shutdown() -> None:
+        if process.is_alive():
+            try:
+                parent_connection.send(None)
+            except (BrokenPipeError, EOFError, OSError):
+                pass
+            process.join(timeout=1)
+            if process.is_alive():
+                process.terminate()
 
-def _sign_completed_manifest(
-    manifest_path: Path,
-    project_id: str,
-    *,
-    capability: object,
-) -> tuple[str, str]:
-    """Sign bytes read independently by the helper from a completed backup."""
-    _require_capability(capability)
-    with _lock:
-        if not _process.is_alive():
-            raise RuntimeError("backup identity helper is unavailable")
-        _parent_connection.send((str(manifest_path), project_id))
-        manifest_digest, signature, error = _parent_connection.recv()
-    if error is not None:
-        raise RuntimeError(error)
-    return manifest_digest, signature
-
-
-def _shutdown() -> None:
-    if _process.is_alive():
-        try:
-            _parent_connection.send(None)
-        except (BrokenPipeError, EOFError, OSError):
-            pass
-        _process.join(timeout=1)
-        if _process.is_alive():
-            _process.terminate()
-
-
-atexit.register(_shutdown)
+    atexit.register(shutdown)
+    return verifier, sign_completed_manifest

@@ -246,6 +246,10 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
 
     assert not hasattr(custody_module, "_verify_backup_identity")
     assert not hasattr(identity_process, "sign_completed_manifest")
+    assert not hasattr(identity_process, "_issue_server_backup_capability")
+    assert not hasattr(identity_process, "BackupSigningCapability")
+    assert not hasattr(identity_process, "_CAPABILITY_PROOF")
+    assert not hasattr(identity_process, "_take_backup_identity_authority")
 
     # Even a canonical caller-created manifest at the expected filename cannot
     # invoke the internal helper without daemon-issued backup authority.
@@ -267,10 +271,7 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
             separators=(",", ":"),
         )
     )
-    with pytest.raises(PermissionError, match="server-issued backup capability"):
-        identity_process._sign_completed_manifest(
-            arbitrary, "project_one", capability=object()
-        )
+    assert not hasattr(identity_process, "_sign_completed_manifest")
 
     receipt = custody.backup(
         "project_one", tmp_path / "backup", created_at="2026-08-12T12:00:00Z"
