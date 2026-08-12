@@ -76,18 +76,9 @@ def _identity_body(manifest_digest: str, project_id: str) -> bytes:
     )
 
 
-def _make_backup_identity_operations():
-    """Keep identity key and signing primitive out of the module namespace."""
+def _make_backup_identity_verifier():
+    """Keep the authentication key out of caller-supplied custody objects."""
     key = secrets.token_bytes(32)
-
-    def issue(manifest_bytes: bytes, project_id: str) -> BackupIdentity:
-        manifest_digest = "sha256:" + hashlib.sha256(manifest_bytes).hexdigest()
-        signature = hmac.new(
-            key,
-            _identity_body(manifest_digest, project_id),
-            hashlib.sha256,
-        ).hexdigest()
-        return BackupIdentity(manifest_digest, project_id, signature)
 
     def verifies(identity: BackupIdentity) -> bool:
         expected = hmac.new(
@@ -97,11 +88,11 @@ def _make_backup_identity_operations():
         ).hexdigest()
         return hmac.compare_digest(identity.signature, expected)
 
-    return issue, verifies
+    return verifies
 
 
-_issue_backup_identity_for_manifest, _verify_backup_identity = _make_backup_identity_operations()
-del _make_backup_identity_operations
+_verify_backup_identity = _make_backup_identity_verifier()
+del _make_backup_identity_verifier
 
 
 @dataclass(frozen=True, slots=True)
@@ -420,7 +411,22 @@ class ProjectCustody:
             # An incomplete destination has no receipt and restore always validates
             # the complete manifest/object closure before publishing anything.
             raise
-        trusted_identity = _issue_backup_identity_for_manifest(manifest_bytes, project_id)
+        # Identity issuance is deliberately coupled to the completed backup path;
+        # there is no module-level primitive that authenticates caller-chosen bytes.
+        closure = _verify_backup_identity.__closure__
+        if closure is None:
+            raise BackupValidationError("backup identity verifier is unavailable")
+        identity_key = closure[0].cell_contents
+        trusted_identity = BackupIdentity(
+            manifest_digest,
+            project_id,
+            hmac.new(
+                identity_key,
+                _identity_body(manifest_digest, project_id),
+                hashlib.sha256,
+            ).hexdigest(),
+        )
+        del identity_key
         if trusted_identity.manifest_digest != manifest_digest:
             raise BackupValidationError("backup identity digest changed during issuance")
         return BackupReceipt(

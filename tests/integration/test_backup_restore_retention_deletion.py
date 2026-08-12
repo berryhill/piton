@@ -223,8 +223,12 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     assert not hasattr(custody, "issue_backup_identity")
     assert not hasattr(custody_module, "_SERVER_BACKUP_IDENTITY_AUTHORITY")
     assert not hasattr(custody_module, "_BackupIdentityAuthority")
+    assert not hasattr(custody_module, "_issue_backup_identity_for_manifest")
     assert not any(
-        callable(value) and hasattr(value, "_sign")
+        callable(value) and (
+            hasattr(value, "_sign")
+            or "issue_backup_identity" in getattr(value, "__name__", "")
+        )
         for value in vars(custody_module).values()
     )
 
