@@ -232,6 +232,25 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
         for value in vars(custody_module).values()
     )
 
+    # A verifier must not retain signing-key bytes that an in-process caller can
+    # recover through Python closure introspection and reuse for a new identity.
+    verifier = custody_module._verify_backup_identity
+    assert not any(
+        isinstance(cell.cell_contents, (bytes, bytearray, memoryview))
+        for cell in (verifier.__closure__ or ())
+    )
+
+    receipt = custody.backup(
+        "project_one", tmp_path / "backup", created_at="2026-08-12T12:00:00Z"
+    )
+    rebound = custody_module.BackupIdentity(
+        "sha256:" + "0" * 64,
+        receipt.project_id,
+        receipt.trusted_identity.signature,
+    )
+    with pytest.raises(BackupValidationError, match="signature"):
+        custody._require_backup_identity(rebound)
+
 
 def test_retention_deletion_tombstones_authority_and_only_prunes_unreferenced_objects(tmp_path: Path):
     database, blobs, revision = _seed(tmp_path / "source")

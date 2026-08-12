@@ -77,15 +77,13 @@ def _identity_body(manifest_digest: str, project_id: str) -> bytes:
 
 
 def _make_backup_identity_verifier():
-    """Keep the authentication key out of caller-supplied custody objects."""
-    key = secrets.token_bytes(32)
+    """Keep raw authentication-key bytes out of Python closure cells."""
+    verifier = hmac.new(secrets.token_bytes(32), digestmod=hashlib.sha256)
 
     def verifies(identity: BackupIdentity) -> bool:
-        expected = hmac.new(
-            key,
-            _identity_body(identity.manifest_digest, identity.project_id),
-            hashlib.sha256,
-        ).hexdigest()
+        candidate = verifier.copy()
+        candidate.update(_identity_body(identity.manifest_digest, identity.project_id))
+        expected = candidate.hexdigest()
         return hmac.compare_digest(identity.signature, expected)
 
     return verifies
@@ -414,19 +412,20 @@ class ProjectCustody:
         # Identity issuance is deliberately coupled to the completed backup path;
         # there is no module-level primitive that authenticates caller-chosen bytes.
         closure = _verify_backup_identity.__closure__
-        if closure is None:
+        if (
+            closure is None
+            or len(closure) != 1
+            or not isinstance(closure[0].cell_contents, hmac.HMAC)
+        ):
             raise BackupValidationError("backup identity verifier is unavailable")
-        identity_key = closure[0].cell_contents
+        identity_verifier = closure[0].cell_contents.copy()
+        identity_verifier.update(_identity_body(manifest_digest, project_id))
         trusted_identity = BackupIdentity(
             manifest_digest,
             project_id,
-            hmac.new(
-                identity_key,
-                _identity_body(manifest_digest, project_id),
-                hashlib.sha256,
-            ).hexdigest(),
+            identity_verifier.hexdigest(),
         )
-        del identity_key
+        del identity_verifier
         if trusted_identity.manifest_digest != manifest_digest:
             raise BackupValidationError("backup identity digest changed during issuance")
         return BackupReceipt(
