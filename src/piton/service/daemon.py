@@ -14,8 +14,16 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from ..health import HealthDetail, LocalHealthService
 from ..source_tree import SourceTree, SourceTreeFile
-from .application import CommandReceipt, DraftReceipt, PitonApplicationService, _issue_principal_context
+from ..storage.blobs import BlobStore
+from ..storage.db import Database
+from .application import (
+    CommandReceipt,
+    DraftReceipt,
+    PitonApplicationService,
+    _issue_principal_context,
+)
 from .commands import (
     BeginDraft,
     CommitDraft,
@@ -31,6 +39,82 @@ class CommandAdmissionError(ValueError):
     """Untrusted command content does not match the closed transport schema."""
 
 
+def _peer_uid(connection: socket.socket) -> int:
+    """Read identity from kernel-owned credentials on a connected local socket."""
+    if type(connection) is not socket.socket or connection.family != socket.AF_UNIX:
+        raise TypeError("trusted connected AF_UNIX socket is required")
+    try:
+        credentials = connection.getsockopt(
+            socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")
+        )
+        _pid, uid, _gid = struct.unpack("3i", credentials)
+    except (AttributeError, OSError, struct.error) as error:
+        raise PermissionError("kernel peer credentials are unavailable") from error
+    return uid
+
+
+class LocalDaemonHealthAdapter:
+    """Closed local routing for liveness, readiness, and authorized detail."""
+
+    __slots__ = ("__health", "__detail_principal_ids_by_uid")
+
+    def __init__(
+        self,
+        health: LocalHealthService,
+        *,
+        detail_principal_ids_by_uid: Mapping[int, str],
+    ) -> None:
+        if not isinstance(health, LocalHealthService):
+            raise TypeError("trusted LocalHealthService is required")
+        if not isinstance(detail_principal_ids_by_uid, Mapping):
+            raise TypeError(
+                "detail_principal_ids_by_uid must be a server-owned mapping"
+            )
+        copied = dict(detail_principal_ids_by_uid)
+        if not all(
+            isinstance(uid, int) and not isinstance(uid, bool) and uid >= 0
+            for uid in copied
+        ):
+            raise ValueError("mapped peer UIDs must be non-negative integers")
+        if not all(
+            isinstance(principal_id, str) and principal_id
+            for principal_id in copied.values()
+        ):
+            raise ValueError("mapped principal IDs must be non-empty strings")
+        self.__health = health
+        self.__detail_principal_ids_by_uid = MappingProxyType(copied)
+
+    @classmethod
+    def open(
+        cls,
+        project_root: str | Path,
+        *,
+        detail_principal_ids_by_uid: Mapping[int, str],
+    ) -> "LocalDaemonHealthAdapter":
+        root = Path(project_root)
+        database = Database(root / ".piton" / "piton.sqlite3")
+        return cls(
+            LocalHealthService(database, BlobStore(root)),
+            detail_principal_ids_by_uid=detail_principal_ids_by_uid,
+        )
+
+    def handle(
+        self, connection: socket.socket, path: str
+    ) -> Mapping[str, str] | HealthDetail:
+        uid = _peer_uid(connection)
+        if path == "/health/live":
+            return self.__health.live()
+        if path == "/health/ready":
+            return self.__health.ready()
+        if path == "/health/detail":
+            if uid not in self.__detail_principal_ids_by_uid:
+                raise PermissionError(
+                    "kernel peer UID is not authorized for health detail"
+                )
+            return self.__health._evaluate()
+        raise CommandAdmissionError("unsupported local health path")
+
+
 _COMMAND_FIELDS = MappingProxyType(
     {
         "create_project": frozenset(("command_id", "project_id", "display_name")),
@@ -40,7 +124,9 @@ _COMMAND_FIELDS = MappingProxyType(
         "begin_draft": frozenset(
             ("command_id", "project_id", "base_revision_id", "expected_generation")
         ),
-        "update_draft": frozenset(("command_id", "project_id", "draft_id", "source_tree")),
+        "update_draft": frozenset(
+            ("command_id", "project_id", "draft_id", "source_tree")
+        ),
         "commit_draft": frozenset(
             (
                 "command_id",
@@ -70,7 +156,9 @@ _SOURCE_FILE_FIELDS = frozenset(("path", "content", "media_type"))
 _ENVELOPE_FIELDS = frozenset(("command_type", "payload"))
 
 
-def _closed_mapping(value: object, expected: frozenset[str], name: str) -> Mapping[str, Any]:
+def _closed_mapping(
+    value: object, expected: frozenset[str], name: str
+) -> Mapping[str, Any]:
     if not isinstance(value, Mapping) or set(value) != expected:
         raise CommandAdmissionError(f"{name} does not match the closed schema")
     return value
@@ -181,9 +269,15 @@ class LocalDaemonCommandAdapter:
         if not isinstance(principal_ids_by_uid, Mapping):
             raise TypeError("principal_ids_by_uid must be a server-owned mapping")
         copied = dict(principal_ids_by_uid)
-        if not all(isinstance(uid, int) and not isinstance(uid, bool) and uid >= 0 for uid in copied):
+        if not all(
+            isinstance(uid, int) and not isinstance(uid, bool) and uid >= 0
+            for uid in copied
+        ):
             raise ValueError("mapped peer UIDs must be non-negative integers")
-        if not all(isinstance(principal_id, str) and principal_id for principal_id in copied.values()):
+        if not all(
+            isinstance(principal_id, str) and principal_id
+            for principal_id in copied.values()
+        ):
             raise ValueError("mapped principal IDs must be non-empty strings")
         self.__service = service
         self.__principal_ids_by_uid = MappingProxyType(copied)
@@ -202,16 +296,7 @@ class LocalDaemonCommandAdapter:
 
     @staticmethod
     def _peer_uid(connection: socket.socket) -> int:
-        if type(connection) is not socket.socket or connection.family != socket.AF_UNIX:
-            raise TypeError("trusted connected AF_UNIX socket is required")
-        try:
-            credentials = connection.getsockopt(
-                socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")
-            )
-            _pid, uid, _gid = struct.unpack("3i", credentials)
-        except (AttributeError, OSError, struct.error) as error:
-            raise PermissionError("kernel peer credentials are unavailable") from error
-        return uid
+        return _peer_uid(connection)
 
     def execute(
         self, connection: socket.socket, content: Mapping[str, Any]
