@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import secrets
 from pathlib import Path
 
 import pytest
 import piton.storage.custody as custody_module
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from piton.revision import DesignRevision
 from piton.source_tree import SourceTree, SourceTreeFile
@@ -226,6 +225,11 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     assert not hasattr(custody_module, "_SERVER_BACKUP_IDENTITY_AUTHORITY")
     assert not hasattr(custody_module, "_BackupIdentityAuthority")
     assert not hasattr(custody_module, "_issue_backup_identity_for_manifest")
+    assert not hasattr(custody_module, "_backup_identity_signer")
+    assert not any(
+        isinstance(value, Ed25519PrivateKey)
+        for value in vars(custody_module).values()
+    )
     assert not any(
         callable(value) and (
             hasattr(value, "_sign")
@@ -234,17 +238,7 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
         for value in vars(custody_module).values()
     )
 
-    # A verifier must not retain signing-key bytes that an in-process caller can
-    # recover through Python closure introspection and reuse for a new identity.
-    verifier = custody_module._verify_backup_identity
-    assert not any(
-        isinstance(cell.cell_contents, (bytes, bytearray, memoryview, hmac.HMAC))
-        for cell in (verifier.__closure__ or ())
-    )
-    verifier_cells = tuple(cell.cell_contents for cell in (verifier.__closure__ or ()))
-    assert len(verifier_cells) == 1
-    assert isinstance(verifier_cells[0], Ed25519PublicKey)
-    assert not hasattr(verifier_cells[0], "sign")
+    assert not hasattr(custody_module, "_verify_backup_identity")
 
     receipt = custody.backup(
         "project_one", tmp_path / "backup", created_at="2026-08-12T12:00:00Z"

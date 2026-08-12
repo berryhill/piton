@@ -78,28 +78,6 @@ def _identity_body(manifest_digest: str, project_id: str) -> bytes:
     )
 
 
-def _make_backup_identity_authority():
-    """Separate private issuance from the public-key-only verifier."""
-    signer = Ed25519PrivateKey.generate()
-    public_key = signer.public_key()
-
-    def verifies(identity: BackupIdentity) -> bool:
-        try:
-            public_key.verify(
-                bytes.fromhex(identity.signature),
-                _identity_body(identity.manifest_digest, identity.project_id),
-            )
-        except (InvalidSignature, ValueError):
-            return False
-        return True
-
-    return signer, verifies
-
-
-_backup_identity_signer, _verify_backup_identity = _make_backup_identity_authority()
-del _make_backup_identity_authority
-
-
 @dataclass(frozen=True, slots=True)
 class BackupReceipt:
     project_id: str
@@ -183,6 +161,9 @@ def _sqlite_value(value: Any) -> Any:
 class ProjectCustody:
     """Daemon-side project custody without a second writable design authority."""
 
+    __backup_identity_signer = Ed25519PrivateKey.generate()
+    __backup_identity_verifier = __backup_identity_signer.public_key()
+
     def __init__(self, database: Database, blobs: BlobStore) -> None:
         if not isinstance(database, Database) or not isinstance(blobs, BlobStore):
             raise TypeError("database and blobs must be Piton custody objects")
@@ -205,7 +186,12 @@ class ProjectCustody:
             or not _SIGNATURE.fullmatch(identity.signature)
         ):
             raise BackupValidationError("trusted identity signature is invalid")
-        if not _verify_backup_identity(identity):
+        try:
+            self.__backup_identity_verifier.verify(
+                bytes.fromhex(identity.signature),
+                _identity_body(identity.manifest_digest, identity.project_id),
+            )
+        except (InvalidSignature, ValueError):
             raise BackupValidationError("trusted identity signature is invalid")
         return identity
 
@@ -416,14 +402,14 @@ class ProjectCustody:
             # An incomplete destination has no receipt and restore always validates
             # the complete manifest/object closure before publishing anything.
             raise
-        # Only the completed backup path invokes private-key issuance. Restore's
-        # verifier retains the corresponding public key and cannot mint identities.
-        if not isinstance(_backup_identity_signer, Ed25519PrivateKey):
+        # Only the completed backup path invokes the custody instance's signer.
+        # No signing authority is exposed through module state or a caller hook.
+        if not isinstance(self.__backup_identity_signer, Ed25519PrivateKey):
             raise BackupValidationError("backup identity verifier is unavailable")
         trusted_identity = BackupIdentity(
             manifest_digest,
             project_id,
-            _backup_identity_signer.sign(
+            self.__backup_identity_signer.sign(
                 _identity_body(manifest_digest, project_id)
             ).hex(),
         )
