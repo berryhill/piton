@@ -26,7 +26,7 @@ from .drafts import (
     DraftNotFoundError,
     DraftStore,
 )
-from .daemon import CommandAdmissionError, LocalDaemonCommandAdapter
+from .daemon import CommandAdmissionError, LocalDaemonCommandAdapter, LocalDaemonHealthAdapter
 
 __all__ = [
     "BeginDraft",
@@ -44,6 +44,7 @@ __all__ = [
     "IdempotencyConflictError",
     "ImportSourceBase",
     "LocalDaemonCommandAdapter",
+    "LocalDaemonHealthAdapter",
     "PitonApplicationService",
     "PrincipalAuthorityError",
     "PrincipalContext",
