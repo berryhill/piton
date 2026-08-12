@@ -580,11 +580,11 @@ def test_ci_provisions_the_required_precision_worker_sandbox_before_tests():
     assert ci.index(install) < ci.index(test)
 
 
-def test_ci_pins_and_preflights_the_runner_namespace_policy() -> None:
+def test_ci_pins_and_preflights_a_sandbox_capable_runner_without_policy_bypass() -> None:
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
-    assert "runs-on: ubuntu-24.04" in ci
-    assert "kernel.apparmor_restrict_unprivileged_userns=0" in ci
+    assert "runs-on: ubuntu-22.04" in ci
+    assert "kernel.apparmor_restrict_unprivileged_userns" not in ci
     assert "bwrap --unshare-all" in ci
     assert "precision-worker sandbox preflight failed" in ci
 
