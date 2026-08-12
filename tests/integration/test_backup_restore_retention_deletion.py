@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import secrets
 from pathlib import Path
 
 import pytest
 import piton.storage.custody as custody_module
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from piton.revision import DesignRevision
 from piton.source_tree import SourceTree, SourceTreeFile
@@ -236,9 +238,13 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     # recover through Python closure introspection and reuse for a new identity.
     verifier = custody_module._verify_backup_identity
     assert not any(
-        isinstance(cell.cell_contents, (bytes, bytearray, memoryview))
+        isinstance(cell.cell_contents, (bytes, bytearray, memoryview, hmac.HMAC))
         for cell in (verifier.__closure__ or ())
     )
+    verifier_cells = tuple(cell.cell_contents for cell in (verifier.__closure__ or ()))
+    assert len(verifier_cells) == 1
+    assert isinstance(verifier_cells[0], Ed25519PublicKey)
+    assert not hasattr(verifier_cells[0], "sign")
 
     receipt = custody.backup(
         "project_one", tmp_path / "backup", created_at="2026-08-12T12:00:00Z"

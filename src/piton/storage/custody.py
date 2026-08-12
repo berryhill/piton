@@ -12,12 +12,14 @@ import hmac
 import json
 import os
 import re
-import secrets
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from .blobs import BlobStore
 from .db import Database
@@ -29,7 +31,7 @@ _EXCLUSIONS = (
     "cache, staging, quarantine, viewer state, and adjacent mutable sidecars are excluded",
     "backup or restore success is not review acceptance, approval, export, fabrication release, or machine actuation",
 )
-_SIGNATURE = re.compile(r"^[0-9a-f]{64}$")
+_SIGNATURE = re.compile(r"^[0-9a-f]{128}$")
 
 
 class BackupValidationError(RuntimeError):
@@ -76,21 +78,26 @@ def _identity_body(manifest_digest: str, project_id: str) -> bytes:
     )
 
 
-def _make_backup_identity_verifier():
-    """Keep raw authentication-key bytes out of Python closure cells."""
-    verifier = hmac.new(secrets.token_bytes(32), digestmod=hashlib.sha256)
+def _make_backup_identity_authority():
+    """Separate private issuance from the public-key-only verifier."""
+    signer = Ed25519PrivateKey.generate()
+    public_key = signer.public_key()
 
     def verifies(identity: BackupIdentity) -> bool:
-        candidate = verifier.copy()
-        candidate.update(_identity_body(identity.manifest_digest, identity.project_id))
-        expected = candidate.hexdigest()
-        return hmac.compare_digest(identity.signature, expected)
+        try:
+            public_key.verify(
+                bytes.fromhex(identity.signature),
+                _identity_body(identity.manifest_digest, identity.project_id),
+            )
+        except (InvalidSignature, ValueError):
+            return False
+        return True
 
-    return verifies
+    return signer, verifies
 
 
-_verify_backup_identity = _make_backup_identity_verifier()
-del _make_backup_identity_verifier
+_backup_identity_signer, _verify_backup_identity = _make_backup_identity_authority()
+del _make_backup_identity_authority
 
 
 @dataclass(frozen=True, slots=True)
@@ -409,23 +416,17 @@ class ProjectCustody:
             # An incomplete destination has no receipt and restore always validates
             # the complete manifest/object closure before publishing anything.
             raise
-        # Identity issuance is deliberately coupled to the completed backup path;
-        # there is no module-level primitive that authenticates caller-chosen bytes.
-        closure = _verify_backup_identity.__closure__
-        if (
-            closure is None
-            or len(closure) != 1
-            or not isinstance(closure[0].cell_contents, hmac.HMAC)
-        ):
+        # Only the completed backup path invokes private-key issuance. Restore's
+        # verifier retains the corresponding public key and cannot mint identities.
+        if not isinstance(_backup_identity_signer, Ed25519PrivateKey):
             raise BackupValidationError("backup identity verifier is unavailable")
-        identity_verifier = closure[0].cell_contents.copy()
-        identity_verifier.update(_identity_body(manifest_digest, project_id))
         trusted_identity = BackupIdentity(
             manifest_digest,
             project_id,
-            identity_verifier.hexdigest(),
+            _backup_identity_signer.sign(
+                _identity_body(manifest_digest, project_id)
+            ).hex(),
         )
-        del identity_verifier
         if trusted_identity.manifest_digest != manifest_digest:
             raise BackupValidationError("backup identity digest changed during issuance")
         return BackupReceipt(
