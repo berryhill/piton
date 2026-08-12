@@ -56,11 +56,13 @@ def _validate_portable_closure(
     ]
     if len(project_sections) != 1 or not isinstance(project_sections[0].get("rows"), list):
         raise ValueError("manifest projects metadata is invalid")
-    if not any(
-        isinstance(row, dict) and row.get("project_id") == expected_project_id
-        for row in project_sections[0]["rows"]
+    project_rows = project_sections[0]["rows"]
+    if (
+        len(project_rows) != 1
+        or not isinstance(project_rows[0], dict)
+        or project_rows[0].get("project_id") != expected_project_id
     ):
-        raise ValueError("manifest projects metadata does not contain the project")
+        raise ValueError("manifest projects metadata is not exact")
 
     objects = manifest.get("objects")
     if not isinstance(objects, list):
