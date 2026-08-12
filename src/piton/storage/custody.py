@@ -20,7 +20,11 @@ from typing import Any
 
 from cryptography.exceptions import InvalidSignature
 
-from ._backup_identity_process import public_key, sign_completed_manifest
+from ._backup_identity_process import (
+    _issue_server_backup_capability,
+    _sign_completed_manifest,
+    public_key,
+)
 from .blobs import BlobStore
 from .db import Database
 
@@ -162,6 +166,7 @@ class ProjectCustody:
     """Daemon-side project custody without a second writable design authority."""
 
     __backup_identity_verifier = public_key()
+    __backup_signing_capability = _issue_server_backup_capability()
 
     def __init__(self, database: Database, blobs: BlobStore) -> None:
         if not isinstance(database, Database) or not isinstance(blobs, BlobStore):
@@ -405,7 +410,11 @@ class ProjectCustody:
         # back and validates the completed canonical manifest before signing it;
         # this process retains only the public verification key.
         try:
-            signed_digest, signature = sign_completed_manifest(manifest_path, project_id)
+            signed_digest, signature = _sign_completed_manifest(
+                manifest_path,
+                project_id,
+                capability=self.__backup_signing_capability,
+            )
         except RuntimeError as error:
             raise BackupValidationError("backup identity helper rejected the manifest") from error
         if signed_digest != manifest_digest:

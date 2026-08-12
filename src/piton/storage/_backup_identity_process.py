@@ -22,6 +22,34 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
+_CAPABILITY_PROOF = object()
+
+
+class BackupSigningCapability:
+    """Opaque daemon-issued authority to request a completed-backup receipt."""
+
+    __slots__ = ("_proof",)
+
+    def __new__(cls, proof: object = None) -> "BackupSigningCapability":
+        if proof is not _CAPABILITY_PROOF:
+            raise PermissionError("backup signing capability is server-issued only")
+        instance = super().__new__(cls)
+        instance._proof = proof
+        return instance
+
+
+def _issue_server_backup_capability() -> BackupSigningCapability:
+    """Issue authority only to the trusted daemon composition root."""
+    return BackupSigningCapability(_CAPABILITY_PROOF)
+
+
+def _require_capability(capability: object) -> None:
+    if (
+        type(capability) is not BackupSigningCapability
+        or getattr(capability, "_proof", None) is not _CAPABILITY_PROOF
+    ):
+        raise PermissionError("server-issued backup capability is required")
+
 
 def _canonical(value: Any) -> bytes:
     return json.dumps(
@@ -96,8 +124,14 @@ def public_key() -> Ed25519PublicKey:
     return _public_key
 
 
-def sign_completed_manifest(manifest_path: Path, project_id: str) -> tuple[str, str]:
+def _sign_completed_manifest(
+    manifest_path: Path,
+    project_id: str,
+    *,
+    capability: object,
+) -> tuple[str, str]:
     """Sign bytes read independently by the helper from a completed backup."""
+    _require_capability(capability)
     with _lock:
         if not _process.is_alive():
             raise RuntimeError("backup identity helper is unavailable")

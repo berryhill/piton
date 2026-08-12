@@ -6,6 +6,7 @@ import secrets
 from pathlib import Path
 
 import pytest
+import piton.storage._backup_identity_process as identity_process
 import piton.storage.custody as custody_module
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -244,6 +245,32 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     )
 
     assert not hasattr(custody_module, "_verify_backup_identity")
+    assert not hasattr(identity_process, "sign_completed_manifest")
+
+    # Even a canonical caller-created manifest at the expected filename cannot
+    # invoke the internal helper without daemon-issued backup authority.
+    arbitrary = tmp_path / "arbitrary" / "manifest.json"
+    arbitrary.parent.mkdir()
+    arbitrary.write_text(
+        json.dumps(
+            {
+                "schema": "piton.project-backup.v1",
+                "schema_version": 1,
+                "project": {"project_id": "project_one"},
+                "safety": {
+                    "review_state": "needs_human_review",
+                    "fabrication_release": False,
+                    "machine_actuation": False,
+                },
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+    with pytest.raises(PermissionError, match="server-issued backup capability"):
+        identity_process._sign_completed_manifest(
+            arbitrary, "project_one", capability=object()
+        )
 
     receipt = custody.backup(
         "project_one", tmp_path / "backup", created_at="2026-08-12T12:00:00Z"
