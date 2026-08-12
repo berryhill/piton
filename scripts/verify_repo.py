@@ -61,6 +61,8 @@ REQUIRED = [
     ROOT / "src/piton/viewer_assets/THIRD_PARTY_NOTICES.txt",
     ROOT / "src/piton/storage/migrations/0005_durable_build_attempts.sql",
     ROOT / "src/piton/storage/migrations/0006_evidence_closure.sql",
+    ROOT / "src/piton/storage/migrations/0007_durable_leases.sql",
+    ROOT / "src/piton/storage/migrations/0008_cancellation_lease_custody.sql",
     ROOT / "tests/test_build_attempt_admission.py",
     ROOT / "tests/contract/test_precision_worker_custody.py",
     ROOT / "tests/contract/test_worker_contracts.py",

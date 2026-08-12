@@ -283,7 +283,8 @@ class BuildAttemptCoordinator:
     ) -> sqlite3.Row:
         row = connection.execute(
             "SELECT state.attempt_id,state.state,state.generation,state.fence,state.lease_id,"
-            "state.lease_expires_at,state.updated_at FROM build_coordinator_state AS state "
+            "state.lease_expires_at,state.updated_at,state.cancellation_lease_id "
+            "FROM build_coordinator_state AS state "
             "JOIN build_attempts AS attempt ON attempt.attempt_id=state.attempt_id "
             "WHERE attempt.project_id=? AND state.attempt_id=?",
             (project_id, attempt_id),
@@ -371,7 +372,11 @@ class BuildAttemptCoordinator:
         now = _aware_now(self._trusted_clock)
         with self._database.immediate() as connection:
             row = self._scoped_state(connection, project_id, attempt_id)
-            if row["state"] == "cancelled" and row["fence"] == fence:
+            if (
+                row["state"] == "cancelled"
+                and row["cancellation_lease_id"] == lease_id
+                and row["fence"] == fence
+            ):
                 return self._state_from_row(row)
             if row["state"] in _TERMINAL_STATES:
                 raise LeaseConflictError("terminal build attempt cannot be cancelled again")
@@ -379,8 +384,8 @@ class BuildAttemptCoordinator:
                 raise LeaseConflictError("cancellation does not match current fenced lease")
             connection.execute(
                 "UPDATE build_coordinator_state SET state='cancelled',lease_id=NULL,"
-                "lease_expires_at=NULL,updated_at=? WHERE attempt_id=?",
-                (_timestamp(now), attempt_id),
+                "lease_expires_at=NULL,cancellation_lease_id=?,updated_at=? WHERE attempt_id=?",
+                (lease_id, _timestamp(now), attempt_id),
             )
             current = self._scoped_state(connection, project_id, attempt_id)
         return self._state_from_row(current)

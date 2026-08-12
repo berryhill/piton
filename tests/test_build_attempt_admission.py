@@ -330,9 +330,24 @@ def test_schema_rejects_fence_reuse_or_regression_and_cancel_is_terminal(tmp_pat
         "project_one", "attempt_one", lease_id=current.lease_id, fence=current.fence
     )
     assert cancelled == replay
+    with pytest.raises(LeaseConflictError, match="terminal"):
+        leases.cancel(
+            "project_one", "attempt_one", lease_id="lease_wrong", fence=current.fence
+        )
     assert (cancelled.state, cancelled.lease_id, cancelled.lease_expires_at) == (
         "cancelled", None, None
     )
+    with database.read() as connection:
+        assert connection.execute(
+            "SELECT cancellation_lease_id FROM build_coordinator_state "
+            "WHERE attempt_id='attempt_one'"
+        ).fetchone()[0] == "lease_one"
+    with pytest.raises(sqlite3.IntegrityError, match="cancellation.*custody"):
+        with database.immediate() as connection:
+            connection.execute(
+                "UPDATE build_coordinator_state SET cancellation_lease_id='lease_wrong' "
+                "WHERE attempt_id='attempt_one'"
+            )
     with pytest.raises(LeaseConflictError, match="terminal"):
         leases.acquire_lease(
             "project_one", "attempt_one", lease_duration=timedelta(minutes=5)
@@ -420,6 +435,8 @@ def test_repository_proof_tracks_build_attempt_assets_and_uses_pytest() -> None:
     for required_path in (
         "src/piton/storage/build_attempts.py",
         "src/piton/storage/migrations/0005_durable_build_attempts.sql",
+        "src/piton/storage/migrations/0007_durable_leases.sql",
+        "src/piton/storage/migrations/0008_cancellation_lease_custody.sql",
         "tests/test_build_attempt_admission.py",
     ):
         assert required_path in verifier
