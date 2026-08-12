@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -97,7 +97,10 @@ def prepared(tmp_path: Path, *, precision_clock=None):
                 (channel, inputs.revision.revision_id, now),
             )
     coordinator = BuildAttemptCoordinator(
-        database, attempt_id_factory=lambda: "attempt_one"
+        database,
+        attempt_id_factory=lambda: "attempt_one",
+        lease_id_factory=lambda: "lease_one",
+        trusted_clock=lambda: datetime(2026, 8, 10, 0, tzinfo=UTC),
     )
     coordinator.admit(
         BuildAdmission(
@@ -115,13 +118,11 @@ def prepared(tmp_path: Path, *, precision_clock=None):
         ),
         capability=_issue_server_admission_capability(),
     )
-    with database.immediate() as connection:
-        connection.execute(
-            "UPDATE build_coordinator_state SET state='running', generation=2, fence=5, "
-            "lease_id='lease_one', lease_expires_at='2026-08-10T01:00:00Z', updated_at=? "
-            "WHERE attempt_id='attempt_one'",
-            (now,),
-        )
+    coordinator.acquire_lease(
+        "project_one",
+        "attempt_one",
+        lease_duration=timedelta(hours=1),
+    )
     return service, database, inputs
 
 
@@ -265,12 +266,37 @@ def test_lease_expiry_during_checks_publishes_no_evidence_or_state_change(
                 "SELECT state,lease_id,lease_expires_at FROM build_coordinator_state "
                 "WHERE attempt_id='attempt_one'"
             ).fetchone()
-        ) == ("running", "lease_one", "2026-08-10T01:00:00Z")
+        ) == ("running", "lease_one", "2026-08-10T01:00:00.000000Z")
         channels = connection.execute(
             "SELECT revision_id,generation FROM channel_pointers"
         ).fetchall()
     assert after == before
     assert all(tuple(row) == (inputs.revision.revision_id, 0) for row in channels)
+
+
+def test_cancelled_execution_rejects_late_worker_result_without_evidence(tmp_path: Path) -> None:
+    service, database, _ = prepared(tmp_path)
+    request = service.issue_precision_worker_request("project_one", "attempt_one")
+    result = service.run_precision_worker(request)
+    coordinator = BuildAttemptCoordinator(
+        database, trusted_clock=lambda: datetime(2026, 8, 10, 0, 45, tzinfo=UTC)
+    )
+    coordinator.cancel(
+        "project_one", "attempt_one", lease_id=request.lease_id, fence=request.fence
+    )
+
+    with pytest.raises((ValueError, EvidenceClosureError), match="lease|running|binding|custody"):
+        service.close_precision_worker_evidence(request, result)
+
+    with database.read() as connection:
+        assert connection.execute("SELECT count(*) FROM evidence_closures").fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT state FROM build_coordinator_state WHERE attempt_id='attempt_one'"
+        ).fetchone()[0] == "cancelled"
+        channels = connection.execute(
+            "SELECT channel,generation FROM channel_pointers ORDER BY channel"
+        ).fetchall()
+    assert all(row["generation"] == 0 for row in channels)
 
 
 def test_closure_transaction_failure_rolls_back_all_metadata_and_preserves_channels(
