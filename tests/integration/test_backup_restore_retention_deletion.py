@@ -19,11 +19,8 @@ from piton.storage.custody import (
 from piton.storage.revisions import _issue_server_mutation_capability
 
 
-_CUSTODY_KEY = secrets.token_bytes(32)
-
-
 def _custody(database: Database, blobs: BlobStore) -> ProjectCustody:
-    return ProjectCustody(database, blobs, identity_key=_CUSTODY_KEY)
+    return ProjectCustody(database, blobs)
 
 
 def _tree() -> SourceTree:
@@ -212,6 +209,18 @@ def test_restore_requires_externally_pinned_manifest_identity_and_rejects_inject
         assert connection.execute("SELECT count(*) FROM projects").fetchone()[0] == 0
         assert connection.execute("SELECT count(*) FROM design_revisions").fetchone()[0] == 0
 
+
+def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_path: Path):
+    database, blobs, _revision = _seed(tmp_path / "source")
+
+    with pytest.raises(TypeError):
+        ProjectCustody(database, blobs, identity_key=secrets.token_bytes(32))
+    with pytest.raises(TypeError):
+        ProjectCustody(database, blobs, identity_authority=object())
+
+    custody = _custody(database, blobs)
+    assert not hasattr(custody, "_ProjectCustody__issue_backup_identity")
+    assert not hasattr(custody, "issue_backup_identity")
 
 def test_retention_deletion_tombstones_authority_and_only_prunes_unreferenced_objects(tmp_path: Path):
     database, blobs, revision = _seed(tmp_path / "source")

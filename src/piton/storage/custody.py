@@ -12,6 +12,7 @@ import hmac
 import json
 import os
 import re
+import secrets
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -29,6 +30,7 @@ _EXCLUSIONS = (
     "backup or restore success is not review acceptance, approval, export, fabrication release, or machine actuation",
 )
 _SIGNATURE = re.compile(r"^[0-9a-f]{64}$")
+_BACKUP_AUTHORITY_PROOF = object()
 
 
 class BackupValidationError(RuntimeError):
@@ -73,6 +75,39 @@ def _identity_body(manifest_digest: str, project_id: str) -> bytes:
             "project_id": project_id,
         }
     )
+
+
+class _BackupIdentityAuthority:
+    """Opaque daemon-composition authority for backup identity authentication."""
+
+    __slots__ = ("__key", "__proof")
+
+    def __new__(cls, proof: object = None) -> "_BackupIdentityAuthority":
+        if proof is not _BACKUP_AUTHORITY_PROOF:
+            raise TypeError("backup identity authority is server-issued only")
+        instance = super().__new__(cls)
+        instance.__key = secrets.token_bytes(32)
+        instance.__proof = proof
+        return instance
+
+    def _sign(self, manifest_digest: str, project_id: str) -> BackupIdentity:
+        signature = hmac.new(
+            self.__key,
+            _identity_body(manifest_digest, project_id),
+            hashlib.sha256,
+        ).hexdigest()
+        return BackupIdentity(manifest_digest, project_id, signature)
+
+    def _verifies(self, identity: BackupIdentity) -> bool:
+        expected = hmac.new(
+            self.__key,
+            _identity_body(identity.manifest_digest, identity.project_id),
+            hashlib.sha256,
+        ).hexdigest()
+        return hmac.compare_digest(identity.signature, expected)
+
+
+_SERVER_BACKUP_IDENTITY_AUTHORITY = _BackupIdentityAuthority(_BACKUP_AUTHORITY_PROOF)
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,22 +193,11 @@ def _sqlite_value(value: Any) -> Any:
 class ProjectCustody:
     """Daemon-side project custody without a second writable design authority."""
 
-    def __init__(self, database: Database, blobs: BlobStore, *, identity_key: bytes):
+    def __init__(self, database: Database, blobs: BlobStore) -> None:
         if not isinstance(database, Database) or not isinstance(blobs, BlobStore):
             raise TypeError("database and blobs must be Piton custody objects")
-        if not isinstance(identity_key, bytes) or len(identity_key) < 32:
-            raise ValueError("identity_key must contain at least 32 bytes")
         self.database = database
         self.blobs = blobs
-        self.__identity_key = identity_key
-
-    def __issue_backup_identity(self, manifest_digest: str, project_id: str) -> BackupIdentity:
-        signature = hmac.new(
-            self.__identity_key,
-            _identity_body(manifest_digest, project_id),
-            hashlib.sha256,
-        ).hexdigest()
-        return BackupIdentity(manifest_digest, project_id, signature)
 
     def _require_backup_identity(self, identity: object) -> BackupIdentity:
         if isinstance(identity, str):
@@ -191,12 +215,7 @@ class ProjectCustody:
             or not _SIGNATURE.fullmatch(identity.signature)
         ):
             raise BackupValidationError("trusted identity signature is invalid")
-        expected = hmac.new(
-            self.__identity_key,
-            _identity_body(identity.manifest_digest, identity.project_id),
-            hashlib.sha256,
-        ).hexdigest()
-        if not hmac.compare_digest(identity.signature, expected):
+        if not _SERVER_BACKUP_IDENTITY_AUTHORITY._verifies(identity):
             raise BackupValidationError("trusted identity signature is invalid")
         return identity
 
@@ -407,7 +426,7 @@ class ProjectCustody:
             # An incomplete destination has no receipt and restore always validates
             # the complete manifest/object closure before publishing anything.
             raise
-        trusted_identity = self.__issue_backup_identity(manifest_digest, project_id)
+        trusted_identity = _SERVER_BACKUP_IDENTITY_AUTHORITY._sign(manifest_digest, project_id)
         return BackupReceipt(
             project_id, manifest_digest, len(objects), str(destination), trusted_identity
         )
