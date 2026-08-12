@@ -67,7 +67,41 @@ def _validate_portable_closure(
     objects = manifest.get("objects")
     if not isinstance(objects, list):
         raise ValueError("manifest object inventory is missing")
+    if not objects:
+        raise ValueError("manifest portable authority objects are missing")
+
+    artifact_sections = [
+        item
+        for item in metadata
+        if isinstance(item, dict) and item.get("table") == "artifacts"
+    ]
+    if len(artifact_sections) != 1 or not isinstance(artifact_sections[0].get("rows"), list):
+        raise ValueError("manifest artifacts metadata is invalid")
+    artifact_rows = artifact_sections[0]["rows"]
+    artifact_inventory: dict[str, tuple[int, str]] = {}
+    for row in artifact_rows:
+        if not isinstance(row, dict):
+            raise ValueError("manifest artifacts metadata is invalid")
+        digest = row.get("digest")
+        byte_length = row.get("byte_length")
+        media_type = row.get("media_type")
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 71
+            or not digest.startswith("sha256:")
+            or any(character not in "0123456789abcdef" for character in digest[7:])
+            or isinstance(byte_length, bool)
+            or not isinstance(byte_length, int)
+            or byte_length < 0
+            or not isinstance(media_type, str)
+            or not media_type
+            or digest in artifact_inventory
+        ):
+            raise ValueError("manifest artifacts metadata is invalid")
+        artifact_inventory[digest] = (byte_length, media_type)
+
     seen_paths: set[str] = set()
+    object_inventory: dict[str, tuple[int, str]] = {}
     for item in objects:
         if not isinstance(item, dict):
             raise ValueError("manifest object inventory is invalid")
@@ -79,20 +113,26 @@ def _validate_portable_closure(
             or len(digest) != 71
             or not digest.startswith("sha256:")
             or any(character not in "0123456789abcdef" for character in digest[7:])
+            or isinstance(byte_length, bool)
             or not isinstance(byte_length, int)
             or byte_length < 0
+            or not isinstance(item.get("media_type"), str)
+            or not item["media_type"]
             or not isinstance(relative_path, str)
             or relative_path != f"objects/sha256/{digest[7:9]}/{digest[9:]}"
             or relative_path in seen_paths
         ):
             raise ValueError("manifest object inventory is invalid")
         seen_paths.add(relative_path)
+        object_inventory[digest] = (byte_length, item["media_type"])
         payload_path = manifest_path.parent / relative_path
         if payload_path.is_symlink():
             raise ValueError("backup payload path is a symlink")
         payload = payload_path.read_bytes()
         if len(payload) != byte_length or hashlib.sha256(payload).hexdigest() != digest[7:]:
             raise ValueError("backup payload does not match its inventory")
+    if object_inventory != artifact_inventory:
+        raise ValueError("manifest object inventory does not match artifact authority")
 
 
 def _serve(connection: Connection) -> None:

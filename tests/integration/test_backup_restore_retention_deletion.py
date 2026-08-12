@@ -270,6 +270,21 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
                     "fabrication_release": False,
                     "machine_actuation": False,
                 },
+                "metadata": [
+                    {
+                        "table": "projects",
+                        "rows": [
+                            {
+                                "project_id": "project_one",
+                                "display_name": "Caller forged",
+                                "format_version": 1,
+                                "state": "active",
+                                "created_at": "2026-08-12T12:00:00Z",
+                            }
+                        ],
+                    }
+                ],
+                "objects": [],
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -306,7 +321,7 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     signed_digest, signature, helper_error = connections[0].recv()
     assert signed_digest is None
     assert signature is None
-    assert "metadata inventory is missing" in helper_error
+    assert "portable authority objects are missing" in helper_error
 
     receipt = custody.backup(
         "project_one", tmp_path / "backup", created_at="2026-08-12T12:00:00Z"
