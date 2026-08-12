@@ -86,7 +86,9 @@ def _serve(connection: Connection) -> None:
 
 
 def _take_backup_identity_authority() -> tuple[
-    Ed25519PublicKey, Callable[[Path, str], tuple[str, str]]
+    Ed25519PublicKey,
+    Callable[[Path, str], tuple[str, str]],
+    Callable[[object], None],
 ]:
     """Consume the process authority exactly once during custody composition."""
     module = sys.modules[__name__]
@@ -99,11 +101,19 @@ def _take_backup_identity_authority() -> tuple[
     child_connection.close()
     verifier = Ed25519PublicKey.from_public_bytes(parent_connection.recv_bytes())
     lock = threading.Lock()
+    authorized_backup_code: object | None = None
+
+    def authorize_backup_caller(code: object) -> None:
+        """Bind the channel once to the exact custody implementation code object."""
+        nonlocal authorized_backup_code
+        if authorized_backup_code is not None:
+            raise RuntimeError("backup caller is already authorized")
+        authorized_backup_code = code
 
     def sign_completed_manifest(manifest_path: Path, project_id: str) -> tuple[str, str]:
         frame = inspect.currentframe()
         caller = None if frame is None else frame.f_back
-        if caller is None or caller.f_code.co_qualname != "ProjectCustody.backup":
+        if caller is None or caller.f_code is not authorized_backup_code:
             raise PermissionError("backup signing is restricted to the custody backup operation")
         with lock:
             if not process.is_alive():
@@ -125,4 +135,4 @@ def _take_backup_identity_authority() -> tuple[
                 process.terminate()
 
     atexit.register(shutdown)
-    return verifier, sign_completed_manifest
+    return verifier, sign_completed_manifest, authorize_backup_caller

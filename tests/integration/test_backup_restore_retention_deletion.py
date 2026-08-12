@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+import types
 from pathlib import Path
 
 import pytest
@@ -277,6 +278,19 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     channel = getattr(ProjectCustody, "_ProjectCustody__backup_identity_channel")
     with pytest.raises(PermissionError, match="custody backup operation"):
         channel(arbitrary, "project_one")
+
+    # Function qualification is descriptive metadata, not authority. A caller
+    # can clone a code object and replace its qualname without executing the
+    # actual custody backup implementation.
+    def invoke_exposed_channel(attack_channel, attack_path):
+        return attack_channel(attack_path, "project_one")
+
+    forged = types.FunctionType(
+        invoke_exposed_channel.__code__.replace(co_qualname="ProjectCustody.backup"),
+        {},
+    )
+    with pytest.raises(PermissionError, match="custody backup operation"):
+        forged(channel, arbitrary)
 
     receipt = custody.backup(
         "project_one", tmp_path / "backup", created_at="2026-08-12T12:00:00Z"

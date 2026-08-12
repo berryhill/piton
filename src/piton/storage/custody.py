@@ -32,7 +32,11 @@ _EXCLUSIONS = (
     "backup or restore success is not review acceptance, approval, export, fabrication release, or machine actuation",
 )
 _SIGNATURE = re.compile(r"^[0-9a-f]{128}$")
-_BACKUP_IDENTITY_VERIFIER, _sign_completed_backup = _take_backup_identity_authority()
+(
+    _BACKUP_IDENTITY_VERIFIER,
+    _sign_completed_backup,
+    _authorize_backup_caller,
+) = _take_backup_identity_authority()
 del _take_backup_identity_authority
 
 
@@ -605,5 +609,9 @@ class ProjectCustody:
         return DeletionReceipt(project_id, "tombstoned", reason)
 
 
+# Bind signing to this exact immutable method implementation. A caller can forge
+# code metadata such as co_qualname, but cannot substitute another code object.
+_authorize_backup_caller(ProjectCustody.backup.__code__)
+
 # The consumed bootstrap and signing closure are retained only by ProjectCustody.
-del _BACKUP_IDENTITY_VERIFIER, _sign_completed_backup
+del _BACKUP_IDENTITY_VERIFIER, _sign_completed_backup, _authorize_backup_caller
