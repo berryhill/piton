@@ -452,7 +452,7 @@ class PitonApplicationService:
         self, request: PrecisionWorkerRequest, result: PrecisionWorkerResult
     ) -> EvidenceClosure:
         """Verify current daemon custody, run fixed checks, and publish atomically."""
-        from ..precision_worker import verify_precision_worker_result
+        from ..precision_worker import verify_custodied_precision_worker_result
 
         if not isinstance(request, PrecisionWorkerRequest):
             raise TypeError("request must be a PrecisionWorkerRequest")
@@ -486,13 +486,9 @@ class PitonApplicationService:
             )
             if any(actual != expected for actual, expected in bindings):
                 raise EvidenceClosureError("replay does not match exact closure custody bindings")
-            output = (
-                self.__precision_control_root
-                / "build-attempts"
-                / request.project_id
-                / request.attempt_id
+            verify_custodied_precision_worker_result(
+                request, result, self.__precision_control_root
             )
-            verify_precision_worker_result(request, result, output)
             return closure
 
         attempt, state, _ = self._precision_worker_bindings(
@@ -501,22 +497,16 @@ class PitonApplicationService:
         expected = self._compose_precision_worker_request(attempt, state)
         if request.canonical_bytes != expected.canonical_bytes:
             raise ValueError("request no longer matches durable attempt and coordinator bindings")
-        output = (
-            self.__precision_control_root
-            / "build-attempts"
-            / attempt.project_id
-            / attempt.attempt_id
+        verified, artifact_bytes = verify_custodied_precision_worker_result(
+            request, result, self.__precision_control_root
         )
-        verify_precision_worker_result(request, result, output)
         if result.status != "succeeded":
             raise EvidenceClosureError("unsuccessful worker result cannot close evidence")
         declaration = self.__evidence_repository.get_declaration(
             attempt.project_id, attempt.attempt_id
         )
-        inspection = json.loads(
-            (output / result.artifacts["inspection_receipt"].relative_path).read_bytes()
-        )
-        receipts = self.__evidence_repository.execute_checks(declaration, result, inspection)
+        inspection = json.loads(artifact_bytes["inspection_receipt"])
+        receipts = self.__evidence_repository.execute_checks(declaration, verified, inspection)
         self.__evidence_repository.begin_publication(attempt, state, result)
         return self.__evidence_repository.publish(
             attempt=attempt,

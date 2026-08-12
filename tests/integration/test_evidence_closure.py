@@ -415,6 +415,51 @@ def test_publication_refuses_substituted_symlink_without_copying_ambient_bytes(
         assert connection.execute("SELECT count(*) FROM evidence_closure_artifacts").fetchone()[0] == 0
 
 
+def test_checks_use_the_same_custodied_receipt_bytes_that_were_verified(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, _, _ = prepared(tmp_path)
+    request = service.issue_precision_worker_request("project_one", "attempt_one")
+    result = service.run_precision_worker(request)
+    receipt_path = (
+        tmp_path
+        / ".piton"
+        / "build-attempts"
+        / "project_one"
+        / "attempt_one"
+        / result.artifacts["inspection_receipt"].relative_path
+    )
+    original_receipt = receipt_path.read_bytes()
+    from piton import precision_worker
+
+    verify_custodied = precision_worker.verify_custodied_precision_worker_result
+    execute_checks = EvidenceRepository.execute_checks
+
+    def substitute_after_verification(request_arg, result_arg, control_root):
+        verified, artifact_bytes = verify_custodied(request_arg, result_arg, control_root)
+        receipt_path.write_text('{"status":"worker-substituted"}', encoding="utf-8")
+        return verified, artifact_bytes
+
+    def assert_pinned_inspection(declaration, checked_result, inspection):
+        receipt_path.write_bytes(original_receipt)
+        assert inspection["schema"] == "piton.exact-realization-receipt.v1"
+        assert inspection["status"] == "succeeded"
+        return execute_checks(declaration, checked_result, inspection)
+
+    monkeypatch.setattr(
+        precision_worker,
+        "verify_custodied_precision_worker_result",
+        substitute_after_verification,
+    )
+    monkeypatch.setattr(
+        EvidenceRepository, "execute_checks", staticmethod(assert_pinned_inspection)
+    )
+
+    closure = service.close_precision_worker_evidence(request, result)
+
+    assert closure.worker_result_digest == result.result_digest
+
+
 def test_restart_quarantines_interrupted_committing_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
