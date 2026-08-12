@@ -226,9 +226,14 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     assert not hasattr(custody_module, "_BackupIdentityAuthority")
     assert not hasattr(custody_module, "_issue_backup_identity_for_manifest")
     assert not hasattr(custody_module, "_backup_identity_signer")
+    assert not hasattr(ProjectCustody, "_ProjectCustody__backup_identity_signer")
     assert not any(
         isinstance(value, Ed25519PrivateKey)
         for value in vars(custody_module).values()
+    )
+    assert not any(
+        isinstance(value, Ed25519PrivateKey)
+        for value in vars(ProjectCustody).values()
     )
     assert not any(
         callable(value) and (

@@ -19,8 +19,8 @@ from pathlib import Path
 from typing import Any
 
 from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from ._backup_identity_process import public_key, sign_completed_manifest
 from .blobs import BlobStore
 from .db import Database
 
@@ -161,8 +161,7 @@ def _sqlite_value(value: Any) -> Any:
 class ProjectCustody:
     """Daemon-side project custody without a second writable design authority."""
 
-    __backup_identity_signer = Ed25519PrivateKey.generate()
-    __backup_identity_verifier = __backup_identity_signer.public_key()
+    __backup_identity_verifier = public_key()
 
     def __init__(self, database: Database, blobs: BlobStore) -> None:
         if not isinstance(database, Database) or not isinstance(blobs, BlobStore):
@@ -402,16 +401,19 @@ class ProjectCustody:
             # An incomplete destination has no receipt and restore always validates
             # the complete manifest/object closure before publishing anything.
             raise
-        # Only the completed backup path invokes the custody instance's signer.
-        # No signing authority is exposed through module state or a caller hook.
-        if not isinstance(self.__backup_identity_signer, Ed25519PrivateKey):
-            raise BackupValidationError("backup identity verifier is unavailable")
+        # Signing-key custody is isolated in a helper process. The helper reads
+        # back and validates the completed canonical manifest before signing it;
+        # this process retains only the public verification key.
+        try:
+            signed_digest, signature = sign_completed_manifest(manifest_path, project_id)
+        except RuntimeError as error:
+            raise BackupValidationError("backup identity helper rejected the manifest") from error
+        if signed_digest != manifest_digest:
+            raise BackupValidationError("backup identity digest changed during issuance")
         trusted_identity = BackupIdentity(
             manifest_digest,
             project_id,
-            self.__backup_identity_signer.sign(
-                _identity_body(manifest_digest, project_id)
-            ).hex(),
+            signature,
         )
         if trusted_identity.manifest_digest != manifest_digest:
             raise BackupValidationError("backup identity digest changed during issuance")
