@@ -20,6 +20,16 @@ from .build_attempts import (
     DurableBuildAttempt,
     LeaseConflictError,
 )
+from .custody import (
+    BackupIdentity,
+    BackupReceipt,
+    BackupValidationError,
+    DeletionReceipt,
+    ProjectCustody,
+    RestoreReceipt,
+    RetentionPolicy,
+    RetentionReceipt,
+)
 from .db import Database, Migration, MigrationError, TransactionOwnershipError
 from .revisions import (
     ActorAuthorityError,
@@ -33,6 +43,9 @@ from .revisions import (
 __all__ = [
     "ActorAuthorityError",
     "ArtifactRef",
+    "BackupIdentity",
+    "BackupReceipt",
+    "BackupValidationError",
     "BlobCollisionError",
     "BlobStore",
     "BlobValidationError",
@@ -44,11 +57,16 @@ __all__ = [
     "CoordinatorState",
     "CustodyError",
     "Database",
+    "DeletionReceipt",
     "DurableBuildAttempt",
     "LeaseConflictError",
     "Migration",
     "MigrationError",
     "PersistenceConflictError",
+    "ProjectCustody",
+    "RestoreReceipt",
+    "RetentionPolicy",
+    "RetentionReceipt",
     "RevisionRepository",
     "StartupRecoveryError",
     "StagedBlob",
