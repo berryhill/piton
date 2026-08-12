@@ -63,6 +63,7 @@ REQUIRED = [
     ROOT / "src/piton/storage/migrations/0006_evidence_closure.sql",
     ROOT / "src/piton/storage/migrations/0007_durable_leases.sql",
     ROOT / "src/piton/storage/migrations/0008_cancellation_lease_custody.sql",
+    ROOT / "src/piton/storage/migrations/0009_crash_safe_publication.sql",
     ROOT / "tests/test_build_attempt_admission.py",
     ROOT / "tests/contract/test_precision_worker_custody.py",
     ROOT / "tests/contract/test_worker_contracts.py",
@@ -246,6 +247,51 @@ for template_name, template in launch_templates.items():
         raise SystemExit(f"{template_name} violates the launch safety truth")
 
 architecture = (ROOT / "docs" / "architecture.md").read_text(encoding="utf-8")
+publication_migration = (
+    ROOT / "src/piton/storage/migrations/0009_crash_safe_publication.sql"
+).read_text(encoding="utf-8")
+evidence_source = (ROOT / "src/piton/evidence.py").read_text(encoding="utf-8")
+blob_source = (ROOT / "src/piton/storage/blobs.py").read_text(encoding="utf-8")
+publication_contract = {
+    "artifact_publications": (publication_migration, "artifact_publications"),
+    "artifact_publications_transition_guard": (
+        publication_migration,
+        "artifact_publications_transition_guard",
+    ),
+    "artifact_publications_no_delete": (
+        publication_migration,
+        "artifact_publications_no_delete",
+    ),
+    "recover_incomplete_publications": (evidence_source, "recover_incomplete_publications"),
+    "evidence.closure.committed": (evidence_source, "evidence.closure.committed"),
+    ".piton/objects/sha256/": (blob_source, '"objects" / "sha256"'),
+}
+missing_publication_contract = [
+    name for name, (custody_source, marker) in publication_contract.items()
+    if marker not in custody_source
+]
+if missing_publication_contract:
+    raise SystemExit(
+        "crash-safe publication custody inventory incomplete: "
+        + ", ".join(missing_publication_contract)
+    )
+required_recovery_documentation = (
+    "committing",
+    "quarantined",
+    "startup-incomplete-publication",
+    "evidence.closure.committed",
+    "delivery_attempts",
+    "fabrication_release=false",
+    "machine_actuation=false",
+)
+missing_recovery_documentation = [
+    truth for truth in required_recovery_documentation if truth not in architecture
+]
+if missing_recovery_documentation:
+    raise SystemExit(
+        "architecture omits crash-recovery operator truth: "
+        + ", ".join(missing_recovery_documentation)
+    )
 review_instructions = (ROOT / "docs" / "human-review-launch-assets.md").read_text(
     encoding="utf-8"
 )
@@ -496,4 +542,8 @@ result = subprocess.run(
 )
 if result.returncode:
     raise SystemExit(result.returncode)
-print("piton repository verification: PASS (schemas validated with representative instances)")
+print(
+    "piton repository verification: PASS "
+    "(schemas validated; crash-safe custody inventory: artifact_publications, "
+    "transition/delete guards, CAS artifact paths, quarantine recovery, closure outbox)"
+)

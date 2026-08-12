@@ -195,6 +195,28 @@ claim scopes, environment, units, tolerances, warnings, uncertainty, and root
 truths. Evidence closure remains review preparation only: it is not human
 acceptance, approval, export, fabrication release, or machine actuation.
 
+Publication is a durable two-boundary protocol. Before any artifact metadata is
+visible, the daemon rechecks the exact attempt, project, revision, worker-result
+digest, generation, fence, current live lease, declared role, media type, byte
+length, digest, and storage address, then records
+`artifact_publications.state=committing`. Verified bytes are fsynced and promoted
+without replacement to `.piton/objects/sha256/`; only then may one
+`BEGIN IMMEDIATE` transaction insert artifact references, receipts, the closure,
+and an `evidence.closure.committed` outbox row and transition the publication to
+`committed`. The event payload is itself CAS-custodied. Pending rows retain
+`delivered_at=NULL` and monotonic `delivery_attempts`, so delivery can resume
+idempotently after restart without recreating or changing the closure.
+
+On startup, `recover_incomplete_publications` scans durable `committing` rows.
+An attempt that never reached the closure transaction is failed closed, its owned
+output scope is moved under
+`.piton/quarantine/startup-incomplete-publication`, and its publication becomes
+`quarantined`; no closure, channel, review acceptance, approval, export, or
+release is inferred. Operators retain quarantine and diagnostics for inspection
+rather than deleting or selecting a nearest artifact. Recovery never mutates
+authored revisions or review/release state and always preserves
+`fabrication_release=false` and `machine_actuation=false`.
+
 ### Framework-only human-review intake
 
 `HumanReviewIntake` is an immutable, public Python contract whose canonical

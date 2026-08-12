@@ -10,6 +10,7 @@ import json
 import os
 import stat
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Mapping
 
 from .launch_verification import (
@@ -719,3 +720,32 @@ def verify_precision_worker_result(
     ):
         raise ValueError("inspection receipt violated the root truth boundary")
     return result
+
+
+def verify_custodied_precision_worker_result(
+    request: PrecisionWorkerRequest,
+    result: PrecisionWorkerResult,
+    control_root: Path,
+) -> tuple[PrecisionWorkerResult, Mapping[str, bytes]]:
+    """Verify one result from bytes read through a pinned, no-follow attempt directory."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    attempt_fd = os.open(control_root, flags)
+    try:
+        for component in ("build-attempts", request.project_id, request.attempt_id):
+            child_fd = os.open(component, flags, dir_fd=attempt_fd)
+            os.close(attempt_fd)
+            attempt_fd = child_fd
+        artifact_bytes = {
+            role: _read_regular_path_at(attempt_fd, artifact.relative_path)
+            for role, artifact in result.artifacts.items()
+        }
+        verified = verify_precision_worker_result(
+            request,
+            result,
+            Path(f"/proc/self/fd/{attempt_fd}"),
+            pinned_directory_fd=attempt_fd,
+            pinned_artifact_bytes=artifact_bytes,
+        )
+        return verified, MappingProxyType(artifact_bytes)
+    finally:
+        os.close(attempt_fd)

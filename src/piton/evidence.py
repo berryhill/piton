@@ -9,13 +9,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, BinaryIO, Callable, Iterator, Mapping, Sequence
 
 from .storage.build_attempts import CoordinatorState, DurableBuildAttempt
+from .storage.blobs import ArtifactRef, BlobStore
 from .storage.db import Database
 from .worker_contracts import PrecisionWorkerResult, canonical_json_bytes
 
@@ -521,13 +526,20 @@ class EvidenceRepository:
     """Append-only evidence records behind one daemon-owned Database boundary."""
 
     def __init__(
-        self, database: Database, *, trusted_clock: Callable[[], datetime] | None = None
+        self,
+        database: Database,
+        *,
+        blobs: BlobStore | None = None,
+        trusted_clock: Callable[[], datetime] | None = None,
     ) -> None:
         if not isinstance(database, Database):
             raise TypeError("database must be a Database")
+        if blobs is not None and not isinstance(blobs, BlobStore):
+            raise TypeError("blobs must be a BlobStore")
         if trusted_clock is not None and not callable(trusted_clock):
             raise TypeError("trusted_clock must be callable")
         self._database = database
+        self._blobs = blobs
         self._trusted_clock = trusted_clock or (lambda: datetime.now(UTC))
 
     @staticmethod
@@ -541,6 +553,108 @@ class EvidenceRepository:
         if parsed.tzinfo is None or parsed.utcoffset() is None:
             raise EvidenceClosureError("current coordinator lease expiry has no timezone")
         return parsed.astimezone(UTC)
+
+    @contextmanager
+    def _open_worker_artifact(
+        self, project_id: str, attempt_id: str, relative_path: str
+    ) -> Iterator[BinaryIO]:
+        """Open one worker artifact without following any output-scope symlink."""
+        if self._blobs is None:
+            raise EvidenceClosureError("artifact publication requires BlobStore custody")
+        parts = Path(relative_path).parts
+        if not parts or any(part in {"", ".", ".."} for part in parts):
+            raise EvidenceClosureError("worker artifact path is not a safe relative path")
+        components = (".piton", "build-attempts", project_id, attempt_id, *parts[:-1])
+        directory_fd = os.open(
+            self._blobs.project_root,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+        artifact_fd = -1
+        try:
+            for component in components:
+                child_fd = os.open(
+                    component,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                    dir_fd=directory_fd,
+                )
+                os.close(directory_fd)
+                directory_fd = child_fd
+            artifact_fd = os.open(
+                parts[-1],
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                dir_fd=directory_fd,
+            )
+            if not stat.S_ISREG(os.fstat(artifact_fd).st_mode):
+                raise EvidenceClosureError("worker artifact is not a regular file")
+            stream = os.fdopen(artifact_fd, "rb", closefd=True)
+            artifact_fd = -1
+            with stream:
+                yield stream
+        finally:
+            if artifact_fd >= 0:
+                os.close(artifact_fd)
+            os.close(directory_fd)
+
+    def recover_incomplete_publications(self) -> tuple[str, ...]:
+        """Fail closed and quarantine output scopes left in committing state."""
+        if self._blobs is None:
+            return ()
+        with self._database.immediate() as connection:
+            rows = connection.execute(
+                "SELECT publication.attempt_id,publication.project_id "
+                "FROM artifact_publications AS publication "
+                "JOIN build_coordinator_state AS state USING(attempt_id) "
+                "WHERE publication.state='committing' OR state.state='committing' "
+                "ORDER BY publication.attempt_id"
+            ).fetchall()
+            recovered: list[str] = []
+            now = datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+            for row in rows:
+                output = self._blobs.control_root / "build-attempts" / row["project_id"] / row["attempt_id"]
+                if output.exists() or output.is_symlink():
+                    self._blobs.quarantine(output, reason_code="startup-incomplete-publication")
+                connection.execute(
+                    "UPDATE artifact_publications SET state='quarantined',updated_at=? "
+                    "WHERE attempt_id=? AND state='committing'", (now, row["attempt_id"]),
+                )
+                connection.execute(
+                    "UPDATE build_coordinator_state SET state='failed',lease_id=NULL,"
+                    "lease_expires_at=NULL,updated_at=? WHERE attempt_id=? AND state='committing'",
+                    (now, row["attempt_id"]),
+                )
+                recovered.append(row["attempt_id"])
+        return tuple(recovered)
+
+    def begin_publication(
+        self, attempt: DurableBuildAttempt, state: CoordinatorState, result: PrecisionWorkerResult
+    ) -> None:
+        """Durably mark exact current custody as committing before CAS publication."""
+        with self._database.immediate() as connection:
+            now = self._trusted_clock().astimezone(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+            current = connection.execute(
+                "SELECT state,generation,fence,lease_id,lease_expires_at "
+                "FROM build_coordinator_state WHERE attempt_id=?",
+                (attempt.attempt_id,),
+            ).fetchone()
+            if current is None or tuple(current) != (
+                "running", state.generation, state.fence, state.lease_id, state.lease_expires_at
+            ):
+                raise EvidenceClosureError("current daemon custody changed before publication")
+            if current["lease_expires_at"] is None or self._lease_expiry(
+                current["lease_expires_at"]
+            ) <= self._trusted_clock().astimezone(UTC):
+                raise EvidenceClosureError("current coordinator lease expired before publication")
+            connection.execute(
+                "INSERT INTO artifact_publications(attempt_id,project_id,revision_id,worker_result_digest,"
+                "generation,fence,lease_id,closure_digest,state,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?,?,NULL,'committing',?,?)",
+                (attempt.attempt_id, attempt.project_id, attempt.revision_id, result.result_digest,
+                 state.generation, state.fence, state.lease_id, now, now),
+            )
+            connection.execute(
+                "UPDATE build_coordinator_state SET state='committing',updated_at=? WHERE attempt_id=?",
+                (now, attempt.attempt_id),
+            )
 
     def declare(self, attempt: DurableBuildAttempt) -> EvidenceCheckDeclaration:
         declaration = EvidenceCheckDeclaration.for_attempt(
@@ -744,6 +858,26 @@ class EvidenceRepository:
             raise EvidenceClosureError(
                 "required check failed; no EvidenceClosure published"
             )
+        if self._blobs is None:
+            raise EvidenceClosureError("artifact publication requires BlobStore custody")
+        promoted: dict[str, ArtifactRef] = {}
+        for role, artifact in result.artifacts.items():
+            with self._open_worker_artifact(
+                attempt.project_id, attempt.attempt_id, artifact.relative_path
+            ) as content:
+                staged = self._blobs.stage_stream(
+                    "evidence-" + attempt.attempt_id,
+                    role,
+                    iter(lambda: content.read(1024 * 1024), b""),
+                    media_type=artifact.media_type,
+                    max_bytes=artifact.byte_length,
+                )
+            self._blobs.validate_staged(
+                staged,
+                expected_digest=artifact.digest,
+                expected_size=artifact.byte_length,
+            )
+            promoted[role] = self._blobs.promote_no_clobber(staged)
         with self._database.immediate() as connection:
             transaction_now = self._trusted_clock()
             if (
@@ -781,7 +915,7 @@ class EvidenceRepository:
             expected = (
                 attempt.project_id,
                 attempt.revision_id,
-                "running",
+                "committing",
                 state.generation,
                 state.fence,
                 state.lease_id,
@@ -817,7 +951,7 @@ class EvidenceRepository:
                 ),
             )
             for role, artifact in result.artifacts.items():
-                storage_relpath = f"build-attempts/{attempt.project_id}/{attempt.attempt_id}/{artifact.relative_path}"
+                storage_relpath = promoted[role].storage_relpath
                 existing_artifact = connection.execute(
                     "SELECT media_type,byte_length,storage_relpath FROM artifacts WHERE digest=?",
                     (artifact.digest,),
@@ -882,6 +1016,49 @@ class EvidenceRepository:
                 "UPDATE build_coordinator_state SET state='succeeded',lease_id=NULL,"
                 "lease_expires_at=NULL,updated_at=? WHERE attempt_id=?",
                 (now, attempt.attempt_id),
+            )
+            connection.execute(
+                "UPDATE artifact_publications SET state='committed',closure_digest=?,updated_at=? "
+                "WHERE attempt_id=? AND state='committing'",
+                (closure.closure_digest, now, attempt.attempt_id),
+            )
+            payload = canonical_json_bytes({
+                "schema": "piton.evidence-closure-committed.v1",
+                "project_id": attempt.project_id,
+                "revision_id": attempt.revision_id,
+                "attempt_id": attempt.attempt_id,
+                "closure_digest": closure.closure_digest,
+            })
+            payload_staged = self._blobs.stage_stream(
+                "outbox-" + attempt.attempt_id,
+                "closure",
+                (payload,),
+                media_type="application/json",
+                max_bytes=len(payload),
+            )
+            payload_artifact = self._blobs.promote_no_clobber(payload_staged)
+            existing_payload = connection.execute(
+                "SELECT media_type,byte_length,storage_relpath FROM artifacts WHERE digest=?",
+                (payload_artifact.digest,),
+            ).fetchone()
+            payload_claims = (
+                payload_artifact.media_type,
+                payload_artifact.byte_length,
+                payload_artifact.storage_relpath,
+            )
+            if existing_payload is None:
+                connection.execute(
+                    "INSERT INTO artifacts(digest,media_type,byte_length,storage_relpath,created_at,verified_at) "
+                    "VALUES(?,?,?,?,?,?)",
+                    (payload_artifact.digest, *payload_claims, now, now),
+                )
+            elif tuple(existing_payload) != payload_claims:
+                raise EvidenceClosureError("outbox payload conflicts with immutable custody")
+            connection.execute(
+                "INSERT INTO outbox(event_id,topic,aggregate_id,payload_digest,payload_json,created_at) "
+                "VALUES(?,?,?,?,?,?)",
+                ("closure-" + closure.closure_digest[7:39], "evidence.closure.committed",
+                 attempt.attempt_id, payload_artifact.digest, payload, now),
             )
         return closure
 
