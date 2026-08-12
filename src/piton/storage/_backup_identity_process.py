@@ -253,6 +253,15 @@ def _take_backup_identity_authority() -> tuple[
                 raise RuntimeError("backup caller is already authorized")
             self.__authorized_backup_code = code
 
+        def __getattribute__(self, name: str) -> Any:
+            """Keep the raw IPC endpoint private to the authorized call path."""
+            if name == "_CustodyBackupIdentityChannel__connection":
+                frame = inspect.currentframe()
+                caller = None if frame is None else frame.f_back
+                if caller is None or caller.f_code is not type(self).__call__.__code__:
+                    raise AttributeError(name)
+            return object.__getattribute__(self, name)
+
         def __call__(self, manifest_path: Path, project_id: str) -> tuple[str, str]:
             frame = inspect.currentframe()
             caller = None if frame is None else frame.f_back

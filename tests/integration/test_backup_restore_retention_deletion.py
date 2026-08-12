@@ -317,6 +317,8 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
         if isinstance(cell.cell_contents, Connection)
     ]
     assert connections == []
+    with pytest.raises(AttributeError):
+        getattr(channel, "_CustodyBackupIdentityChannel__connection")
 
     receipt = custody.backup(
         "project_one", tmp_path / "backup", created_at="2026-08-12T12:00:00Z"
