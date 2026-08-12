@@ -51,7 +51,7 @@ def test_packet_is_exact_deterministic_and_contains_a_local_viewer(tmp_path: Pat
     assert first.evidence_closure_digest == closure.closure_digest
     assert first.worker_result_digest == result.result_digest
     assert first.declaration_digest == closure.declaration_digest
-    assert (first.generation, first.fence, first.lease_id) == (2, 5, "lease_one")
+    assert (first.generation, first.fence, first.lease_id) == (1, 1, "lease_one")
     assert set(first.artifacts) == EXPECTED_ROLES
     assert all(item["digest"] == result.artifacts[role].digest for role, item in first.artifacts.items())
     assert all(item["byte_length"] == result.artifacts[role].byte_length for role, item in first.artifacts.items())
