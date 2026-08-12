@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import atexit
 import hashlib
+import inspect
 import json
 import multiprocessing
 import sys
@@ -100,6 +101,10 @@ def _take_backup_identity_authority() -> tuple[
     lock = threading.Lock()
 
     def sign_completed_manifest(manifest_path: Path, project_id: str) -> tuple[str, str]:
+        frame = inspect.currentframe()
+        caller = None if frame is None else frame.f_back
+        if caller is None or caller.f_code.co_qualname != "ProjectCustody.backup":
+            raise PermissionError("backup signing is restricted to the custody backup operation")
         with lock:
             if not process.is_alive():
                 raise RuntimeError("backup identity helper is unavailable")

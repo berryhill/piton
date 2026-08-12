@@ -164,7 +164,7 @@ class ProjectCustody:
     """Daemon-side project custody without a second writable design authority."""
 
     __backup_identity_verifier = _BACKUP_IDENTITY_VERIFIER
-    __sign_completed_backup = staticmethod(_sign_completed_backup)
+    __backup_identity_channel = staticmethod(_sign_completed_backup)
 
     def __init__(self, database: Database, blobs: BlobStore) -> None:
         if not isinstance(database, Database) or not isinstance(blobs, BlobStore):
@@ -408,7 +408,7 @@ class ProjectCustody:
         # back and validates the completed canonical manifest before signing it;
         # this process retains only the public verification key.
         try:
-            signed_digest, signature = self.__sign_completed_backup(manifest_path, project_id)
+            signed_digest, signature = self.__backup_identity_channel(manifest_path, project_id)
         except RuntimeError as error:
             raise BackupValidationError("backup identity helper rejected the manifest") from error
         if signed_digest != manifest_digest:

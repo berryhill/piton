@@ -222,6 +222,8 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
 
     custody = _custody(database, blobs)
     assert not hasattr(custody, "_ProjectCustody__issue_backup_identity")
+    assert not hasattr(custody, "_ProjectCustody__sign_completed_backup")
+    assert not hasattr(ProjectCustody, "_ProjectCustody__sign_completed_backup")
     assert not hasattr(custody, "issue_backup_identity")
     assert not hasattr(custody_module, "_SERVER_BACKUP_IDENTITY_AUTHORITY")
     assert not hasattr(custody_module, "_BackupIdentityAuthority")
@@ -272,6 +274,9 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
         )
     )
     assert not hasattr(identity_process, "_sign_completed_manifest")
+    channel = getattr(ProjectCustody, "_ProjectCustody__backup_identity_channel")
+    with pytest.raises(PermissionError, match="custody backup operation"):
+        channel(arbitrary, "project_one")
 
     receipt = custody.backup(
         "project_one", tmp_path / "backup", created_at="2026-08-12T12:00:00Z"
