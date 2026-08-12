@@ -11,7 +11,7 @@ import re
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Callable
 
 from .db import Database
@@ -53,6 +53,42 @@ def _require_admission_capability(capability: object) -> None:
 
 class BuildAttemptConflictError(RuntimeError):
     """An immutable attempt identity is already in durable custody."""
+
+
+class LeaseConflictError(RuntimeError):
+    """A lease operation conflicts with current durable coordinator custody."""
+
+
+_TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled", "blocked"})
+
+
+def _aware_now(clock: Callable[[], datetime]) -> datetime:
+    value = clock()
+    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("trusted clock must return a timezone-aware datetime")
+    return value.astimezone(UTC)
+
+
+def _timestamp(value: datetime) -> str:
+    return value.astimezone(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def _expiry(value: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise LeaseConflictError("durable lease expiry is invalid") from error
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise LeaseConflictError("durable lease expiry has no timezone")
+    return parsed.astimezone(UTC)
+
+
+def _duration(value: timedelta) -> timedelta:
+    if not isinstance(value, timedelta) or value <= timedelta(0):
+        raise ValueError("lease_duration must be a positive timedelta")
+    if value > timedelta(hours=24):
+        raise ValueError("lease_duration must not exceed 24 hours")
+    return value
 
 
 def _required(name: str, value: str) -> None:
@@ -137,6 +173,8 @@ class CoordinatorState:
 
 DispatchSeam = Callable[[DurableBuildAttempt], None]
 AttemptIdFactory = Callable[[], str]
+LeaseIdFactory = Callable[[], str]
+Clock = Callable[[], datetime]
 
 
 class BuildAttemptCoordinator:
@@ -147,13 +185,21 @@ class BuildAttemptCoordinator:
         database: Database,
         *,
         attempt_id_factory: AttemptIdFactory = _uuid_attempt_id,
+        lease_id_factory: LeaseIdFactory = _uuid_attempt_id,
+        trusted_clock: Clock | None = None,
     ) -> None:
         if not isinstance(database, Database):
             raise TypeError("database must be a Database")
         if not callable(attempt_id_factory):
             raise TypeError("attempt_id_factory must be callable")
+        if not callable(lease_id_factory):
+            raise TypeError("lease_id_factory must be callable")
+        if trusted_clock is not None and not callable(trusted_clock):
+            raise TypeError("trusted_clock must be callable")
         self._database = database
         self._attempt_id_factory = attempt_id_factory
+        self._lease_id_factory = lease_id_factory
+        self._trusted_clock = trusted_clock or (lambda: datetime.now(UTC))
 
     def admit(
         self,
@@ -223,6 +269,121 @@ class BuildAttemptCoordinator:
         if dispatch is not None:
             dispatch(record)
         return record
+
+    @staticmethod
+    def _state_from_row(row: sqlite3.Row) -> CoordinatorState:
+        return CoordinatorState(
+            row["attempt_id"], row["state"], row["generation"], row["fence"],
+            row["lease_id"], row["lease_expires_at"], row["updated_at"]
+        )
+
+    @staticmethod
+    def _scoped_state(
+        connection: sqlite3.Connection, project_id: str, attempt_id: str
+    ) -> sqlite3.Row:
+        row = connection.execute(
+            "SELECT state.attempt_id,state.state,state.generation,state.fence,state.lease_id,"
+            "state.lease_expires_at,state.updated_at FROM build_coordinator_state AS state "
+            "JOIN build_attempts AS attempt ON attempt.attempt_id=state.attempt_id "
+            "WHERE attempt.project_id=? AND state.attempt_id=?",
+            (project_id, attempt_id),
+        ).fetchone()
+        if row is None:
+            raise LookupError("build coordinator state was not found")
+        return row
+
+    def acquire_lease(
+        self,
+        project_id: str,
+        attempt_id: str,
+        *,
+        lease_duration: timedelta,
+    ) -> CoordinatorState:
+        """Commit a fresh fenced lease before any worker request can be issued."""
+        _required("project_id", project_id)
+        _required("attempt_id", attempt_id)
+        duration = _duration(lease_duration)
+        now = _aware_now(self._trusted_clock)
+        with self._database.immediate() as connection:
+            row = self._scoped_state(connection, project_id, attempt_id)
+            if row["state"] in _TERMINAL_STATES:
+                raise LeaseConflictError("terminal build attempt cannot acquire a lease")
+            if (
+                row["lease_id"] is not None
+                and row["lease_expires_at"] is not None
+                and _expiry(row["lease_expires_at"]) > now
+            ):
+                raise LeaseConflictError("build attempt already has a live lease")
+            lease_id = self._lease_id_factory()
+            _required("server-derived lease_id", lease_id)
+            updated_at = _timestamp(now)
+            expires_at = _timestamp(now + duration)
+            connection.execute(
+                "UPDATE build_coordinator_state SET state='running',generation=generation+1,"
+                "fence=fence+1,lease_id=?,lease_expires_at=?,updated_at=? WHERE attempt_id=?",
+                (lease_id, expires_at, updated_at, attempt_id),
+            )
+            current = self._scoped_state(connection, project_id, attempt_id)
+        return self._state_from_row(current)
+
+    def renew_lease(
+        self,
+        project_id: str,
+        attempt_id: str,
+        lease_id: str,
+        *,
+        lease_duration: timedelta,
+    ) -> CoordinatorState:
+        """Extend exactly the current live lease without changing its fencing counters."""
+        _required("project_id", project_id)
+        _required("attempt_id", attempt_id)
+        _required("lease_id", lease_id)
+        duration = _duration(lease_duration)
+        now = _aware_now(self._trusted_clock)
+        with self._database.immediate() as connection:
+            row = self._scoped_state(connection, project_id, attempt_id)
+            if row["state"] != "running" or row["lease_id"] != lease_id:
+                raise LeaseConflictError("lease renewal does not match current custody")
+            if row["lease_expires_at"] is None or _expiry(row["lease_expires_at"]) <= now:
+                raise LeaseConflictError("expired lease cannot be renewed")
+            connection.execute(
+                "UPDATE build_coordinator_state SET lease_expires_at=?,updated_at=? "
+                "WHERE attempt_id=?",
+                (_timestamp(now + duration), _timestamp(now), attempt_id),
+            )
+            current = self._scoped_state(connection, project_id, attempt_id)
+        return self._state_from_row(current)
+
+    def cancel(
+        self,
+        project_id: str,
+        attempt_id: str,
+        *,
+        lease_id: str,
+        fence: int,
+    ) -> CoordinatorState:
+        """Durably cancel current execution; cancellation grants no review or release effect."""
+        _required("project_id", project_id)
+        _required("attempt_id", attempt_id)
+        _required("lease_id", lease_id)
+        if type(fence) is not int or fence < 0:
+            raise ValueError("fence must be a non-negative integer")
+        now = _aware_now(self._trusted_clock)
+        with self._database.immediate() as connection:
+            row = self._scoped_state(connection, project_id, attempt_id)
+            if row["state"] == "cancelled" and row["fence"] == fence:
+                return self._state_from_row(row)
+            if row["state"] in _TERMINAL_STATES:
+                raise LeaseConflictError("terminal build attempt cannot be cancelled again")
+            if row["lease_id"] != lease_id or row["fence"] != fence:
+                raise LeaseConflictError("cancellation does not match current fenced lease")
+            connection.execute(
+                "UPDATE build_coordinator_state SET state='cancelled',lease_id=NULL,"
+                "lease_expires_at=NULL,updated_at=? WHERE attempt_id=?",
+                (_timestamp(now), attempt_id),
+            )
+            current = self._scoped_state(connection, project_id, attempt_id)
+        return self._state_from_row(current)
 
     def get_attempt(self, project_id: str, attempt_id: str) -> DurableBuildAttempt:
         _required("project_id", project_id)

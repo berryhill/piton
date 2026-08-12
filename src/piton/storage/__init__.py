@@ -18,6 +18,7 @@ from .build_attempts import (
     BuildAttemptCoordinator,
     CoordinatorState,
     DurableBuildAttempt,
+    LeaseConflictError,
 )
 from .db import Database, Migration, MigrationError, TransactionOwnershipError
 from .revisions import (
@@ -44,6 +45,7 @@ __all__ = [
     "CustodyError",
     "Database",
     "DurableBuildAttempt",
+    "LeaseConflictError",
     "Migration",
     "MigrationError",
     "PersistenceConflictError",
