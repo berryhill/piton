@@ -487,6 +487,12 @@ def test_install_verifier_exercises_public_api_and_fresh_schema() -> None:
     assert "evidence_closure_receipts" in verifier
     assert "evidence_closure_artifacts" in verifier
     assert "evidence_closures_no_duplicate_insert" in verifier
+    assert "artifact_publications" in verifier
+    assert "artifact_publications_transition_guard" in verifier
+    assert "artifact_publications_no_delete" in verifier
+    assert "outbox" in verifier
+    assert "delivery_attempts" in verifier
+    assert "outbox_pending_idx" in verifier
     assert "Durable build admission and coordinator state" in architecture
     assert "fabrication_release" in architecture
     assert "machine_actuation" in architecture

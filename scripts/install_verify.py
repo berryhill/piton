@@ -343,7 +343,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
                 "AND name IN ('build_attempts','build_coordinator_state',"
                 "'evidence_check_declarations','evidence_check_receipts',"
                 "'evidence_closures','evidence_closure_receipts',"
-                "'evidence_closure_artifacts')"
+                "'evidence_closure_artifacts','artifact_publications','outbox')"
             )
         }
         durable_triggers = {
@@ -351,7 +351,19 @@ with tempfile.TemporaryDirectory() as temporary_directory:
             for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='trigger' "
                 "AND (name='build_attempts_no_duplicate_insert' "
-                "OR name GLOB 'evidence_*_no_*')"
+                "OR name GLOB 'evidence_*_no_*' "
+                "OR name IN ('artifact_publications_transition_guard',"
+                "'artifact_publications_no_delete'))"
+            )
+        }
+        outbox_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(outbox)")
+        }
+        durable_indexes = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' "
+                "AND name='outbox_pending_idx'"
             )
         }
     expected_tables = {
@@ -362,6 +374,8 @@ with tempfile.TemporaryDirectory() as temporary_directory:
         "evidence_closures",
         "evidence_closure_receipts",
         "evidence_closure_artifacts",
+        "artifact_publications",
+        "outbox",
     }
     expected_triggers = {
         "build_attempts_no_duplicate_insert",
@@ -378,11 +392,25 @@ with tempfile.TemporaryDirectory() as temporary_directory:
         "evidence_closure_receipts_no_delete",
         "evidence_closure_artifacts_no_update",
         "evidence_closure_artifacts_no_delete",
+        "artifact_publications_transition_guard",
+        "artifact_publications_no_delete",
+    }
+    expected_outbox_columns = {
+        "event_id",
+        "topic",
+        "aggregate_id",
+        "payload_digest",
+        "payload_json",
+        "created_at",
+        "delivered_at",
+        "delivery_attempts",
     }
     if durable_tables != expected_tables:
         raise SystemExit("installed build-attempt/evidence-closure custody schema is incomplete")
     if durable_triggers != expected_triggers:
         raise SystemExit("installed build-attempt/evidence-closure immutability guards are incomplete")
+    if outbox_columns != expected_outbox_columns or durable_indexes != {"outbox_pending_idx"}:
+        raise SystemExit("installed restartable outbox custody schema is incomplete")
 
 print(
     json.dumps(
@@ -397,6 +425,17 @@ print(
             "evidence_closure_custody": sorted(
                 table for table in durable_tables if table.startswith("evidence_")
             ),
+            "artifact_publication_custody": {
+                "table": "artifact_publications",
+                "guards": [
+                    "artifact_publications_no_delete",
+                    "artifact_publications_transition_guard",
+                ],
+            },
+            "restartable_outbox_custody": {
+                "columns": sorted(outbox_columns),
+                "pending_index": "outbox_pending_idx",
+            },
             "launch_asset_package": launch_receipt["schema"],
             "draft_export_api": draft_export_payload["schema"],
             "review_packet_api": "piton.review-packet.v1",
