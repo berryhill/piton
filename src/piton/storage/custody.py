@@ -64,11 +64,6 @@ class CustodyCapability:
         return instance
 
 
-def _issue_server_custody_capability() -> CustodyCapability:
-    """Issue custody authority only at a trusted daemon/operator composition root."""
-    return CustodyCapability(_CUSTODY_CAPABILITY_PROOF)
-
-
 def _require_custody_capability(capability: object) -> None:
     if (
         type(capability) is not CustodyCapability
@@ -655,3 +650,18 @@ _authorize_backup_caller(ProjectCustody.backup.__code__)
 
 # The consumed bootstrap and signing closure are retained only by ProjectCustody.
 del _BACKUP_IDENTITY_VERIFIER, _sign_completed_backup, _authorize_backup_caller
+
+
+def _take_project_custody_factory():
+    """Transfer the sole constructor to the application composition root once."""
+    module_globals = globals()
+    if module_globals.get("_PROJECT_CUSTODY_FACTORY_TAKEN", False):
+        raise CustodyAuthorityError("project custody factory was already consumed")
+    module_globals["_PROJECT_CUSTODY_FACTORY_TAKEN"] = True
+    capability = CustodyCapability(_CUSTODY_CAPABILITY_PROOF)
+
+    def construct(database: Database, blobs: BlobStore) -> ProjectCustody:
+        return ProjectCustody(database, blobs, capability=capability)
+
+    module_globals.pop("_take_project_custody_factory", None)
+    return construct

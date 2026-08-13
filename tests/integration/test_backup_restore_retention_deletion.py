@@ -14,6 +14,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from piton.revision import DesignRevision
 from piton.source_tree import SourceTree, SourceTreeFile
+from piton.service.application import PitonApplicationService
+from piton.service.drafts import DraftStore
 from piton.storage import BlobStore, Database, RevisionRepository
 from piton.storage.custody import (
     BackupValidationError,
@@ -21,15 +23,12 @@ from piton.storage.custody import (
     CustodyCapability,
     ProjectCustody,
     RetentionPolicy,
-    _issue_server_custody_capability,
 )
 from piton.storage.revisions import _issue_server_mutation_capability
 
 
-def _custody(database: Database, blobs: BlobStore) -> ProjectCustody:
-    return ProjectCustody(
-        database, blobs, capability=_issue_server_custody_capability()
-    )
+def _custody(database: Database, blobs: BlobStore) -> PitonApplicationService:
+    return PitonApplicationService(database, blobs, DraftStore(blobs.project_root))
 
 
 def _tree() -> SourceTree:
@@ -79,10 +78,10 @@ def test_backup_is_deterministic_portable_closure_and_restore_survives_source_de
     source = tmp_path / "source"
     database, blobs, revision = _seed(source)
     custody = _custody(database, blobs)
-    first = custody.backup(
+    first = custody.backup_project(
         "project_one", tmp_path / "backup-a", created_at="2026-08-12T12:00:00Z"
     )
-    second = custody.backup(
+    second = custody.backup_project(
         "project_one", tmp_path / "backup-b", created_at="2026-08-12T12:00:00Z"
     )
 
@@ -112,7 +111,7 @@ def test_backup_is_deterministic_portable_closure_and_restore_survives_source_de
     restored_db.migrate()
     pinned_identity = first.trusted_identity.serialize()
     del custody, first
-    restored = _custody(restored_db, BlobStore(restored_root)).restore(
+    restored = _custody(restored_db, BlobStore(restored_root)).restore_project(
         tmp_path / "backup-a", trusted_identity=pinned_identity
     )
     assert restored.project_id == "project_one"
@@ -132,7 +131,7 @@ def test_restore_rejects_tampering_and_never_partially_publishes(tmp_path: Path)
     source = tmp_path / "source"
     database, blobs, _revision = _seed(source)
     backup = tmp_path / "backup"
-    receipt = _custody(database, blobs).backup(
+    receipt = _custody(database, blobs).backup_project(
         "project_one", backup, created_at="2026-08-12T12:00:00Z"
     )
     manifest = json.loads((backup / "manifest.json").read_bytes())
@@ -144,7 +143,7 @@ def test_restore_rejects_tampering_and_never_partially_publishes(tmp_path: Path)
     target_db = Database(target / "piton.sqlite3")
     target_db.migrate()
     with pytest.raises(BackupValidationError, match="digest|length"):
-        _custody(target_db, BlobStore(target)).restore(
+        _custody(target_db, BlobStore(target)).restore_project(
             backup, trusted_identity=receipt.trusted_identity
         )
     with target_db.read() as connection:
@@ -156,11 +155,11 @@ def test_restore_collision_fails_closed_without_replacing_existing_project(tmp_p
     source = tmp_path / "source"
     database, blobs, _revision = _seed(source)
     backup = tmp_path / "backup"
-    receipt = _custody(database, blobs).backup(
+    receipt = _custody(database, blobs).backup_project(
         "project_one", backup, created_at="2026-08-12T12:00:00Z"
     )
     with pytest.raises(BackupValidationError, match="already exists"):
-        _custody(database, blobs).restore(
+        _custody(database, blobs).restore_project(
             backup, trusted_identity=receipt.trusted_identity
         )
     with database.read() as connection:
@@ -173,7 +172,7 @@ def test_restore_requires_externally_pinned_manifest_identity_and_rejects_inject
 ):
     database, blobs, _revision = _seed(tmp_path / "source")
     backup = tmp_path / "backup"
-    receipt = _custody(database, blobs).backup(
+    receipt = _custody(database, blobs).backup_project(
         "project_one", backup, created_at="2026-08-12T12:00:00Z"
     )
     target = tmp_path / "target"
@@ -185,7 +184,7 @@ def test_restore_requires_externally_pinned_manifest_identity_and_rejects_inject
     assert not hasattr(target_custody, "_issue_backup_identity")
 
     with pytest.raises(TypeError):
-        target_custody.restore(backup)
+        target_custody.restore_project(backup)
 
     manifest_path = backup / "manifest.json"
     manifest_path.chmod(0o600)
@@ -204,16 +203,16 @@ def test_restore_requires_externally_pinned_manifest_identity_and_rejects_inject
     # A caller-recomputed digest is only a checksum. It cannot mint the
     # daemon-held identity returned through the separate backup receipt.
     with pytest.raises(TypeError, match="trusted_identity"):
-        target_custody.restore(backup, trusted_identity=caller_minted_digest)
+        target_custody.restore_project(backup, trusted_identity=caller_minted_digest)
     forged_identity = json.dumps(
         {"manifest_digest": caller_minted_digest, "project_id": "project_one", "signature": "00" * 32},
         sort_keys=True,
         separators=(",", ":"),
     )
     with pytest.raises(BackupValidationError, match="signature"):
-        target_custody.restore(backup, trusted_identity=forged_identity)
+        target_custody.restore_project(backup, trusted_identity=forged_identity)
     with pytest.raises(BackupValidationError, match="trusted manifest digest"):
-        target_custody.restore(backup, trusted_identity=receipt.trusted_identity)
+        target_custody.restore_project(backup, trusted_identity=receipt.trusted_identity)
     with target_db.read() as connection:
         assert connection.execute("SELECT count(*) FROM projects").fetchone()[0] == 0
         assert connection.execute("SELECT count(*) FROM design_revisions").fetchone()[0] == 0
@@ -226,14 +225,12 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
         ProjectCustody(
             database,
             blobs,
-            capability=_issue_server_custody_capability(),
             identity_key=secrets.token_bytes(32),
         )
     with pytest.raises(TypeError):
         ProjectCustody(
             database,
             blobs,
-            capability=_issue_server_custody_capability(),
             identity_authority=object(),
         )
 
@@ -352,17 +349,9 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     with pytest.raises(PermissionError, match="custody backup channel"):
         guarded_request(arbitrary, "project_one")
 
-    receipt = custody.backup(
+    receipt = custody.backup_project(
         "project_one", tmp_path / "backup", created_at="2026-08-12T12:00:00Z"
     )
-    rebound = custody_module.BackupIdentity(
-        "sha256:" + "0" * 64,
-        receipt.project_id,
-        receipt.trusted_identity.signature,
-    )
-    with pytest.raises(BackupValidationError, match="signature"):
-        custody._require_backup_identity(rebound)
-
     # A previously valid backup is not a reusable signing authorization. Even
     # when a caller keeps its closure complete and changes both duplicate
     # display-name fields consistently, direct IPC cannot mint a new identity.
@@ -420,6 +409,8 @@ def test_caller_owned_storage_handles_cannot_construct_or_forge_custody_authorit
 ):
     database, blobs, _revision = _seed(tmp_path / "source")
 
+    assert not hasattr(custody_module, "_issue_server_custody_capability")
+    assert not hasattr(custody_module, "_take_project_custody_factory")
     with pytest.raises(CustodyAuthorityError, match="server-issued custody capability"):
         ProjectCustody(database, blobs)
     with pytest.raises(CustodyAuthorityError, match="server-issued custody capability"):

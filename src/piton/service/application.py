@@ -39,6 +39,15 @@ from ..source_tree import SourceTree, SourceTreeFile
 from ..storage.blobs import BlobStore
 from ..storage.build_attempts import BuildAttemptCoordinator, CoordinatorState, DurableBuildAttempt
 from ..storage.db import Database
+from ..storage.custody import (
+    BackupIdentity,
+    BackupReceipt,
+    DeletionReceipt,
+    RestoreReceipt,
+    RetentionPolicy,
+    RetentionReceipt,
+    _take_project_custody_factory,
+)
 from ..storage.revisions import (
     ChannelConflictError,
     RevisionRepository,
@@ -62,6 +71,8 @@ if TYPE_CHECKING:
 _PRINCIPAL_PROOF = object()
 ExactInputs = Callable[[str, str, str], "RealizationInputs"]
 Clock = Callable[[], datetime]
+_construct_project_custody = _take_project_custody_factory()
+del _take_project_custody_factory
 
 
 class PrincipalAuthorityError(PermissionError):
@@ -153,6 +164,7 @@ class PitonApplicationService:
         self.__blobs = blobs
         self.__drafts = drafts
         self.__repository = RevisionRepository(database, blobs)
+        self.__project_custody = _construct_project_custody(database, blobs)
         self.__mutation_capability = _issue_server_mutation_capability()
         self.__build_attempt_coordinator = BuildAttemptCoordinator(database)
         self.__precision_inputs = precision_inputs
@@ -184,6 +196,35 @@ class PitonApplicationService:
             precision_inputs=precision_inputs,
             precision_clock=precision_clock,
         )
+
+    def backup_project(
+        self,
+        project_id: str,
+        destination: str | Path,
+        *,
+        created_at: str | None = None,
+    ) -> BackupReceipt:
+        return self.__project_custody.backup(
+            project_id, destination, created_at=created_at
+        )
+
+    def restore_project(
+        self,
+        source: str | Path,
+        *,
+        trusted_identity: BackupIdentity | str,
+    ) -> RestoreReceipt:
+        return self.__project_custody.restore(
+            source, trusted_identity=trusted_identity
+        )
+
+    def apply_retention(
+        self, policy: RetentionPolicy, *, dry_run: bool = True
+    ) -> RetentionReceipt:
+        return self.__project_custody.apply_retention(policy, dry_run=dry_run)
+
+    def delete_project(self, project_id: str, *, reason: str) -> DeletionReceipt:
+        return self.__project_custody.delete_project(project_id, reason=reason)
 
     @staticmethod
     def _lease_expiry(value: str) -> datetime:
