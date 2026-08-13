@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sqlite3
+import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -49,11 +50,11 @@ class CustodyAuthorityError(PermissionError):
 
 
 def _define_custody_authority():
-    """Create one unforgeable-by-construction application custody capability.
+    """Create one call-path-bound application custody factory.
 
-    The capability instance is retained only in closures consumed by the
-    application composition root. No module attribute exposes a constructor
-    proof that an arbitrary in-process caller can replay.
+    No reusable capability object exists. The constructor accepts only a call
+    from the exact factory code object, and that factory accepts only a call
+    from the exact registered application composition-root code object.
     """
 
     class CustodyCapability:
@@ -64,32 +65,46 @@ def _define_custody_authority():
         def __new__(cls):
             raise CustodyAuthorityError("custody capability is server-issued only")
 
-    capability = object.__new__(CustodyCapability)
     factory_taken = False
+    authorized_caller = None
+    factory_code = None
 
     def require(capability_candidate: object) -> None:
-        if capability_candidate is not capability:
+        if capability_candidate is not factory_code or sys._getframe(2).f_code is not factory_code:
             raise CustodyAuthorityError("server-issued custody capability is required")
 
     def take_factory():
         """Transfer the sole constructor to the application composition root once."""
-        nonlocal factory_taken
+        nonlocal factory_taken, factory_code
         if factory_taken:
             raise CustodyAuthorityError("project custody factory was already consumed")
         factory_taken = True
 
         def construct(database: Database, blobs: BlobStore) -> "ProjectCustody":
-            return ProjectCustody(database, blobs, capability=capability)
+            if sys._getframe(1).f_code is not authorized_caller:
+                raise CustodyAuthorityError("application custody composition root is required")
+            return ProjectCustody(database, blobs, capability=construct.__code__)
 
+        factory_code = construct.__code__
         globals().pop("_take_project_custody_factory", None)
         return construct
 
-    return CustodyCapability, require, take_factory
+    def authorize_caller(code: object) -> None:
+        nonlocal authorized_caller
+        if authorized_caller is not None or not isinstance(code, type(authorize_caller.__code__)):
+            raise CustodyAuthorityError("project custody composition root is already bound")
+        authorized_caller = code
+        globals().pop("_authorize_project_custody_factory", None)
+
+    return CustodyCapability, require, take_factory, authorize_caller
 
 
-CustodyCapability, _require_custody_capability, _take_project_custody_factory = (
-    _define_custody_authority()
-)
+(
+    CustodyCapability,
+    _require_custody_capability,
+    _take_project_custody_factory,
+    _authorize_project_custody_factory,
+) = _define_custody_authority()
 del _define_custody_authority
 
 
@@ -218,6 +233,7 @@ class ProjectCustody:
 
     __backup_identity_verifier = _BACKUP_IDENTITY_VERIFIER
     __backup_identity_channel = staticmethod(_sign_completed_backup)
+    __custody_guard = staticmethod(_require_custody_capability)
 
     def __init__(
         self,
@@ -226,7 +242,7 @@ class ProjectCustody:
         *,
         capability: object = None,
     ) -> None:
-        _require_custody_capability(capability)
+        self.__custody_guard(capability)
         if not isinstance(database, Database) or not isinstance(blobs, BlobStore):
             raise TypeError("database and blobs must be Piton custody objects")
         self.database = database
@@ -671,3 +687,4 @@ _authorize_backup_caller(ProjectCustody.backup.__code__)
 
 # The consumed bootstrap and signing closure are retained only by ProjectCustody.
 del _BACKUP_IDENTITY_VERIFIER, _sign_completed_backup, _authorize_backup_caller
+del _require_custody_capability

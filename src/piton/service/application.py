@@ -46,6 +46,7 @@ from ..storage.custody import (
     RestoreReceipt,
     RetentionPolicy,
     RetentionReceipt,
+    _authorize_project_custody_factory,
     _take_project_custody_factory,
 )
 from ..storage.revisions import (
@@ -1268,3 +1269,7 @@ class PitonApplicationService:
     @staticmethod
     def _now() -> str:
         return datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+_authorize_project_custody_factory(PitonApplicationService.__init__.__code__)
+del _authorize_project_custody_factory
