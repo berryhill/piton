@@ -235,6 +235,84 @@ def serialize_partner_scaffold_t007(receipt: PartnerScaffoldT007Receipt) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class PartnerScaffoldT008Receipt:
+    """Closed, synthetic shape for unperformed T008 partner work.
+
+    This fixture can record only unavailable, zero-claim repository state. It
+    cannot represent external evidence or confer review, gate, release, or
+    machine-actuation authority.
+    """
+
+    schema: Literal["piton.partner-alpha-scaffold.t008.v1"] = (
+        "piton.partner-alpha-scaffold.t008.v1"
+    )
+    disposition: Literal["unavailable"] = "unavailable"
+    synthetic: Literal[True] = True
+    claim_scope: Literal["fixture-only"] = "fixture-only"
+    external_thresholds_passed: Literal[False] = False
+    successor_authorized: Literal[False] = False
+    threshold_passed: Literal[False] = False
+    fabrication_release: Literal[False] = False
+    machine_actuation: Literal[False] = False
+    review_state: Literal["needs_human_review"] = "needs_human_review"
+    g2_accepted: Literal[False] = False
+    g7_accepted: Literal[False] = False
+    paid_partner_count: Literal[0] = 0
+    completed_real_job_count: Literal[0] = 0
+    recognized_revenue_usd: Literal[0] = 0
+
+    FIELD_NAMES: ClassVar[tuple[str, ...]] = (
+        "schema",
+        "disposition",
+        "synthetic",
+        "claim_scope",
+        "external_thresholds_passed",
+        "successor_authorized",
+        "threshold_passed",
+        "fabrication_release",
+        "machine_actuation",
+        "review_state",
+        "g2_accepted",
+        "g7_accepted",
+        "paid_partner_count",
+        "completed_real_job_count",
+        "recognized_revenue_usd",
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {name: getattr(self, name) for name in self.FIELD_NAMES}
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "PartnerScaffoldT008Receipt":
+        if not isinstance(value, Mapping) or set(value) != set(cls.FIELD_NAMES):
+            raise ValueError("fields do not match the closed partner scaffold schema")
+        return cls(**{name: value[name] for name in cls.FIELD_NAMES})
+
+
+def validate_partner_scaffold_t008(receipt: object) -> bool:
+    """Return true only for the exact, type-strict T008 zero-claim state."""
+
+    if type(receipt) is not PartnerScaffoldT008Receipt:
+        return False
+    expected = PartnerScaffoldT008Receipt().to_dict()
+    actual = receipt.to_dict()
+    return all(
+        type(actual[name]) is type(expected_value) and actual[name] == expected_value
+        for name, expected_value in expected.items()
+    )
+
+
+def serialize_partner_scaffold_t008(receipt: PartnerScaffoldT008Receipt) -> str:
+    """Serialize a valid T008 fixture as deterministic JSON text."""
+
+    if not validate_partner_scaffold_t008(receipt):
+        raise ValueError("cannot serialize an invalid partner scaffold")
+    return json.dumps(
+        receipt.to_dict(), sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False
+    ) + "\n"
+
+
+@dataclass(frozen=True, slots=True)
 class SafetyState:
     fabrication_release: bool = False
     machine_actuation: bool = False

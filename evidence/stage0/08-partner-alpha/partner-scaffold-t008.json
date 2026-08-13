@@ -1,0 +1,17 @@
+{
+  "claim_scope": "fixture-only",
+  "completed_real_job_count": 0,
+  "disposition": "unavailable",
+  "external_thresholds_passed": false,
+  "fabrication_release": false,
+  "g2_accepted": false,
+  "g7_accepted": false,
+  "machine_actuation": false,
+  "paid_partner_count": 0,
+  "recognized_revenue_usd": 0,
+  "review_state": "needs_human_review",
+  "schema": "piton.partner-alpha-scaffold.t008.v1",
+  "successor_authorized": false,
+  "synthetic": true,
+  "threshold_passed": false
+}
