@@ -317,6 +317,12 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
         if isinstance(cell.cell_contents, Connection)
     ]
     assert connections == []
+    method_closure = getattr(type(channel).__call__, "__closure__", None) or ()
+    assert not any(isinstance(cell.cell_contents, Connection) for cell in method_closure)
+    assert not any(
+        isinstance(cell.cell_contents, identity_process.multiprocessing.process.BaseProcess)
+        for cell in method_closure
+    )
     with pytest.raises(AttributeError):
         getattr(channel, "_CustodyBackupIdentityChannel__connection")
     with pytest.raises(AttributeError):

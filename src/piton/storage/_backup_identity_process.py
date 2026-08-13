@@ -26,6 +26,29 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 
 
+class _CustodyBackupIdentityChannel:
+    """Expose a custody-bound operation without closing the method over raw IPC."""
+
+    __slots__ = ("__authorized_backup_code", "__request")
+
+    def __init__(self, request: Callable[[Path, str], tuple[str, str]]) -> None:
+        self.__authorized_backup_code: object | None = None
+        self.__request = request
+
+    def authorize(self, code: object) -> None:
+        """Bind the channel once to the exact custody implementation code object."""
+        if self.__authorized_backup_code is not None:
+            raise RuntimeError("backup caller is already authorized")
+        self.__authorized_backup_code = code
+
+    def __call__(self, manifest_path: Path, project_id: str) -> tuple[str, str]:
+        frame = inspect.currentframe()
+        caller = None if frame is None else frame.f_back
+        if caller is None or caller.f_code is not self.__authorized_backup_code:
+            raise PermissionError("backup signing is restricted to the custody backup operation")
+        return self.__request(manifest_path, project_id)
+
+
 def _canonical(value: Any) -> bytes:
     return json.dumps(
         value, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
@@ -238,35 +261,17 @@ def _take_backup_identity_authority() -> tuple[
     verifier = Ed25519PublicKey.from_public_bytes(parent_connection.recv_bytes())
     channel_lock = threading.Lock()
 
-    class _CustodyBackupIdentityChannel:
-        """Expose only the bounded signing operation, never its raw IPC endpoint."""
+    def request(manifest_path: Path, project_id: str) -> tuple[str, str]:
+        with channel_lock:
+            if not process.is_alive():
+                raise RuntimeError("backup identity helper is unavailable")
+            parent_connection.send((str(manifest_path), project_id))
+            manifest_digest, signature, error = parent_connection.recv()
+        if error is not None:
+            raise RuntimeError(error)
+        return manifest_digest, signature
 
-        __slots__ = ("__authorized_backup_code",)
-
-        def __init__(self) -> None:
-            self.__authorized_backup_code: object | None = None
-
-        def authorize(self, code: object) -> None:
-            """Bind the channel once to the exact custody implementation code object."""
-            if self.__authorized_backup_code is not None:
-                raise RuntimeError("backup caller is already authorized")
-            self.__authorized_backup_code = code
-
-        def __call__(self, manifest_path: Path, project_id: str) -> tuple[str, str]:
-            frame = inspect.currentframe()
-            caller = None if frame is None else frame.f_back
-            if caller is None or caller.f_code is not self.__authorized_backup_code:
-                raise PermissionError("backup signing is restricted to the custody backup operation")
-            with channel_lock:
-                if not process.is_alive():
-                    raise RuntimeError("backup identity helper is unavailable")
-                parent_connection.send((str(manifest_path), project_id))
-                manifest_digest, signature, error = parent_connection.recv()
-            if error is not None:
-                raise RuntimeError(error)
-            return manifest_digest, signature
-
-    channel = _CustodyBackupIdentityChannel()
+    channel = _CustodyBackupIdentityChannel(request)
 
     def shutdown() -> None:
         if process.is_alive():
