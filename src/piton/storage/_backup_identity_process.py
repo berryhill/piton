@@ -33,7 +33,7 @@ class _CustodyBackupIdentityChannel:
 
     def __init__(self, request: Callable[[Path, str], tuple[str, str]]) -> None:
         self.__authorized_backup_code: object | None = None
-        self.__request = request
+        self.__request = _CustodyBackupIdentityRequest(request, type(self).__call__.__code__)
 
     def authorize(self, code: object) -> None:
         """Bind the channel once to the exact custody implementation code object."""
@@ -46,6 +46,27 @@ class _CustodyBackupIdentityChannel:
         caller = None if frame is None else frame.f_back
         if caller is None or caller.f_code is not self.__authorized_backup_code:
             raise PermissionError("backup signing is restricted to the custody backup operation")
+        return self.__request(manifest_path, project_id)
+
+
+class _CustodyBackupIdentityRequest:
+    """Permit helper requests only from the custody channel implementation."""
+
+    __slots__ = ("__authorized_channel_code", "__request")
+
+    def __init__(
+        self,
+        request: Callable[[Path, str], tuple[str, str]],
+        authorized_channel_code: object,
+    ) -> None:
+        self.__authorized_channel_code = authorized_channel_code
+        self.__request = request
+
+    def __call__(self, manifest_path: Path, project_id: str) -> tuple[str, str]:
+        frame = inspect.currentframe()
+        caller = None if frame is None else frame.f_back
+        if caller is None or caller.f_code is not self.__authorized_channel_code:
+            raise PermissionError("backup request is restricted to the custody backup channel")
         return self.__request(manifest_path, project_id)
 
 

@@ -327,6 +327,15 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
         getattr(channel, "_CustodyBackupIdentityChannel__connection")
     with pytest.raises(AttributeError):
         object.__getattribute__(channel, "_CustodyBackupIdentityChannel__connection")
+    # Bypassing attribute policy can reveal only a second, independently guarded
+    # endpoint. It must reject direct caller use even after a completed canonical
+    # backup is rewritten; raw IPC is never returned from the channel itself.
+    guarded_request = object.__getattribute__(
+        channel, "_CustodyBackupIdentityChannel__request"
+    )
+    assert callable(guarded_request)
+    with pytest.raises(PermissionError, match="custody backup channel"):
+        guarded_request(arbitrary, "project_one")
 
     receipt = custody.backup(
         "project_one", tmp_path / "backup", created_at="2026-08-12T12:00:00Z"
@@ -355,6 +364,8 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     )
     with pytest.raises(PermissionError, match="custody backup operation"):
         channel(completed_manifest_path, "project_one")
+    with pytest.raises(PermissionError, match="custody backup channel"):
+        guarded_request(completed_manifest_path, "project_one")
 
 
 def test_retention_deletion_tombstones_authority_and_only_prunes_unreferenced_objects(tmp_path: Path):
