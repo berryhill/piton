@@ -43,6 +43,7 @@ from ..storage.custody import (
     BackupIdentity,
     BackupReceipt,
     DeletionReceipt,
+    ProjectStateConflictError,
     RestoreReceipt,
     RetentionPolicy,
     RetentionReceipt,
@@ -856,15 +857,14 @@ class PitonApplicationService:
         self, cmd: DeleteProject, ctx: PrincipalContext
     ) -> DeletionReceipt:
         self._require(cmd, DeleteProject, ctx)
-        with self.__database.read() as connection:
-            row = connection.execute(
-                "SELECT state FROM projects WHERE project_id=?", (cmd.project_id,)
-            ).fetchone()
-        if row is None or row[0] != cmd.expected_state:
-            raise StaleBaseConflictError(
-                "project state does not match the destructive command precondition"
+        try:
+            return self.__project_custody.delete_project(
+                cmd.project_id,
+                reason=cmd.reason,
+                expected_state=cmd.expected_state,
             )
-        return self.__project_custody.delete_project(cmd.project_id, reason=cmd.reason)
+        except ProjectStateConflictError as error:
+            raise StaleBaseConflictError(str(error)) from error
 
     def create_project(self, cmd: CreateProject, ctx: PrincipalContext) -> CommandReceipt:
         receipt = self.execute(cmd, ctx)

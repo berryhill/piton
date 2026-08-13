@@ -49,6 +49,10 @@ class CustodyAuthorityError(PermissionError):
     """A caller attempted to construct a destructive custody boundary."""
 
 
+class ProjectStateConflictError(RuntimeError):
+    """A destructive project transition lost its exact-state precondition."""
+
+
 def _define_custody_authority():
     """Create one call-path-bound application custody factory.
 
@@ -665,19 +669,24 @@ class ProjectCustody:
                 self.blobs.fsync_parent(path)
         return RetentionReceipt(tuple(digest for digest, _path in candidates), dry_run)
 
-    def delete_project(self, project_id: str, *, reason: str) -> DeletionReceipt:
+    def delete_project(
+        self, project_id: str, *, reason: str, expected_state: str
+    ) -> DeletionReceipt:
         """Delete product visibility by tombstone; immutable history and CAS remain."""
         if not isinstance(reason, str) or not reason.strip():
             raise ValueError("deletion reason must be non-empty")
+        if not isinstance(expected_state, str) or not expected_state:
+            raise ValueError("expected project state must be non-empty")
         with self.database.immediate() as connection:
-            row = connection.execute(
-                "SELECT state FROM projects WHERE project_id=?", (project_id,)
-            ).fetchone()
-            if row is None:
-                raise BackupValidationError("project does not exist")
-            connection.execute(
-                "UPDATE projects SET state='tombstoned' WHERE project_id=?", (project_id,)
+            updated = connection.execute(
+                "UPDATE projects SET state='tombstoned' "
+                "WHERE project_id=? AND state=?",
+                (project_id, expected_state),
             )
+            if updated.rowcount != 1:
+                raise ProjectStateConflictError(
+                    "project state does not match the destructive command precondition"
+                )
         return DeletionReceipt(project_id, "tombstoned", reason)
 
 

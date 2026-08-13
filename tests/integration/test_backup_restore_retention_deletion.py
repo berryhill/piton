@@ -103,6 +103,45 @@ def test_project_deletion_requires_typed_authenticated_idempotent_admission(tmp_
     assert tuple(row) == ("operator_local", "delete_project")
 
 
+def test_project_deletion_rechecks_expected_state_in_destructive_transaction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, blobs, _revision = _seed(tmp_path / "source")
+    service = _custody(database, blobs)
+    original_delete = ProjectCustody.delete_project
+
+    def race_delete(
+        custody: ProjectCustody, project_id: str, *, reason: str, expected_state: str
+    ):
+        with database.immediate() as connection:
+            connection.execute(
+                "UPDATE projects SET state='quarantined' WHERE project_id=?", (project_id,)
+            )
+        return original_delete(
+            custody, project_id, reason=reason, expected_state=expected_state
+        )
+
+    monkeypatch.setattr(ProjectCustody, "delete_project", race_delete)
+    command = DeleteProject(
+        command_id="cmd_delete_raced",
+        project_id="project_one",
+        reason="must not overwrite a concurrent state transition",
+        expected_state="active",
+    )
+
+    with pytest.raises(StaleBaseConflictError, match="precondition"):
+        service.delete_project(command, _operator())
+
+    with database.read() as connection:
+        assert connection.execute(
+            "SELECT state FROM projects WHERE project_id='project_one'"
+        ).fetchone()[0] == "quarantined"
+        assert connection.execute(
+            "SELECT COUNT(*) FROM command_receipts WHERE command_id=?",
+            (command.command_id,),
+        ).fetchone()[0] == 0
+
+
 def _tree() -> SourceTree:
     return SourceTree(
         files=(
