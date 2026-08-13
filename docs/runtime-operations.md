@@ -132,9 +132,38 @@ recreating an evidence closure, changing a revision, or moving a channel.
 
 ### backup failure
 
-Backup/restore is not yet implemented in this slice. Keep the corresponding
-support claim blocked. Preserve existing custody and diagnostics; never claim a
-filesystem copy is a verified backup and never overlay live custody.
+Project custody is implemented at the authenticated application-service boundary:
+`PitonApplicationService.backup_project`,
+`PitonApplicationService.restore_project`, and
+`PitonApplicationService.apply_retention`. These are daemon-side Python APIs, not
+a shell command or permission to copy `.piton/piton.sqlite3`. The daemon must issue
+the `PrincipalContext`; callers cannot mint one.
+
+For backup, choose a new destination path, pin the returned serialized
+`trusted_identity` separately from the backup directory, and retain the complete
+canonical manifest plus immutable object closure. If the operation fails, preserve
+the incomplete destination and diagnostics for inspection, but do not issue or
+claim a backup receipt. Never retry over that path: use a new empty destination.
+
+For restore, migrate a clean Piton database, use an empty destination custody root,
+and supply the externally pinned `trusted_identity`. Restore validates the signed
+manifest identity, canonical metadata, every object digest and byte length, exact
+project identity, and the current schema before one metadata transaction. It fails
+closed if the project already exists and never overlays live project authority.
+After success, run integrity and object readback checks before admitting the local
+instance:
+
+```bash
+uv run --frozen python -c 'from pathlib import Path; from piton.storage import Database; db=Database(Path("RESTORED_ROOT/piton.sqlite3")); print(db.schema_version()); print(db.integrity_check())'
+```
+
+Retention defaults to dry-run and may delete only verified unreferenced CAS
+objects; review `deleted_digests` before applying it. Project deletion is separate:
+an authenticated typed `DeleteProject` command records an idempotent command
+receipt and tombstones product visibility while preserving immutable revisions,
+evidence, and referenced CAS. Backup, restore, retention, and deletion all preserve
+`fabrication_release=false` and `machine_actuation=false`; none grants review,
+approval, export, release, or actuation authority.
 
 ### dependency revocation
 

@@ -6,6 +6,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = ROOT / "docs" / "runtime-operations.md"
+ARCHITECTURE = ROOT / "docs" / "architecture.md"
 CREDENTIAL = ROOT / "docs" / "incidents" / "credential-exposure.md"
 CUSTODY = ROOT / "docs" / "incidents" / "custody-corruption.md"
 
@@ -43,6 +44,30 @@ def test_runtime_health_detail_uses_kernel_derived_local_authority() -> None:
     assert "os.getuid()" in content
     assert 'adapter.handle(server, "/health/detail")' in content
     assert "detail(authorized=True)" not in content
+
+
+def test_backup_restore_operations_and_architecture_match_implemented_custody() -> None:
+    runtime = RUNTIME.read_text(encoding="utf-8")
+    architecture = ARCHITECTURE.read_text(encoding="utf-8")
+
+    assert "Backup/restore is not yet implemented" not in runtime
+    for phrase in (
+        "PitonApplicationService.backup_project",
+        "PitonApplicationService.restore_project",
+        "trusted_identity",
+        "empty destination",
+        "fabrication_release=false",
+        "machine_actuation=false",
+    ):
+        assert phrase in runtime
+    for phrase in (
+        "canonical JSON metadata",
+        "immutable CAS payloads",
+        "authenticated `BackupIdentity`",
+        "tombstone",
+        "unreferenced CAS",
+    ):
+        assert phrase in architecture
 
 
 def test_credential_exposure_runbook_never_requests_secret_rendering() -> None:
