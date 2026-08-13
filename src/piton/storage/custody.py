@@ -48,28 +48,49 @@ class CustodyAuthorityError(PermissionError):
     """A caller attempted to construct a destructive custody boundary."""
 
 
-_CUSTODY_CAPABILITY_PROOF = object()
+def _define_custody_authority():
+    """Create one unforgeable-by-construction application custody capability.
 
+    The capability instance is retained only in closures consumed by the
+    application composition root. No module attribute exposes a constructor
+    proof that an arbitrary in-process caller can replay.
+    """
 
-class CustodyCapability:
-    """Opaque daemon-issued authority to construct project custody operations."""
+    class CustodyCapability:
+        """Opaque daemon-issued authority to construct project custody operations."""
 
-    __slots__ = ("_proof",)
+        __slots__ = ()
 
-    def __new__(cls, proof: object = None) -> "CustodyCapability":
-        if proof is not _CUSTODY_CAPABILITY_PROOF:
+        def __new__(cls):
             raise CustodyAuthorityError("custody capability is server-issued only")
-        instance = super().__new__(cls)
-        instance._proof = proof
-        return instance
+
+    capability = object.__new__(CustodyCapability)
+    factory_taken = False
+
+    def require(capability_candidate: object) -> None:
+        if capability_candidate is not capability:
+            raise CustodyAuthorityError("server-issued custody capability is required")
+
+    def take_factory():
+        """Transfer the sole constructor to the application composition root once."""
+        nonlocal factory_taken
+        if factory_taken:
+            raise CustodyAuthorityError("project custody factory was already consumed")
+        factory_taken = True
+
+        def construct(database: Database, blobs: BlobStore) -> "ProjectCustody":
+            return ProjectCustody(database, blobs, capability=capability)
+
+        globals().pop("_take_project_custody_factory", None)
+        return construct
+
+    return CustodyCapability, require, take_factory
 
 
-def _require_custody_capability(capability: object) -> None:
-    if (
-        type(capability) is not CustodyCapability
-        or getattr(capability, "_proof", None) is not _CUSTODY_CAPABILITY_PROOF
-    ):
-        raise CustodyAuthorityError("server-issued custody capability is required")
+CustodyCapability, _require_custody_capability, _take_project_custody_factory = (
+    _define_custody_authority()
+)
+del _define_custody_authority
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,7 +224,7 @@ class ProjectCustody:
         database: Database,
         blobs: BlobStore,
         *,
-        capability: CustodyCapability | None = None,
+        capability: object = None,
     ) -> None:
         _require_custody_capability(capability)
         if not isinstance(database, Database) or not isinstance(blobs, BlobStore):
@@ -650,18 +671,3 @@ _authorize_backup_caller(ProjectCustody.backup.__code__)
 
 # The consumed bootstrap and signing closure are retained only by ProjectCustody.
 del _BACKUP_IDENTITY_VERIFIER, _sign_completed_backup, _authorize_backup_caller
-
-
-def _take_project_custody_factory():
-    """Transfer the sole constructor to the application composition root once."""
-    module_globals = globals()
-    if module_globals.get("_PROJECT_CUSTODY_FACTORY_TAKEN", False):
-        raise CustodyAuthorityError("project custody factory was already consumed")
-    module_globals["_PROJECT_CUSTODY_FACTORY_TAKEN"] = True
-    capability = CustodyCapability(_CUSTODY_CAPABILITY_PROOF)
-
-    def construct(database: Database, blobs: BlobStore) -> ProjectCustody:
-        return ProjectCustody(database, blobs, capability=capability)
-
-    module_globals.pop("_take_project_custody_factory", None)
-    return construct

@@ -411,6 +411,9 @@ def test_caller_owned_storage_handles_cannot_construct_or_forge_custody_authorit
 
     assert not hasattr(custody_module, "_issue_server_custody_capability")
     assert not hasattr(custody_module, "_take_project_custody_factory")
+    assert not hasattr(custody_module, "_CUSTODY_CAPABILITY_PROOF")
+    with pytest.raises(AttributeError):
+        getattr(custody_module, "_CUSTODY_CAPABILITY_PROOF")
     with pytest.raises(CustodyAuthorityError, match="server-issued custody capability"):
         ProjectCustody(database, blobs)
     with pytest.raises(CustodyAuthorityError, match="server-issued custody capability"):
