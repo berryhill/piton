@@ -203,9 +203,11 @@ class PitonApplicationService:
         self,
         project_id: str,
         destination: str | Path,
+        ctx: PrincipalContext | None = None,
         *,
         created_at: str | None = None,
     ) -> BackupReceipt:
+        self._require_context(ctx)
         return self.__project_custody.backup(
             project_id, destination, created_at=created_at
         )
@@ -213,16 +215,23 @@ class PitonApplicationService:
     def restore_project(
         self,
         source: str | Path,
+        ctx: PrincipalContext | None = None,
         *,
         trusted_identity: BackupIdentity | str,
     ) -> RestoreReceipt:
+        self._require_context(ctx)
         return self.__project_custody.restore(
             source, trusted_identity=trusted_identity
         )
 
     def apply_retention(
-        self, policy: RetentionPolicy, *, dry_run: bool = True
+        self,
+        policy: RetentionPolicy,
+        ctx: PrincipalContext | None = None,
+        *,
+        dry_run: bool = True,
     ) -> RetentionReceipt:
+        self._require_context(ctx)
         return self.__project_custody.apply_retention(policy, dry_run=dry_run)
 
     @staticmethod
@@ -1256,14 +1265,18 @@ class PitonApplicationService:
             )
 
     @staticmethod
-    def _require(command: object, expected_type: type, ctx: PrincipalContext) -> None:
-        if not isinstance(command, expected_type):
-            raise TypeError(f"command must be {expected_type.__name__}")
+    def _require_context(ctx: PrincipalContext | None) -> None:
         if (
             type(ctx) is not PrincipalContext
             or getattr(ctx, "_proof", None) is not _PRINCIPAL_PROOF
         ):
             raise TypeError("trusted PrincipalContext is required")
+
+    @staticmethod
+    def _require(command: object, expected_type: type, ctx: PrincipalContext) -> None:
+        if not isinstance(command, expected_type):
+            raise TypeError(f"command must be {expected_type.__name__}")
+        PitonApplicationService._require_context(ctx)
 
     @staticmethod
     def _draft_receipt(command_id: str, record: DraftRecord) -> DraftReceipt:
