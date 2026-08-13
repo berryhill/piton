@@ -17,14 +17,19 @@ from piton.source_tree import SourceTree, SourceTreeFile
 from piton.storage import BlobStore, Database, RevisionRepository
 from piton.storage.custody import (
     BackupValidationError,
+    CustodyAuthorityError,
+    CustodyCapability,
     ProjectCustody,
     RetentionPolicy,
+    _issue_server_custody_capability,
 )
 from piton.storage.revisions import _issue_server_mutation_capability
 
 
 def _custody(database: Database, blobs: BlobStore) -> ProjectCustody:
-    return ProjectCustody(database, blobs)
+    return ProjectCustody(
+        database, blobs, capability=_issue_server_custody_capability()
+    )
 
 
 def _tree() -> SourceTree:
@@ -218,9 +223,19 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     database, blobs, _revision = _seed(tmp_path / "source")
 
     with pytest.raises(TypeError):
-        ProjectCustody(database, blobs, identity_key=secrets.token_bytes(32))
+        ProjectCustody(
+            database,
+            blobs,
+            capability=_issue_server_custody_capability(),
+            identity_key=secrets.token_bytes(32),
+        )
     with pytest.raises(TypeError):
-        ProjectCustody(database, blobs, identity_authority=object())
+        ProjectCustody(
+            database,
+            blobs,
+            capability=_issue_server_custody_capability(),
+            identity_authority=object(),
+        )
 
     custody = _custody(database, blobs)
     assert not hasattr(custody, "_ProjectCustody__issue_backup_identity")
@@ -398,6 +413,25 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     )
     with pytest.raises(PermissionError, match="custody backup request"):
         invoke_caller_minted_request(forged_request, completed_manifest_path)
+
+
+def test_caller_owned_storage_handles_cannot_construct_or_forge_custody_authority(
+    tmp_path: Path,
+):
+    database, blobs, _revision = _seed(tmp_path / "source")
+
+    with pytest.raises(CustodyAuthorityError, match="server-issued custody capability"):
+        ProjectCustody(database, blobs)
+    with pytest.raises(CustodyAuthorityError, match="server-issued custody capability"):
+        ProjectCustody(database, blobs, capability=object())
+    with pytest.raises(CustodyAuthorityError, match="server-issued custody capability"):
+        ProjectCustody(database, blobs, capability=object.__new__(CustodyCapability))
+    with pytest.raises(CustodyAuthorityError, match="server-issued only"):
+        CustodyCapability()
+
+    custody = _custody(database, blobs)
+    assert not hasattr(custody, "capability")
+    assert not hasattr(custody, "_ProjectCustody__capability")
 
 
 def test_retention_deletion_tombstones_authority_and_only_prunes_unreferenced_objects(tmp_path: Path):

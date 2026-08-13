@@ -44,6 +44,39 @@ class BackupValidationError(RuntimeError):
     """A backup or restore claim cannot be proved exactly."""
 
 
+class CustodyAuthorityError(PermissionError):
+    """A caller attempted to construct a destructive custody boundary."""
+
+
+_CUSTODY_CAPABILITY_PROOF = object()
+
+
+class CustodyCapability:
+    """Opaque daemon-issued authority to construct project custody operations."""
+
+    __slots__ = ("_proof",)
+
+    def __new__(cls, proof: object = None) -> "CustodyCapability":
+        if proof is not _CUSTODY_CAPABILITY_PROOF:
+            raise CustodyAuthorityError("custody capability is server-issued only")
+        instance = super().__new__(cls)
+        instance._proof = proof
+        return instance
+
+
+def _issue_server_custody_capability() -> CustodyCapability:
+    """Issue custody authority only at a trusted daemon/operator composition root."""
+    return CustodyCapability(_CUSTODY_CAPABILITY_PROOF)
+
+
+def _require_custody_capability(capability: object) -> None:
+    if (
+        type(capability) is not CustodyCapability
+        or getattr(capability, "_proof", None) is not _CUSTODY_CAPABILITY_PROOF
+    ):
+        raise CustodyAuthorityError("server-issued custody capability is required")
+
+
 @dataclass(frozen=True, slots=True)
 class BackupIdentity:
     """Durable authenticated identity for one exact backup manifest."""
@@ -170,7 +203,14 @@ class ProjectCustody:
     __backup_identity_verifier = _BACKUP_IDENTITY_VERIFIER
     __backup_identity_channel = staticmethod(_sign_completed_backup)
 
-    def __init__(self, database: Database, blobs: BlobStore) -> None:
+    def __init__(
+        self,
+        database: Database,
+        blobs: BlobStore,
+        *,
+        capability: CustodyCapability | None = None,
+    ) -> None:
+        _require_custody_capability(capability)
         if not isinstance(database, Database) or not isinstance(blobs, BlobStore):
             raise TypeError("database and blobs must be Piton custody objects")
         self.database = database
