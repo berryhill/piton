@@ -383,6 +383,22 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
             raw_request, invoke_caller_minted_request.__code__
         )
 
+    # Skipping __init__ and populating the implementation slots directly must
+    # not let a forged guard reuse the extracted endpoint. The endpoint is
+    # bound to the exact guard instance created by the custody bootstrap, not
+    # merely to code shared by every instance of the implementation class.
+    forged_request = object.__new__(identity_process._CustodyBackupIdentityRequest)
+    object.__setattr__(
+        forged_request,
+        "_CustodyBackupIdentityRequest__authorized_channel_code",
+        invoke_caller_minted_request.__code__,
+    )
+    object.__setattr__(
+        forged_request, "_CustodyBackupIdentityRequest__request", raw_request
+    )
+    with pytest.raises(PermissionError, match="custody backup request"):
+        invoke_caller_minted_request(forged_request, completed_manifest_path)
+
 
 def test_retention_deletion_tombstones_authority_and_only_prunes_unreferenced_objects(tmp_path: Path):
     database, blobs, revision = _seed(tmp_path / "source")

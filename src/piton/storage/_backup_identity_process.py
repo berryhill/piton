@@ -290,11 +290,16 @@ def _take_backup_identity_authority() -> tuple[
     child_connection.close()
     verifier = Ed25519PublicKey.from_public_bytes(parent_connection.recv_bytes())
     channel_lock = threading.Lock()
+    authorized_request: _CustodyBackupIdentityRequest | None = None
 
     def request(manifest_path: Path, project_id: str) -> tuple[str, str]:
         frame = inspect.currentframe()
         caller = None if frame is None else frame.f_back
-        if caller is None or caller.f_code is not _CustodyBackupIdentityRequest.__call__.__code__:
+        if (
+            caller is None
+            or caller.f_code is not _CustodyBackupIdentityRequest.__call__.__code__
+            or caller.f_locals.get("self") is not authorized_request
+        ):
             raise PermissionError("backup identity helper is restricted to the custody backup request")
         with channel_lock:
             if not process.is_alive():
@@ -306,6 +311,9 @@ def _take_backup_identity_authority() -> tuple[
         return manifest_digest, signature
 
     channel = _CustodyBackupIdentityChannel(request)
+    authorized_request = object.__getattribute__(
+        channel, "_CustodyBackupIdentityChannel__request"
+    )
 
     def shutdown() -> None:
         if process.is_alive():
