@@ -9,7 +9,7 @@ description = "Local-first, source-native mechanical CAD with governed revisions
 requires-python = "==3.12.11"
 license = "LicenseRef-Proprietary"
 authors = [{name = "Nick Mercer"}]
-dependencies = ["jsonschema==4.26.0"]
+dependencies = ["cryptography==46.0.7", "jsonschema==4.26.0"]
 
 [project.optional-dependencies]
 verification = ["pytest==8.4.2"]

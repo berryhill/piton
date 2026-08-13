@@ -30,6 +30,7 @@ def test_repository_passes_first_party_supply_chain_gate():
         "build==1.3.0",
         "build123d==0.11.1",
         "cadquery-ocp-novtk==7.9.3.1",
+        "cryptography==46.0.7",
         "jsonschema==4.26.0",
         "pytest==8.4.2",
         "setuptools==80.9.0",
@@ -74,8 +75,9 @@ def test_gate_rejects_unpinned_direct_dependency(tmp_path: Path):
     project = root / "pyproject.toml"
     project.write_text(
         project.read_text(encoding="utf-8").replace(
-            'dependencies = ["jsonschema==4.26.0"]',
-            'dependencies = ["jsonschema>=4.26.0"]',
+            '"jsonschema==4.26.0"',
+            '"jsonschema>=4.26.0"',
+            1,
         ),
         encoding="utf-8",
     )

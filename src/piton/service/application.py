@@ -39,6 +39,17 @@ from ..source_tree import SourceTree, SourceTreeFile
 from ..storage.blobs import BlobStore
 from ..storage.build_attempts import BuildAttemptCoordinator, CoordinatorState, DurableBuildAttempt
 from ..storage.db import Database
+from ..storage.custody import (
+    BackupIdentity,
+    BackupReceipt,
+    DeletionReceipt,
+    ProjectStateConflictError,
+    RestoreReceipt,
+    RetentionPolicy,
+    RetentionReceipt,
+    _authorize_project_custody_factory,
+    _take_project_custody_factory,
+)
 from ..storage.revisions import (
     ChannelConflictError,
     RevisionRepository,
@@ -48,6 +59,7 @@ from .commands import (
     BeginDraft,
     CommitDraft,
     CreateProject,
+    DeleteProject,
     DiscardDraft,
     ImportSourceBase,
     RestoreForward,
@@ -62,6 +74,8 @@ if TYPE_CHECKING:
 _PRINCIPAL_PROOF = object()
 ExactInputs = Callable[[str, str, str], "RealizationInputs"]
 Clock = Callable[[], datetime]
+_construct_project_custody = _take_project_custody_factory()
+del _take_project_custody_factory
 
 
 class PrincipalAuthorityError(PermissionError):
@@ -153,6 +167,7 @@ class PitonApplicationService:
         self.__blobs = blobs
         self.__drafts = drafts
         self.__repository = RevisionRepository(database, blobs)
+        self.__project_custody = _construct_project_custody(database, blobs)
         self.__mutation_capability = _issue_server_mutation_capability()
         self.__build_attempt_coordinator = BuildAttemptCoordinator(database)
         self.__precision_inputs = precision_inputs
@@ -184,6 +199,41 @@ class PitonApplicationService:
             precision_inputs=precision_inputs,
             precision_clock=precision_clock,
         )
+
+    def backup_project(
+        self,
+        project_id: str,
+        destination: str | Path,
+        ctx: PrincipalContext | None = None,
+        *,
+        created_at: str | None = None,
+    ) -> BackupReceipt:
+        self._require_context(ctx)
+        return self.__project_custody.backup(
+            project_id, destination, created_at=created_at
+        )
+
+    def restore_project(
+        self,
+        source: str | Path,
+        ctx: PrincipalContext | None = None,
+        *,
+        trusted_identity: BackupIdentity | str,
+    ) -> RestoreReceipt:
+        self._require_context(ctx)
+        return self.__project_custody.restore(
+            source, trusted_identity=trusted_identity
+        )
+
+    def apply_retention(
+        self,
+        policy: RetentionPolicy,
+        ctx: PrincipalContext | None = None,
+        *,
+        dry_run: bool = True,
+    ) -> RetentionReceipt:
+        self._require_context(ctx)
+        return self.__project_custody.apply_retention(policy, dry_run=dry_run)
 
     @staticmethod
     def _lease_expiry(value: str) -> datetime:
@@ -770,10 +820,11 @@ class PitonApplicationService:
 
     def execute(
         self, command: object, ctx: PrincipalContext
-    ) -> CommandReceipt | DraftReceipt:
+    ) -> CommandReceipt | DraftReceipt | DeletionReceipt:
         """Admit every adapter through one typed, idempotent command path."""
         routes = {
             CreateProject: ("create_project", self._create_project),
+            DeleteProject: ("delete_project", self._delete_project),
             ImportSourceBase: ("import_source_base", self._import_source_base),
             BeginDraft: ("begin_draft", self._begin_draft),
             UpdateDraft: ("update_draft", self._update_draft),
@@ -793,6 +844,27 @@ class PitonApplicationService:
         receipt = handler(command, ctx)
         self._store_receipt(command, ctx, operation, request_digest, receipt)
         return receipt
+
+    def delete_project(
+        self, cmd: DeleteProject, ctx: PrincipalContext
+    ) -> DeletionReceipt:
+        receipt = self.execute(cmd, ctx)
+        if not isinstance(receipt, DeletionReceipt):
+            raise TypeError("delete_project returned a non-deletion receipt")
+        return receipt
+
+    def _delete_project(
+        self, cmd: DeleteProject, ctx: PrincipalContext
+    ) -> DeletionReceipt:
+        self._require(cmd, DeleteProject, ctx)
+        try:
+            return self.__project_custody.delete_project(
+                cmd.project_id,
+                reason=cmd.reason,
+                expected_state=cmd.expected_state,
+            )
+        except ProjectStateConflictError as error:
+            raise StaleBaseConflictError(str(error)) from error
 
     def create_project(self, cmd: CreateProject, ctx: PrincipalContext) -> CommandReceipt:
         receipt = self.execute(cmd, ctx)
@@ -1104,7 +1176,7 @@ class PitonApplicationService:
         ctx: PrincipalContext,
         operation: str,
         request_digest: str,
-    ) -> CommandReceipt | DraftReceipt | None:
+    ) -> CommandReceipt | DraftReceipt | DeletionReceipt | None:
         command_id = getattr(command, "command_id")
         project_id = getattr(command, "project_id")
         with self.__database.read() as connection:
@@ -1133,9 +1205,11 @@ class PitonApplicationService:
         payload = json.loads(row[4])
         receipt_type = payload.pop("receipt_type", None)
         if receipt_type == "CommandReceipt":
-            receipt: CommandReceipt | DraftReceipt = CommandReceipt(**payload)
+            receipt: CommandReceipt | DraftReceipt | DeletionReceipt = CommandReceipt(**payload)
         elif receipt_type == "DraftReceipt":
             receipt = DraftReceipt(**payload)
+        elif receipt_type == "DeletionReceipt":
+            receipt = DeletionReceipt(**payload)
         else:
             raise RuntimeError("stored command receipt has an unsupported type")
         return receipt
@@ -1146,7 +1220,7 @@ class PitonApplicationService:
         ctx: PrincipalContext,
         operation: str,
         request_digest: str,
-        receipt: CommandReceipt | DraftReceipt,
+        receipt: CommandReceipt | DraftReceipt | DeletionReceipt,
     ) -> None:
         command_id = getattr(command, "command_id")
         project_id = getattr(command, "project_id")
@@ -1191,14 +1265,18 @@ class PitonApplicationService:
             )
 
     @staticmethod
-    def _require(command: object, expected_type: type, ctx: PrincipalContext) -> None:
-        if not isinstance(command, expected_type):
-            raise TypeError(f"command must be {expected_type.__name__}")
+    def _require_context(ctx: PrincipalContext | None) -> None:
         if (
             type(ctx) is not PrincipalContext
             or getattr(ctx, "_proof", None) is not _PRINCIPAL_PROOF
         ):
             raise TypeError("trusted PrincipalContext is required")
+
+    @staticmethod
+    def _require(command: object, expected_type: type, ctx: PrincipalContext) -> None:
+        if not isinstance(command, expected_type):
+            raise TypeError(f"command must be {expected_type.__name__}")
+        PitonApplicationService._require_context(ctx)
 
     @staticmethod
     def _draft_receipt(command_id: str, record: DraftRecord) -> DraftReceipt:
@@ -1227,3 +1305,7 @@ class PitonApplicationService:
     @staticmethod
     def _now() -> str:
         return datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+_authorize_project_custody_factory(PitonApplicationService.__init__.__code__)
+del _authorize_project_custody_factory

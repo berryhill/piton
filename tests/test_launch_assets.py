@@ -627,3 +627,28 @@ def test_browser_qualification_contract_is_in_repository_and_installed_proof_sur
     ):
         assert required_claim in architecture
         assert required_claim in instructions
+
+
+def test_project_custody_contract_is_in_repository_and_installed_proof_surfaces() -> None:
+    repository_verifier = (ROOT / "scripts" / "verify_repo.py").read_text(encoding="utf-8")
+    for required_path in (
+        'ROOT / "src/piton/storage/custody.py"',
+        'ROOT / "src/piton/storage/_backup_identity_process.py"',
+        'ROOT / "src/piton/storage/migrations/0010_destructive_custody_admission.sql"',
+        'ROOT / "tests/integration/test_backup_restore_retention_deletion.py"',
+    ):
+        assert required_path in repository_verifier
+
+    install_verifier = (ROOT / "scripts" / "install_verify.py").read_text(encoding="utf-8")
+    for installed_proof in (
+        "BackupIdentity",
+        "BackupReceipt",
+        "RestoreReceipt",
+        "RetentionPolicy",
+        "RetentionReceipt",
+        "DeletionReceipt",
+        '"project_custody_api"',
+        '"command_receipts"',
+        '"delete_project"',
+    ):
+        assert installed_proof in install_verifier

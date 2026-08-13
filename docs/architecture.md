@@ -313,6 +313,26 @@ adjacent mutable sidecars are not portable authority. Full golden path
 disconnected. No-clobber atomic CAS promotion, one `BEGIN IMMEDIATE`
 closure transaction, restartable idempotent outbox.
 
+Portable project backup consists of deterministic canonical JSON metadata and
+immutable CAS payloads. Its manifest binds schema/version, creation metadata,
+project identity, the exact metadata/object inventory, media types, byte lengths,
+digests, safety state, and explicit claim-scope exclusions. Raw SQLite database,
+WAL, SHM, cache, staging, quarantine, viewer state, and mutable sidecars are
+excluded. A completed backup returns an authenticated `BackupIdentity` issued by
+the custody signing process; restore requires that identity to be pinned outside
+the backup directory and rejects caller-recomputed checksums or forged identities.
+
+Restore validates the complete closure before publication, refuses to replace an
+existing project, promotes exact payloads by no-clobber CAS identity, and inserts
+portable metadata in one transaction against the current schema. Failed metadata
+publication can leave only harmless unreferenced CAS bytes. Retention is a separate
+authenticated operation: dry-run is the default, and application may prune only
+verified unreferenced CAS objects absent from metadata authority. Project deletion
+is admitted through an authenticated typed, idempotent command and records a
+tombstone; it does not erase immutable revision/evidence history or referenced CAS.
+None of these custody operations changes authored revisions, human-review state,
+fabrication release, export authority, or machine-actuation authority.
+
 ## Capability packages
 
 Four isolation tiers: schema (inert), UI (separate origin/process),

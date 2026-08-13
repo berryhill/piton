@@ -125,3 +125,15 @@ class RestoreForward:
         ):
             _required(name, getattr(self, name))
         _generation(self.expected_generation)
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteProject:
+    command_id: str
+    project_id: str
+    reason: str
+    expected_state: str
+
+    def __post_init__(self) -> None:
+        for name in ("command_id", "project_id", "reason", "expected_state"):
+            _required(name, getattr(self, name))
