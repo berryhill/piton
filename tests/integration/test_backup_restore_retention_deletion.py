@@ -308,9 +308,9 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     with pytest.raises(PermissionError, match="custody backup operation"):
         forged(channel, arbitrary)
 
-    # Compromise of the in-process wrapper must not expose the raw helper IPC
-    # endpoint through the callable closure. The former closure leak bypassed
-    # the exact-code caller check and made the helper a generic signing oracle.
+    # The channel instance must not own the raw helper endpoint. In particular,
+    # bypassing its attribute policy with object.__getattribute__ must still fail;
+    # otherwise a caller can submit a rewritten completed manifest directly.
     connections = [
         cell.cell_contents
         for cell in (getattr(channel, "__closure__", None) or ())
@@ -319,6 +319,8 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     assert connections == []
     with pytest.raises(AttributeError):
         getattr(channel, "_CustodyBackupIdentityChannel__connection")
+    with pytest.raises(AttributeError):
+        object.__getattribute__(channel, "_CustodyBackupIdentityChannel__connection")
 
     receipt = custody.backup(
         "project_one", tmp_path / "backup", created_at="2026-08-12T12:00:00Z"
