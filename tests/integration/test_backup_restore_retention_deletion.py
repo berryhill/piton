@@ -372,6 +372,17 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
     with pytest.raises(PermissionError, match="custody backup request"):
         raw_request(completed_manifest_path, "project_one")
 
+    # Guard classes are implementation details, not caller-mintable authority.
+    # Rewrapping the extracted endpoint with caller-selected code must not turn
+    # that code into an authorized backup request path.
+    def invoke_caller_minted_request(attack_request, attack_path):
+        return attack_request(attack_path, "project_one")
+
+    with pytest.raises(PermissionError, match="custody backup channel bootstrap"):
+        identity_process._CustodyBackupIdentityRequest(
+            raw_request, invoke_caller_minted_request.__code__
+        )
+
 
 def test_retention_deletion_tombstones_authority_and_only_prunes_unreferenced_objects(tmp_path: Path):
     database, blobs, revision = _seed(tmp_path / "source")

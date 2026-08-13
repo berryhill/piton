@@ -59,6 +59,15 @@ class _CustodyBackupIdentityRequest:
         request: Callable[[Path, str], tuple[str, str]],
         authorized_channel_code: object,
     ) -> None:
+        frame = inspect.currentframe()
+        caller = None if frame is None else frame.f_back
+        if (
+            caller is None
+            or caller.f_code is not _CustodyBackupIdentityChannel.__init__.__code__
+        ):
+            raise PermissionError(
+                "backup request construction is restricted to custody backup channel bootstrap"
+            )
         self.__authorized_channel_code = authorized_channel_code
         self.__request = request
 
