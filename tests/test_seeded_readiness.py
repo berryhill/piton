@@ -2,13 +2,19 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from importlib.resources import files
 import json
 
 import pytest
+from jsonschema import Draft202012Validator, ValidationError
 
+from piton import ReadinessPacketClosure as PublicReadinessPacketClosure
+from piton import close_readiness_packet as public_close_readiness_packet
 from piton.seeded_readiness import (
     CRITICAL_COUNTER_NAMES,
     ReadinessCampaign,
+    ReadinessPacketClosure,
+    close_readiness_packet,
     generate_schedule,
     run_readiness_campaign,
     verify_readiness_campaign,
@@ -96,3 +102,73 @@ def test_verifier_fails_closed_on_incomplete_duplicate_or_forged_evidence() -> N
     assert any("root truth" in reason for reason in verify_readiness_campaign(unsafe))
     with pytest.raises(ValueError, match="closed schema"):
         ReadinessCampaign.from_primitive({**json.loads(result.canonical_bytes), "approval": True})
+
+
+def test_readiness_packet_closes_one_exact_verified_campaign_without_accepting_g2() -> None:
+    result = campaign()
+
+    packet = close_readiness_packet(
+        candidate_commit=CANDIDATE,
+        readiness_campaign_digest=result.digest,
+        campaign=result,
+    )
+
+    assert packet.candidate_commit == CANDIDATE
+    assert packet.readiness_campaign_digest == result.digest
+    assert packet.run_count == 1000
+    assert dict(packet.counters) == {name: 0 for name in CRITICAL_COUNTER_NAMES}
+    assert packet.claim_scope == "readiness-evidence-only"
+    assert packet.review_state == "needs_human_review"
+    assert packet.g2_accepted is False
+    assert packet.fabrication_release is False
+    assert packet.machine_actuation is False
+    primitive = json.loads(packet.canonical_bytes)
+    assert ReadinessPacketClosure.from_primitive(primitive) == packet
+    schema = json.loads(
+        files("piton")
+        .joinpath("schemas", "readiness-packet-closure-v1.schema.json")
+        .read_text(encoding="utf-8")
+    )
+    validator = Draft202012Validator(schema)
+    validator.validate(primitive)
+    with pytest.raises(ValidationError):
+        validator.validate({**primitive, "g2_accepted": True})
+
+
+def test_readiness_packet_api_is_available_from_the_installed_package_surface() -> None:
+    assert PublicReadinessPacketClosure is ReadinessPacketClosure
+    assert public_close_readiness_packet is close_readiness_packet
+
+
+def test_readiness_packet_rejects_mismatched_or_unverified_campaigns() -> None:
+    result = campaign()
+    failed_outcome = replace(result.outcomes[0], status="fail", diagnostics=("forged",))
+    failed_campaign = replace(result, outcomes=(failed_outcome, *result.outcomes[1:]))
+
+    with pytest.raises(ValueError, match="exact candidate"):
+        close_readiness_packet(
+            candidate_commit="8" * 40,
+            readiness_campaign_digest=result.digest,
+            campaign=result,
+        )
+    with pytest.raises(ValueError, match="exact digest"):
+        close_readiness_packet(
+            candidate_commit=CANDIDATE,
+            readiness_campaign_digest="sha256:" + "9" * 64,
+            campaign=result,
+        )
+    with pytest.raises(ValueError, match="failed verification"):
+        close_readiness_packet(
+            candidate_commit=CANDIDATE,
+            readiness_campaign_digest=failed_campaign.digest,
+            campaign=failed_campaign,
+        )
+    with pytest.raises(ValueError, match="root truth"):
+        replace(
+            close_readiness_packet(
+                candidate_commit=CANDIDATE,
+                readiness_campaign_digest=result.digest,
+                campaign=result,
+            ),
+            g2_accepted=True,
+        )

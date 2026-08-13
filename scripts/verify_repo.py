@@ -33,6 +33,12 @@ from piton.model import DraftExport
 from piton.precision_worker import EXPECTED_OUTPUTS, PRECISION_WORKER_PIN
 from piton.project_format import load_project_directory
 from piton.revision import DesignRevision
+from piton.seeded_readiness import (
+    CRITICAL_COUNTER_NAMES,
+    ReadinessPacketClosure,
+    close_readiness_packet,
+    run_readiness_campaign,
+)
 from piton.supply_chain import verify_first_party_supply_chain
 
 REQUIRED = [
@@ -93,6 +99,7 @@ REQUIRED = [
     ROOT / "schemas/semantic-selection-map-v1.schema.json",
     ROOT / "schemas/human-review-intake-v1.schema.json",
     ROOT / "schemas/framework-packet-closure-v1.schema.json",
+    ROOT / "schemas/readiness-packet-closure-v1.schema.json",
     ROOT / "schemas/governed-alpha-evidence-v1.schema.json",
     ROOT / "schemas/p4-assurance-policy-v1.schema.json",
     ROOT / "schemas/p4-assurance-evidence-v1.schema.json",
@@ -108,6 +115,7 @@ REQUIRED = [
     ROOT / "src/piton/schemas/semantic-selection-map-v1.schema.json",
     ROOT / "src/piton/schemas/human-review-intake-v1.schema.json",
     ROOT / "src/piton/schemas/framework-packet-closure-v1.schema.json",
+    ROOT / "src/piton/schemas/readiness-packet-closure-v1.schema.json",
     ROOT / "src/piton/schemas/draft-export-receipt-v1.schema.json",
     ROOT / "scripts/review_export.py",
     ROOT / "scripts/restore_forward.py",
@@ -153,6 +161,7 @@ for schema_name in (
     "semantic-selection-map-v1.schema.json",
     "human-review-intake-v1.schema.json",
     "framework-packet-closure-v1.schema.json",
+    "readiness-packet-closure-v1.schema.json",
     "governed-alpha-evidence-v1.schema.json",
     "p4-assurance-policy-v1.schema.json",
     "p4-assurance-evidence-v1.schema.json",
@@ -341,6 +350,9 @@ for required_instruction in (
     "policy_digest",
     "evaluated_requirement_ids",
     "Stop review",
+    "Close readiness evidence with G2 unaccepted",
+    "close_readiness_packet",
+    "g2_accepted is False",
 ):
     if required_instruction not in review_instructions:
         raise SystemExit("human review instructions omit evidence-closure custody")
@@ -364,6 +376,9 @@ load_validator("semantic-selection-map-v1.schema.json")
 human_review_intake_validator = load_validator("human-review-intake-v1.schema.json")
 framework_packet_closure_validator = load_validator(
     "framework-packet-closure-v1.schema.json"
+)
+readiness_packet_closure_validator = load_validator(
+    "readiness-packet-closure-v1.schema.json"
 )
 governed_alpha_validator = load_validator("governed-alpha-evidence-v1.schema.json")
 p4_policy_validator = load_validator("p4-assurance-policy-v1.schema.json")
@@ -444,6 +459,40 @@ framework_packet_closure = FrameworkPacketClosure(
     review_selection_map_digest=digest,
 )
 framework_packet_closure_validator.validate(framework_packet_closure.to_primitive())
+readiness_campaign = run_readiness_campaign(
+    candidate_commit="0" * 40,
+    policy_digest=digest,
+    method_digest=digest,
+    comparator_digest=digest,
+    implementation_digest=digest,
+    environment_digest=digest,
+    toolchain_digest=digest,
+)
+readiness_packet_closure = close_readiness_packet(
+    candidate_commit=readiness_campaign.candidate_commit,
+    readiness_campaign_digest=readiness_campaign.digest,
+    campaign=readiness_campaign,
+)
+readiness_payload = readiness_packet_closure.to_primitive()
+readiness_packet_closure_validator.validate(readiness_payload)
+if ReadinessPacketClosure.from_primitive(readiness_payload) != readiness_packet_closure:
+    raise SystemExit("readiness packet closure canonical round trip drifted")
+if (
+    readiness_packet_closure.g2_accepted is not False
+    or readiness_packet_closure.review_state != "needs_human_review"
+    or readiness_packet_closure.fabrication_release is not False
+    or readiness_packet_closure.machine_actuation is not False
+    or dict(readiness_packet_closure.counters)
+    != {name: 0 for name in CRITICAL_COUNTER_NAMES}
+):
+    raise SystemExit("readiness packet closure violated G2-unaccepted safety truth")
+for field in ("g2_accepted", "fabrication_release", "machine_actuation"):
+    try:
+        readiness_packet_closure_validator.validate({**readiness_payload, field: True})
+    except ValidationError:
+        pass
+    else:
+        raise SystemExit(f"readiness packet closure schema accepted unsafe {field}")
 revision = DesignRevision(
     parent_revision_id=None,
     source_manifest_digest=digest,

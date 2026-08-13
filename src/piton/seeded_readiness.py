@@ -330,6 +330,104 @@ def verify_readiness_campaign(campaign: ReadinessCampaign) -> tuple[str, ...]:
     return tuple(reasons)
 
 
+@dataclass(frozen=True, slots=True)
+class ReadinessPacketClosure:
+    """Powerless closure of one exact verified campaign; G2 remains unaccepted."""
+
+    candidate_commit: str
+    readiness_campaign_digest: str
+    run_count: int
+    counters: Mapping[str, int]
+    claim_scope: Literal["readiness-evidence-only"] = "readiness-evidence-only"
+    review_state: Literal["needs_human_review"] = "needs_human_review"
+    g2_accepted: Literal[False] = False
+    fabrication_release: Literal[False] = False
+    machine_actuation: Literal[False] = False
+
+    schema: ClassVar[str] = "piton.readiness-packet-closure.v1"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.candidate_commit, str) or _COMMIT.fullmatch(self.candidate_commit) is None:
+            raise ValueError("candidate_commit must be an exact 40-hex commit")
+        _require_digest("readiness_campaign_digest", self.readiness_campaign_digest)
+        if type(self.run_count) is not int or self.run_count != _RUN_COUNT:
+            raise ValueError("readiness packet must close exactly 1000 runs")
+        supplied_counters = dict(self.counters)
+        if set(supplied_counters) != set(CRITICAL_COUNTER_NAMES) or any(
+            type(value) is not int or value != 0 for value in supplied_counters.values()
+        ):
+            raise ValueError("readiness packet counters must be the closed zero counter set")
+        object.__setattr__(
+            self,
+            "counters",
+            MappingProxyType({name: supplied_counters[name] for name in CRITICAL_COUNTER_NAMES}),
+        )
+        if (
+            self.claim_scope != "readiness-evidence-only"
+            or self.review_state != "needs_human_review"
+            or self.g2_accepted is not False
+            or self.fabrication_release is not False
+            or self.machine_actuation is not False
+        ):
+            raise ValueError("readiness packet violates the root truth boundary")
+
+    def to_primitive(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "candidate_commit": self.candidate_commit,
+            "readiness_campaign_digest": self.readiness_campaign_digest,
+            "run_count": self.run_count,
+            "counters": dict(self.counters),
+            "claim_scope": self.claim_scope,
+            "review_state": self.review_state,
+            "g2_accepted": self.g2_accepted,
+            "fabrication_release": self.fabrication_release,
+            "machine_actuation": self.machine_actuation,
+        }
+
+    @property
+    def canonical_bytes(self) -> bytes:
+        return _canonical_bytes(self.to_primitive())
+
+    @property
+    def digest(self) -> str:
+        return _digest(self.to_primitive())
+
+    @classmethod
+    def from_primitive(cls, value: Mapping[str, Any]) -> "ReadinessPacketClosure":
+        expected = set(cls.__dataclass_fields__) - {"schema"}
+        expected.add("schema")
+        if not isinstance(value, Mapping) or set(value) != expected:
+            raise ValueError("readiness packet fields do not match the closed schema")
+        if value["schema"] != cls.schema:
+            raise ValueError("unsupported readiness packet schema")
+        return cls(**{name: value[name] for name in cls.__dataclass_fields__ if name != "schema"})
+
+
+def close_readiness_packet(
+    *,
+    candidate_commit: str,
+    readiness_campaign_digest: str,
+    campaign: ReadinessCampaign,
+) -> ReadinessPacketClosure:
+    """Close explicitly supplied readiness evidence without accepting or advancing G2."""
+    if not isinstance(campaign, ReadinessCampaign):
+        raise TypeError("campaign must be a ReadinessCampaign")
+    if candidate_commit != campaign.candidate_commit:
+        raise ValueError("readiness packet candidate is not the exact candidate campaign binding")
+    if readiness_campaign_digest != campaign.digest:
+        raise ValueError("readiness packet campaign is not the exact digest binding")
+    reasons = verify_readiness_campaign(campaign)
+    if reasons:
+        raise ValueError("readiness campaign failed verification: " + "; ".join(reasons))
+    return ReadinessPacketClosure(
+        candidate_commit=candidate_commit,
+        readiness_campaign_digest=readiness_campaign_digest,
+        run_count=campaign.run_count,
+        counters=campaign.counters,
+    )
+
+
 def run_readiness_campaign(
     *,
     candidate_commit: str,

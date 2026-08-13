@@ -24,7 +24,9 @@ from piton import (
     P4AssurancePolicy,
     P4AssuranceReceipt,
     Phase,
+    ReadinessPacketClosure,
     SafetyState,
+    close_readiness_packet,
     emit_unavailable_p4_receipts,
     issue_phase_exit_receipt,
 
@@ -38,6 +40,7 @@ from piton.launch_verification import (
     validate_launch_worker_contract,
 )
 from piton.model import TruthBoundary
+from piton.seeded_readiness import CRITICAL_COUNTER_NAMES, run_readiness_campaign
 from piton.project_format import PitonProject, ProjectAuthority, ProjectSafety, SourceFile
 from piton.review_packet import ReviewPacket, build_review_packet, validate_review_packet
 from piton.browser_qualification import (
@@ -100,6 +103,7 @@ for schema_name in (
     "semantic-selection-map-v1.schema.json",
     "human-review-intake-v1.schema.json",
     "framework-packet-closure-v1.schema.json",
+    "readiness-packet-closure-v1.schema.json",
     "governed-alpha-evidence-v1.schema.json",
     "p4-assurance-policy-v1.schema.json",
     "p4-assurance-evidence-v1.schema.json",
@@ -269,6 +273,38 @@ Draft202012Validator(framework_closure_schema).validate(
 )
 if not framework_packet_closure.closure_digest.startswith("sha256:"):
     raise SystemExit("installed framework closure digest is unavailable")
+readiness_campaign = run_readiness_campaign(
+    candidate_commit="0" * 40,
+    policy_digest=digest,
+    method_digest=digest,
+    comparator_digest=digest,
+    implementation_digest=digest,
+    environment_digest=digest,
+    toolchain_digest=digest,
+)
+readiness_packet_closure = close_readiness_packet(
+    candidate_commit=readiness_campaign.candidate_commit,
+    readiness_campaign_digest=readiness_campaign.digest,
+    campaign=readiness_campaign,
+)
+readiness_schema = json.loads(
+    package_root.joinpath(
+        "schemas", "readiness-packet-closure-v1.schema.json"
+    ).read_text(encoding="utf-8")
+)
+readiness_payload = readiness_packet_closure.to_primitive()
+Draft202012Validator(readiness_schema).validate(readiness_payload)
+if ReadinessPacketClosure.from_primitive(readiness_payload) != readiness_packet_closure:
+    raise SystemExit("installed readiness packet closure canonical round trip drifted")
+if (
+    readiness_packet_closure.g2_accepted is not False
+    or readiness_packet_closure.review_state != "needs_human_review"
+    or readiness_packet_closure.fabrication_release is not False
+    or readiness_packet_closure.machine_actuation is not False
+    or dict(readiness_packet_closure.counters)
+    != {name: 0 for name in CRITICAL_COUNTER_NAMES}
+):
+    raise SystemExit("installed readiness packet closure violated G2-unaccepted safety truth")
 authority_artifact = EvidenceArtifact.from_content(
     artifact_id="install-authority-evidence",
     repository_path="evidence/install-authority.json",
@@ -489,6 +525,8 @@ print(
             "framework_packet_closure_api": framework_packet_closure.to_primitive()[
                 "schema"
             ],
+            "readiness_packet_closure_api": readiness_payload["schema"],
+            "g2_accepted": readiness_packet_closure.g2_accepted,
             "governed_alpha_evidence_api": governed_alpha.to_primitive()["schema"],
             "p4_assurance_policy_id": p4_policy.policy_id,
             "p4_assurance_policy_digest": p4_policy.digest,

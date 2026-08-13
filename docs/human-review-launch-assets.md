@@ -471,6 +471,38 @@ binding; or any value other than `needs_human_review`/`false`/`false` for the
 three root truths. Do not select a fallback policy, use a prior policy digest,
 or continue pending later reconciliation.
 
+### Close readiness evidence with G2 unaccepted
+
+Use only one explicitly supplied `ReadinessCampaign` and its canonical digest;
+do not resolve a campaign or candidate through `latest`, a filename, a channel,
+a nearest identity, or inference:
+
+```python
+from piton import close_readiness_packet
+
+readiness_closure = close_readiness_packet(
+    candidate_commit=campaign.candidate_commit,
+    readiness_campaign_digest=campaign.digest,
+    campaign=campaign,
+)
+assert readiness_closure.run_count == 1000
+assert not any(readiness_closure.counters.values())
+assert readiness_closure.review_state == "needs_human_review"
+assert readiness_closure.g2_accepted is False
+assert readiness_closure.fabrication_release is False
+assert readiness_closure.machine_actuation is False
+```
+
+The closure API independently calls `verify_readiness_campaign` and fails closed
+unless all 1,000 ordered seeds, outcomes, distinct schedule identities, aggregate
+zero counters, exact input bindings, and readiness-only truths are consistent.
+Validate the canonical primitive against packaged
+`piton.readiness-packet-closure.v1`. This is evidence closure only. It does not
+accept G2, complete Stage 1, mutate source or revision authority, grant review or
+engineering approval, export, release, promote a channel, or actuate a machine.
+Stop review on any candidate/digest mismatch, incomplete or forged campaign,
+unknown field, non-canonical safety value, or attempted G2 acceptance.
+
 ## Restore-forward request (no rollback mutation)
 
 1. Preserve the accepted project and history byte-for-byte. Prepare the desired prior design as a new canonical candidate directory with truthful source digests.
