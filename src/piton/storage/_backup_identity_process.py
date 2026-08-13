@@ -283,6 +283,10 @@ def _take_backup_identity_authority() -> tuple[
     channel_lock = threading.Lock()
 
     def request(manifest_path: Path, project_id: str) -> tuple[str, str]:
+        frame = inspect.currentframe()
+        caller = None if frame is None else frame.f_back
+        if caller is None or caller.f_code is not _CustodyBackupIdentityRequest.__call__.__code__:
+            raise PermissionError("backup identity helper is restricted to the custody backup request")
         with channel_lock:
             if not process.is_alive():
                 raise RuntimeError("backup identity helper is unavailable")

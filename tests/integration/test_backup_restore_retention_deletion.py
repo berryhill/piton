@@ -366,6 +366,11 @@ def test_backup_signing_authority_cannot_be_supplied_or_invoked_by_a_caller(tmp_
         channel(completed_manifest_path, "project_one")
     with pytest.raises(PermissionError, match="custody backup channel"):
         guarded_request(completed_manifest_path, "project_one")
+    raw_request = object.__getattribute__(
+        guarded_request, "_CustodyBackupIdentityRequest__request"
+    )
+    with pytest.raises(PermissionError, match="custody backup request"):
+        raw_request(completed_manifest_path, "project_one")
 
 
 def test_retention_deletion_tombstones_authority_and_only_prunes_unreferenced_objects(tmp_path: Path):
