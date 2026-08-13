@@ -251,6 +251,22 @@ generation/fence/lease, exact B-rep/STEP, and review-only GLB/selection-map
 digests. Closure is not review acceptance, engineering approval, channel
 promotion, export, fabrication release, or machine actuation.
 
+### Readiness-packet closure with G2 unaccepted
+
+`ReadinessPacketClosure` is a frozen, canonical, readiness-evidence-only record
+binding one explicit 40-hex candidate commit to the canonical digest of one
+explicitly supplied `ReadinessCampaign`. `close_readiness_packet` independently
+runs `verify_readiness_campaign`; it rejects incomplete or inconsistent ordered
+seed coverage, schedule identities, outcomes, aggregate counters, input binding,
+and root truth. It performs no `latest`, filename, channel, nearest-identity, or
+inferred candidate lookup. The packaged `piton.readiness-packet-closure.v1`
+schema fixes exactly 1,000 runs and every critical counter to zero while fixing
+`review_state=needs_human_review`, `g2_accepted=false`,
+`fabrication_release=false`, and `machine_actuation=false`. This closure records
+readiness evidence only: it does not accept G2, complete Stage 1, mutate authored
+source or revisions, grant human review, export, release, channel transition, or
+machine authority.
+
 ### P3 governed-alpha and P4 assurance authority
 
 P3 admission is controlled by one closed `GovernedAlphaEvidence` record, not by

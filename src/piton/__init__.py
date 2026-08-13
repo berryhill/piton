@@ -75,6 +75,7 @@ from .project_format import (
     project_digest,
 )
 from .revision import DesignRevision, canonical_json_bytes, compute_revision_id
+from .seeded_readiness import ReadinessPacketClosure, close_readiness_packet
 
 __all__ = [
     "AdmissionDecision",
@@ -120,11 +121,13 @@ __all__ = [
     "ReviewDisposition",
     "ReviewDispositionRecord",
     "ReviewDispositionState",
+    "ReadinessPacketClosure",
     "SafetyState",
     "TruthBoundary",
     "admit_engineering_request",
     "canonical_json_bytes",
     "canonical_project_bytes",
+    "close_readiness_packet",
     "compute_revision_id",
     "default_p4_assurance_policy",
     "emit_unavailable_p4_receipts",
