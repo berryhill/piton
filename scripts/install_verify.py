@@ -45,6 +45,7 @@ from piton.browser_qualification import (
     validate_browser_qualification,
 )
 from piton.service import CommandAdmissionError, LocalDaemonCommandAdapter
+from piton.service.application import PitonApplicationService
 from piton.portfolio.partner_scaffold_t001 import (
     PartnerScaffoldT001Receipt,
     validate_partner_scaffold_t001,
@@ -54,6 +55,24 @@ from piton.worker_contracts import PrecisionWorkerRequest
 
 PITON_IMPLEMENTATION_LOOP.validate()
 TruthBoundary().assert_safe()
+for custody_type_name in (
+    "BackupIdentity",
+    "BackupReceipt",
+    "RestoreReceipt",
+    "RetentionPolicy",
+    "RetentionReceipt",
+    "DeletionReceipt",
+):
+    if not isinstance(getattr(storage, custody_type_name, None), type):
+        raise SystemExit(f"installed project-custody type is unavailable: {custody_type_name}")
+for custody_operation in (
+    "backup_project",
+    "restore_project",
+    "apply_retention",
+    "delete_project",
+):
+    if not callable(getattr(PitonApplicationService, custody_operation, None)):
+        raise SystemExit(f"installed project-custody API is unavailable: {custody_operation}")
 if not callable(build_review_packet) or not callable(validate_review_packet):
     raise SystemExit("installed review-packet API is unavailable")
 if ReviewPacket.__name__ != "ReviewPacket":
@@ -343,7 +362,8 @@ with tempfile.TemporaryDirectory() as temporary_directory:
                 "AND name IN ('build_attempts','build_coordinator_state',"
                 "'evidence_check_declarations','evidence_check_receipts',"
                 "'evidence_closures','evidence_closure_receipts',"
-                "'evidence_closure_artifacts','artifact_publications','outbox')"
+                "'evidence_closure_artifacts','artifact_publications','outbox',"
+                "'command_receipts','idempotency_keys')"
             )
         }
         durable_triggers = {
@@ -353,7 +373,9 @@ with tempfile.TemporaryDirectory() as temporary_directory:
                 "AND (name='build_attempts_no_duplicate_insert' "
                 "OR name GLOB 'evidence_*_no_*' "
                 "OR name IN ('artifact_publications_transition_guard',"
-                "'artifact_publications_no_delete'))"
+                "'artifact_publications_no_delete','command_receipts_no_update',"
+                "'command_receipts_no_delete','idempotency_keys_no_update',"
+                "'idempotency_keys_no_delete'))"
             )
         }
         outbox_columns = {
@@ -366,6 +388,9 @@ with tempfile.TemporaryDirectory() as temporary_directory:
                 "AND name='outbox_pending_idx'"
             )
         }
+        command_receipts_sql = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='command_receipts'"
+        ).fetchone()[0]
     expected_tables = {
         "build_attempts",
         "build_coordinator_state",
@@ -376,6 +401,8 @@ with tempfile.TemporaryDirectory() as temporary_directory:
         "evidence_closure_artifacts",
         "artifact_publications",
         "outbox",
+        "command_receipts",
+        "idempotency_keys",
     }
     expected_triggers = {
         "build_attempts_no_duplicate_insert",
@@ -394,6 +421,10 @@ with tempfile.TemporaryDirectory() as temporary_directory:
         "evidence_closure_artifacts_no_delete",
         "artifact_publications_transition_guard",
         "artifact_publications_no_delete",
+        "command_receipts_no_update",
+        "command_receipts_no_delete",
+        "idempotency_keys_no_update",
+        "idempotency_keys_no_delete",
     }
     expected_outbox_columns = {
         "event_id",
@@ -411,6 +442,8 @@ with tempfile.TemporaryDirectory() as temporary_directory:
         raise SystemExit("installed build-attempt/evidence-closure immutability guards are incomplete")
     if outbox_columns != expected_outbox_columns or durable_indexes != {"outbox_pending_idx"}:
         raise SystemExit("installed restartable outbox custody schema is incomplete")
+    if "delete_project" not in command_receipts_sql:
+        raise SystemExit("installed destructive custody admission schema is incomplete")
 
 print(
     json.dumps(
@@ -446,6 +479,13 @@ print(
             ],
             "human_review_intake_api": human_review_intake.to_primitive()["schema"],
             "local_daemon_command_admission": "installed-secretless-af-unix",
+            "project_custody_api": {
+                "backup": "backup_project",
+                "restore": "restore_project",
+                "retention": "apply_retention",
+                "deletion": "delete_project",
+                "admission_table": "command_receipts",
+            },
             "framework_packet_closure_api": framework_packet_closure.to_primitive()[
                 "schema"
             ],
