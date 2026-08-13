@@ -14,7 +14,12 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from piton.revision import DesignRevision
 from piton.source_tree import SourceTree, SourceTreeFile
-from piton.service.application import PitonApplicationService
+from piton.service.application import (
+    PitonApplicationService,
+    StaleBaseConflictError,
+    _issue_principal_context,
+)
+from piton.service.commands import DeleteProject
 from piton.service.drafts import DraftStore
 from piton.storage import BlobStore, Database, RevisionRepository
 from piton.storage.custody import (
@@ -29,6 +34,45 @@ from piton.storage.revisions import _issue_server_mutation_capability
 
 def _custody(database: Database, blobs: BlobStore) -> PitonApplicationService:
     return PitonApplicationService(database, blobs, DraftStore(blobs.project_root))
+
+
+def test_project_deletion_requires_typed_authenticated_idempotent_admission(tmp_path: Path):
+    database, blobs, _revision = _seed(tmp_path / "source")
+    service = _custody(database, blobs)
+
+    with pytest.raises(TypeError):
+        service.delete_project("project_one", reason="caller-selected")
+    with database.read() as connection:
+        assert connection.execute(
+            "SELECT state FROM projects WHERE project_id='project_one'"
+        ).fetchone()[0] == "active"
+
+    command = DeleteProject(
+        command_id="cmd_delete_project_one",
+        project_id="project_one",
+        reason="operator-requested tombstone",
+        expected_state="active",
+    )
+    context = _issue_principal_context("operator_local")
+    first = service.delete_project(command, context)
+    replay = service.delete_project(command, context)
+    assert replay == first
+    with pytest.raises(StaleBaseConflictError, match="precondition"):
+        service.delete_project(
+            DeleteProject(
+                command_id="cmd_delete_stale",
+                project_id="project_one",
+                reason="stale repeated request",
+                expected_state="active",
+            ),
+            context,
+        )
+    with database.read() as connection:
+        row = connection.execute(
+            "SELECT actor_id,kind FROM command_receipts WHERE command_id=?",
+            (command.command_id,),
+        ).fetchone()
+    assert tuple(row) == ("operator_local", "delete_project")
 
 
 def _tree() -> SourceTree:
@@ -450,7 +494,15 @@ def test_retention_deletion_tombstones_authority_and_only_prunes_unreferenced_ob
     assert not blobs.object_path(orphan.digest).exists()
     assert authoritative.exists()
 
-    receipt = custody.delete_project("project_one", reason="operator-requested tombstone")
+    receipt = custody.delete_project(
+        DeleteProject(
+            command_id="cmd_delete_project_one",
+            project_id="project_one",
+            reason="operator-requested tombstone",
+            expected_state="active",
+        ),
+        _issue_principal_context("operator_local"),
+    )
     assert receipt.project_id == "project_one"
     assert receipt.state == "tombstoned"
     assert receipt.fabrication_release is False

@@ -58,6 +58,7 @@ from .commands import (
     BeginDraft,
     CommitDraft,
     CreateProject,
+    DeleteProject,
     DiscardDraft,
     ImportSourceBase,
     RestoreForward,
@@ -223,9 +224,6 @@ class PitonApplicationService:
         self, policy: RetentionPolicy, *, dry_run: bool = True
     ) -> RetentionReceipt:
         return self.__project_custody.apply_retention(policy, dry_run=dry_run)
-
-    def delete_project(self, project_id: str, *, reason: str) -> DeletionReceipt:
-        return self.__project_custody.delete_project(project_id, reason=reason)
 
     @staticmethod
     def _lease_expiry(value: str) -> datetime:
@@ -812,10 +810,11 @@ class PitonApplicationService:
 
     def execute(
         self, command: object, ctx: PrincipalContext
-    ) -> CommandReceipt | DraftReceipt:
+    ) -> CommandReceipt | DraftReceipt | DeletionReceipt:
         """Admit every adapter through one typed, idempotent command path."""
         routes = {
             CreateProject: ("create_project", self._create_project),
+            DeleteProject: ("delete_project", self._delete_project),
             ImportSourceBase: ("import_source_base", self._import_source_base),
             BeginDraft: ("begin_draft", self._begin_draft),
             UpdateDraft: ("update_draft", self._update_draft),
@@ -835,6 +834,28 @@ class PitonApplicationService:
         receipt = handler(command, ctx)
         self._store_receipt(command, ctx, operation, request_digest, receipt)
         return receipt
+
+    def delete_project(
+        self, cmd: DeleteProject, ctx: PrincipalContext
+    ) -> DeletionReceipt:
+        receipt = self.execute(cmd, ctx)
+        if not isinstance(receipt, DeletionReceipt):
+            raise TypeError("delete_project returned a non-deletion receipt")
+        return receipt
+
+    def _delete_project(
+        self, cmd: DeleteProject, ctx: PrincipalContext
+    ) -> DeletionReceipt:
+        self._require(cmd, DeleteProject, ctx)
+        with self.__database.read() as connection:
+            row = connection.execute(
+                "SELECT state FROM projects WHERE project_id=?", (cmd.project_id,)
+            ).fetchone()
+        if row is None or row[0] != cmd.expected_state:
+            raise StaleBaseConflictError(
+                "project state does not match the destructive command precondition"
+            )
+        return self.__project_custody.delete_project(cmd.project_id, reason=cmd.reason)
 
     def create_project(self, cmd: CreateProject, ctx: PrincipalContext) -> CommandReceipt:
         receipt = self.execute(cmd, ctx)
@@ -1146,7 +1167,7 @@ class PitonApplicationService:
         ctx: PrincipalContext,
         operation: str,
         request_digest: str,
-    ) -> CommandReceipt | DraftReceipt | None:
+    ) -> CommandReceipt | DraftReceipt | DeletionReceipt | None:
         command_id = getattr(command, "command_id")
         project_id = getattr(command, "project_id")
         with self.__database.read() as connection:
@@ -1175,9 +1196,11 @@ class PitonApplicationService:
         payload = json.loads(row[4])
         receipt_type = payload.pop("receipt_type", None)
         if receipt_type == "CommandReceipt":
-            receipt: CommandReceipt | DraftReceipt = CommandReceipt(**payload)
+            receipt: CommandReceipt | DraftReceipt | DeletionReceipt = CommandReceipt(**payload)
         elif receipt_type == "DraftReceipt":
             receipt = DraftReceipt(**payload)
+        elif receipt_type == "DeletionReceipt":
+            receipt = DeletionReceipt(**payload)
         else:
             raise RuntimeError("stored command receipt has an unsupported type")
         return receipt
@@ -1188,7 +1211,7 @@ class PitonApplicationService:
         ctx: PrincipalContext,
         operation: str,
         request_digest: str,
-        receipt: CommandReceipt | DraftReceipt,
+        receipt: CommandReceipt | DraftReceipt | DeletionReceipt,
     ) -> None:
         command_id = getattr(command, "command_id")
         project_id = getattr(command, "project_id")

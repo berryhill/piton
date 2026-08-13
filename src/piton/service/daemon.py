@@ -28,6 +28,7 @@ from .commands import (
     BeginDraft,
     CommitDraft,
     CreateProject,
+    DeleteProject,
     DiscardDraft,
     ImportSourceBase,
     RestoreForward,
@@ -118,6 +119,9 @@ class LocalDaemonHealthAdapter:
 _COMMAND_FIELDS = MappingProxyType(
     {
         "create_project": frozenset(("command_id", "project_id", "display_name")),
+        "delete_project": frozenset(
+            ("command_id", "project_id", "reason", "expected_state")
+        ),
         "import_source_base": frozenset(
             ("command_id", "project_id", "source_tree", "parameter_values")
         ),
@@ -219,6 +223,8 @@ def _parse_command(content: object) -> object:
     try:
         if command_type == "create_project":
             return CreateProject(**payload)
+        if command_type == "delete_project":
+            return DeleteProject(**payload)
         if command_type == "import_source_base":
             return ImportSourceBase(
                 command_id=payload["command_id"],
