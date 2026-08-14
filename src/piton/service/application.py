@@ -336,6 +336,7 @@ class PitonApplicationService:
             sandbox_mount_arguments,
             sealed_archive_fd,
             stage_input_bundle,
+            trusted_precision_worker_sandbox,
             validate_admitted_worker_payload,
             worker_payload_digest,
         )
@@ -353,18 +354,7 @@ class PitonApplicationService:
         blocked = preflight_precision_output_custody(request, self.__precision_control_root)
         if blocked is not None:
             return blocked
-        sandbox = Path("/usr/bin/bwrap")
-        try:
-            sandbox_metadata = sandbox.stat()
-        except FileNotFoundError:
-            raise RuntimeError("precision worker sandbox is unavailable")
-        if (
-            not sandbox.is_file()
-            or sandbox_metadata.st_uid != 0
-            or sandbox_metadata.st_mode & 0o022
-            or not os.access(sandbox, os.X_OK)
-        ):
-            raise RuntimeError("precision worker sandbox executable is not trusted")
+        sandbox = trusted_precision_worker_sandbox()
         bundle, bundle_digest = stage_input_bundle(
             inputs.repository_root, self.__precision_control_root, inputs.revision
         )
