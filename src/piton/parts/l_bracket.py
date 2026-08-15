@@ -3,9 +3,10 @@
 L-bracket, parametric, build123d-native. Wedge class = "bracket"
 (frozen in the Stage 0 charter).
 
-This is source-native Python — the only writable Stage 1 authority.
-STEP export is a derived artifact under a pinned realization, never a
-parallel writable copy. No fabrication claims. No machine actuation.
+This source-native Python Part is the optional external exact-CAD/reference
+adapter for the browser-authored Stage 1 revision. Its STEP export is derived
+evidence under a pinned realization, never a parallel writable copy. No
+fabrication claims. No machine actuation.
 """
 from __future__ import annotations
 

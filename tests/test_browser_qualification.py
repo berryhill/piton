@@ -60,8 +60,8 @@ def _observation(packet_root: Path) -> dict:
         "build_plane": {
             "artifact_z_min_mm": 0.0,
             "tolerance_mm": 1e-6,
-            "mapping": "(x,y,z)->(x,z,-y)",
-            "world_grid_plane": "y=0",
+            "mapping": "(x,y,z)->(x,y,z)",
+            "world_grid_plane": "z=0",
             "exact_coordinates_reinterpreted": False,
         },
         "measurements": {

@@ -1,71 +1,66 @@
 # Piton
 
-Piton is the local-first Mechanical CAD MVI.
-
-Piton was named after the OpenDesign R14 Bench Clamp Fixture prototype
-that produced the controlling current-verified interaction vocabulary and
-the original Stage 0/Stage 1 design.
-
-- Project: `8da9ea71-1dce-454a-bc4a-7e835eadfdd5`
-- Conversation: `76d3d331-cb2e-4a40-aca7-f6737ea538fe`
-- Authoring revision: `r14-05729d28`
-- Artifact URL: https://silas-workstation.taild7c550.ts.net:8443/api/projects/8da9ea71-1dce-454a-bc4a-7e835eadfdd5/raw/index.html?revision=r14-05729d28
-- Conversation URL: https://silas-workstation.taild7c550.ts.net:8443/api/conversations/76d3d331-cb2e-4a40-aca7-f6737ea538fe/files/index.html
-- Local ancestor mirror: `cad_mvi_opendesign/` (R1..R14 source pins, contracts, reproducer scripts)
-- Source doctrine: `/home/silas/.hermes/profiles/nick-mercer/workspace/reports/mechanical-cad-mvi-exhaustive-final-report-2026-08-06.md`
-
-Canonical MVI doctrine (one writable authority for in-repo text):
-[`docs/mvi-doctrine.md`](docs/mvi-doctrine.md). It is the in-repo mirror of
-the report’s Stage 1 doctrine (sections 9–18). Where text in any plan or
-doc disagrees with `docs/mvi-doctrine.md`, the doctrine wins.
-
-Current repository state: foundation scaffold only. It is not a production CAD system and it does not authorize fabrication.
+Piton is a runnable, browser-local Mechanical CAD MVI. It remains review-only and does not authorize fabrication.
 
 ```text
 review_state = needs_human_review
 fabrication_release = false
 machine_actuation = false
+release_state = unreleased
 ```
 
-## First product slice
+## Product surfaces
 
-One source-native Python/build123d Part, one bounded parameter mutation, one pinned exact-geometry worker, three to five predeclared checks, revision-pinned review artifacts, human review, and an optional visibly unreleased draft export.
+- Browser MVI — the primary runnable product. Browser-local TypeScript commands author immutable revisions; Manifold WASM generates fast review meshes in a Web Worker; SQLite WASM stores the local project in OPFS.
+- Python/build123d/OCP — an optional external exact-CAD/reference adapter. It is not required by the browser editing loop and cannot mutate browser-authored revisions.
+- Generated packet viewer — a disconnected, revision-pinned review artifact, not an authoring or exact-geometry surface.
+- Repository verification — automated proof for these surfaces, not a substitute for launching and manually testing the product.
 
-The current custody scaffold includes capability-gated durable build admission
-with server-derived attempt identity and exact project-scoped reads.
-`PitonApplicationService` executes the pinned
-`precision_worker_one:piton.realization-and-review.v3` worker under the honestly
-declared weaker `trusted-local` isolation class. It verifies attempt-bound exact
-and review output closure. Request issuance also freezes three deterministic
-attempt-bound checks; the daemon can atomically publish their immutable receipts
-and one project-scoped `EvidenceClosure` only after exact custody readback.
-A frozen `FrameworkPacketClosure` can then confirm, without persistence, that
-one independently validated packet and its separate exact/review artifact
-digests remain `needs_human_review`; it cannot record a human decision.
-P3 portfolio admission additionally requires one closed, repository-native
-`GovernedAlphaEvidence` record binding the exact project, revision, build
-attempt, evidence closure, framework/review packets, and separately scoped
-exact B-rep, STEP, GLB, and selection-map artifacts. These deep checks validate
-review evidence only and cannot confer advancement. Trusted durable human
-authorization issuance and verification are unavailable in this Stage-1 slice;
-every human-authority advancement fails closed. Local Linux command admission
-is implemented separately: `LocalDaemonCommandAdapter` derives the connected
-peer UID from kernel-owned AF_UNIX `SO_PEERCRED`, resolves it through a copied
-server-owned UID-to-principal mapping, rejects unknown UIDs and extra fields,
-and admits only closed typed commands into `PitonApplicationService`. This
-secretless local identity boundary is not durable human-authorization issuance,
-custody, or verification and cannot grant approval, release, or machine
-authority. P4 assurance thresholds,
-named environments, methods, comparators, and invalidation conditions are
-predeclared in an immutable, content-digested `P4AssurancePolicy`; later P4
-evidence must bind that exact digest and cannot self-declare advancement.
-This defines admission and readiness policy only. It does not claim that P3
-human review was accepted or that P4 assurance was executed or passed.
-This does not prove network or credential isolation and does not grant authored-
-state, channel, human-review, approval, export, fabrication-release, or machine-
-actuation authority.
+Piton was named after the OpenDesign R14 Bench Clamp Fixture prototype (project `8da9ea71-1dce-454a-bc4a-7e835eadfdd5`, conversation `76d3d331-cb2e-4a40-aca7-f6737ea538fe`, revision `r14-05729d28`). Canonical doctrine: [`docs/mvi-doctrine.md`](docs/mvi-doctrine.md).
 
-## Repository verification
+## Fresh-clone quickstart
+
+Prerequisites:
+
+- Node.js 22.22.3
+- pnpm 11.1.3
+- Chromium 145+ on Linux (the currently verified browser/platform combination)
+
+Install only from the committed lockfile and launch:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+Open the URL printed by Vite (normally `http://127.0.0.1:5173`). The dev server supplies the cross-origin-isolation headers required by SQLite WASM OPFS. The app fails visibly rather than falling back to transient writable state when OPFS is unavailable.
+
+Manual smoke:
+
+1. Confirm the seeded L-bracket and accepted immutable revision appear.
+2. Orbit, pan, zoom, and use Reset / fit. Confirm the physical grid is CAD Z=0 and the status says the review mesh has Z-min 0 on the grid.
+3. Inspect the source-parameter zone, bbox, build-volume context, and review-only disclosure.
+4. Change Leg length from 80 mm to a bounded value between 40 and 160 mm.
+5. Confirm the exact old/new diff says Preview only · not committed.
+6. Commit the candidate. Confirm the accepted revision ID remains unchanged.
+7. Reload the page. Confirm the candidate and parameter value reopen from SQLite WASM · OPFS.
+8. Confirm fabrication_release and machine_actuation remain false.
+
+## Browser verification
+
+```bash
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm exec playwright install --with-deps chromium
+pnpm test:e2e
+```
+
+The Playwright golden path exercises launch, seeded project, Manifold WASM preview, CAD Z-min=0/grid status, immutable candidate commit, OPFS reload, and safety truth.
+
+## Python exact-adapter verification
+
+The existing Python foundation and optional exact-CAD adapter remain independently verified:
 
 Run verification on a supported Linux host with a root-owned, non-group/world-writable
 `/usr/bin/bwrap` and an enabled unprivileged namespace policy. The shared preflight
@@ -79,4 +74,12 @@ uv run --frozen python -m pytest -q
 uv run --frozen python scripts/verify_repo.py
 ```
 
-The GitHub remote is attached as `origin` at `https://github.com/berryhill/piton.git`. This repository remains review-only: no deployment, production approval, fabrication release, or machine actuation is authorized.
+## Current limitations
+
+- One seeded single Part and one writable bounded parameter (`leg_length_mm`).
+- Browser Manifold output is a review mesh, not exact B-rep or durable topology authority.
+- Python exact realization is an optional external adapter and is not yet invoked from the browser workbench.
+- No engineering approval issuance, fabrication release, machine actuation, printer, CNC, slicer, G-code, CAM, or deployment capability exists.
+- No assembly authoring or general persistent topology.
+
+The GitHub remote is `https://github.com/berryhill/piton.git`. Build, preview, commit, export, and test success never imply review acceptance, approval, release, or machine actuation.

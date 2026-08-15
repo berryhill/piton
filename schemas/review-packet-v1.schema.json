@@ -56,7 +56,7 @@
       "properties": {
         "exact_brep_z_min_mm": {"type": "number"}, "review_z_min_mm": {"const": 0.0},
         "artifact_to_cad_translation_mm": {"$ref": "#/$defs/vector3"},
-        "artifact_to_world_mapping": {"const": "[x,y,z] -> [x,z,-y]"}, "world_grid_axis": {"const": "Y=0"},
+        "artifact_to_world_mapping": {"const": "[x,y,z] -> [x,y,z]"}, "world_grid_axis": {"const": "Z=0"},
         "tolerance_mm": {"type": "number", "exclusiveMinimum": 0},
         "translated_review_floor_is_exact_coordinate": {"const": false}
       }

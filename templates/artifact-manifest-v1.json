@@ -217,7 +217,7 @@
     "exact_brep_z_min_mm": null,
     "review_glb_z_min_mm": null,
     "artifact_to_cad_translation_mm": null,
-    "review_to_threejs_world_mapping": "(x,y,z)->(x,z,-y)",
+    "review_to_threejs_world_mapping": "(x,y,z)->(x,y,z)",
     "review_z_zero_on_visible_grid": false,
     "exact_geometry_was_translated_for_review": null,
     "verification_state": "template_incomplete_unverified",
