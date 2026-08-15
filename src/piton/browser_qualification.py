@@ -211,8 +211,8 @@ def _validate_observation(packet: ReviewPacket, raw: Mapping[str, Any]) -> tuple
     tolerance = _finite_nonnegative(build_plane["tolerance_mm"], "build_plane.tolerance_mm")
     if (
         z_min > tolerance
-        or build_plane["mapping"] != "(x,y,z)->(x,z,-y)"
-        or build_plane["world_grid_plane"] != "y=0"
+        or build_plane["mapping"] != "(x,y,z)->(x,y,z)"
+        or build_plane["world_grid_plane"] != "z=0"
         or build_plane["exact_coordinates_reinterpreted"] is not False
     ):
         failed.append("build_plane")

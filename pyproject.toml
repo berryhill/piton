@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "piton-cad"
 version = "0.1.0"
-description = "Local-first, source-native mechanical CAD with governed revisions and human review."
+description = "Optional external exact-CAD/reference adapter for the browser-local Piton authority."
 requires-python = "==3.12.11"
 license = "LicenseRef-Proprietary"
 authors = [{name = "Nick Mercer"}]

@@ -2,6 +2,35 @@
 
 These assets prepare evidence for a person; they do not approve, export for fabrication, release, promote a channel, or actuate a machine. Every generated packet must retain `review_state=needs_human_review`, `fabrication_release=false`, and `machine_actuation=false`.
 
+The primary runnable reviewer path is the browser workbench below. The later Python procedures cover the optional external exact-CAD/reference adapter and lifecycle-framework evidence; they supplement the browser MVI and are not its writable authored authority.
+
+## Browser workbench review
+
+1. From a fresh checkout, install the exact browser graph and launch the cross-origin-isolated local origin:
+
+   ```console
+   pnpm install --frozen-lockfile
+   pnpm dev
+   ```
+
+2. Open the Vite URL (normally `http://127.0.0.1:5173`). Confirm the page identifies persistence as `SQLite WASM · OPFS`; failure to obtain OPFS must be visible and must not fall back to transient writable state.
+3. Confirm the accepted immutable revision, current revision, complete source-parameter panel, review-only disclosure, bbox, build-volume context, and root safety values. Orbit/pan/zoom, roll, and reset/fit. Verify the Manifold worker reports `CAD Z-min 0 on grid`, the viewport records CAD/build-plane Z as zero, and the physical grid is the bottom/build plane. The mesh is review geometry, not exact B-rep or durable topology.
+4. Change only `leg_length_mm` to a value from 40 through 160. Before commit, require the exact old/new diff and `Preview only · not committed`; after `Commit candidate`, require a new current immutable revision while the accepted revision remains unchanged.
+5. Reload the page. Require `Reopened from SQLite WASM · OPFS`, the same current revision and parameter value, and unchanged `needs_human_review`/`false`/`false`/`unreleased` safety truth. A reload alone is persistence evidence, not schema-migration evidence.
+6. Run the automated browser gates from the same candidate:
+
+   ```console
+   pnpm typecheck
+   pnpm test
+   pnpm build
+   pnpm exec playwright install --with-deps chromium
+   pnpm test:e2e
+   ```
+
+   `tests-browser/e2e/golden-path.spec.ts` opens the real SQLite WASM OPFS database and directly reads `PRAGMA user_version`, the non-internal table inventory, the project row's schema version, revision count, and current-revision match. It proves durable version-2 schema/project/revision readback for the opened browser database. `tests-browser/storage.test.ts` verifies the ordered v1-to-v2 migration statement plan and that a newer unsupported schema fails closed; it does not execute a real OPFS database seeded at v1, so no actual v1-to-v2 browser migration is claimed. Playwright success remains test evidence only; it does not approve, export, release, or actuate.
+
+The remaining procedures are optional Python exact-adapter/framework review surfaces.
+
 ## Review-only project receipt
 
 This procedure emits `piton.review-export-receipt.v1`. Despite the historical
@@ -14,13 +43,13 @@ used as evidence that deliverables were exported.
 2. Emit a receipt outside that directory:
 
    ```console
-   python scripts/review_export.py examples/minimal-project --out /tmp/piton-review-receipt.json
+   uv run --frozen python scripts/review_export.py examples/minimal-project --out /tmp/piton-review-receipt.json
    ```
 
 3. Independently validate receipt identity and canonical project custody:
 
    ```console
-   python scripts/review_export.py validate /tmp/piton-review-receipt.json --project-dir examples/minimal-project
+   uv run --frozen python scripts/review_export.py validate /tmp/piton-review-receipt.json --project-dir examples/minimal-project
    ```
 
 4. Confirm validation succeeded, then inspect every `source_closure` path and digest against the intended revision. Confirm `source_executed=false`, `channel_transition=false`, `release_state=unreleased`, and all three safety values.
@@ -47,7 +76,7 @@ channel, qualify a STEP receiver, release fabrication, or actuate machinery.
 
 ## Geometry/reference-build review
 
-1. Run `python scripts/build_part.py --out /tmp/l_bracket_default.step`, or use a new path under repository `dist/`. The script accepts no source selector and no parameter JSON; it always uses the fixed tracked reference inputs. Repository paths outside `dist/` are rejected before geometry realization. Choose a new path: it rejects an existing or symlinked STEP or companion manifest rather than overwriting either artifact.
+1. Run `uv run --frozen python scripts/build_part.py --out /tmp/l_bracket_default.step`, or use a new path under repository `dist/`. The locked invocation is required from a fresh src-layout checkout so `piton` and the exact toolchain resolve from the verified environment. The script accepts no source selector and no parameter JSON; it always uses the fixed tracked reference inputs. Repository paths outside `dist/` are rejected before geometry realization. Choose a new path: it rejects an existing or symlinked STEP or companion manifest rather than overwriting either artifact.
 2. Verify the manifest is `piton.reference-build-manifest.v1`; inspect its runtime/toolchain versions, millimetre units, deterministic STEP export policy, non-manufacturing tolerance policy, fixed recipe, tracked closure, and artifact digest. Confirm both governed `design_revision_id` and `build_attempt_id` are absent (`null`) and `authored_state_mutated=false`. Recompute the domain-separated closure digest before relying on provenance.
 3. Confirm the STEP `FILE_NAME` header uses the declared deterministic name and `1970-01-01T00:00:00` timestamp, then read the STEP back with an independent exact-geometry tool. This normalization only removes header volatility; it does not enlarge the artifact's claim scope.
 4. Independently inspect dimensions, coordinate system, topology, tolerances, interfaces, and intended material/process assumptions. Build success and visual plausibility are not acceptance.
@@ -510,13 +539,13 @@ unknown field, non-canonical safety value, or attempted G2 acceptance.
 3. Emit a packet outside both accepted and candidate directories:
 
    ```console
-   python scripts/restore_forward.py emit path/to/candidate path/to/validated-accepted-project --out /tmp/restore-forward.json
+   uv run --frozen python scripts/restore_forward.py emit path/to/candidate path/to/validated-accepted-project --out /tmp/restore-forward.json
    ```
 
 4. Validate packet identity and candidate custody:
 
    ```console
-   python scripts/restore_forward.py validate /tmp/restore-forward.json --project-dir path/to/candidate
+   uv run --frozen python scripts/restore_forward.py validate /tmp/restore-forward.json --project-dir path/to/candidate
    ```
 
 5. Check that accepted and candidate digests differ and that `operation=restore_forward_new_revision`, `history_rewrite=false`, and `accepted_state_mutation=false`.

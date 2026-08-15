@@ -253,7 +253,7 @@ def test_launch_manifest_closes_current_exact_and_review_roles_with_independent_
         "exact_brep_z_min_mm": None,
         "review_glb_z_min_mm": None,
         "artifact_to_cad_translation_mm": None,
-        "review_to_threejs_world_mapping": "(x,y,z)->(x,z,-y)",
+        "review_to_threejs_world_mapping": "(x,y,z)->(x,y,z)",
         "review_z_zero_on_visible_grid": False,
         "exact_geometry_was_translated_for_review": None,
         "verification_state": "template_incomplete_unverified",
