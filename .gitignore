@@ -7,3 +7,6 @@ node_modules/
 dist/
 build/
 .piton/
+test-results/
+playwright-report/
+.otoxan/evidence/

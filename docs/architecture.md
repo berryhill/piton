@@ -12,8 +12,13 @@ with `docs/mvi-doctrine.md`, the doctrine wins.
 
 ## Current authority
 
-- Authored intent: immutable source-native Python revision.
-- Exact realization: pinned build123d/OCP worker result scoped to revision and environment.
+- Authored intent: immutable browser-local TypeScript revision under
+  `browser-typescript/v1`, persisted in SQLite WASM/OPFS with an explicit current
+  pointer and an immutable accepted base.
+- Interactive realization: pinned Manifold WASM worker mesh scoped to one request
+  and revision. It is review geometry; stale/failed results cannot replace last-good.
+- Optional external exact realization: pinned Python/build123d/OCP worker result
+  scoped to revision and environment. It is an adapter, not writable product authority.
 - Review representation: revision/build-scoped GLB plus artifact-local selection map (`claim_scope=review-only`).
 - Exchange: STEP derived from a successful exact realization (must be receiver-qualified under a named receiver/version/profile; emit only does not pass).
 - Optional additive derivatives: 3MF/STL, always labeled derivative and unreleased.
@@ -25,7 +30,7 @@ with `docs/mvi-doctrine.md`, the doctrine wins.
 ## Stage 1 wedge
 
 One consequential single Part, one bounded partner-driven parameter
-mutation, one writable source-native authority, one pinned precision
+mutation, one writable browser-local TypeScript authority, one optional pinned precision
 worker, three to five predeclared checks selected from observed reviewer
 decisions.
 

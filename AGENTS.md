@@ -19,7 +19,10 @@ any plan or doc disagrees with `docs/mvi-doctrine.md`, the doctrine wins.
 ## Authority
 
 - Repository instructions are advisory; runtime policy and human approval remain authoritative.
-- Source-native Python is the only writable design authority in the first slice.
+- Browser-local TypeScript commands and immutable revision state are the primary
+  writable product authority in the runnable first slice. Python/build123d is
+  retained as an optional external exact-CAD/reference adapter; its exact
+  realizations and derivatives cannot mutate browser-authored revisions.
 - Workers may realize geometry and emit evidence but may not mutate authored revisions, review dispositions, approvals, or release state.
 
 ## Required implementation loop

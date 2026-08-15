@@ -20,6 +20,7 @@ _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 APPROVED_ACTIONS = MappingProxyType(
     {
         "actions/checkout": "11bd71901bbe5b1630ceea73d27597364c9af683",
+        "actions/setup-node": "49933ea5288caeca8642d1e84afbd3f7d6820020",
         "actions/setup-python": "a26af69be951a213d495a4c3e4e4022e16d87065",
     }
 )
@@ -27,7 +28,7 @@ APPROVED_WORKFLOWS = (".github/workflows/ci.yml",)
 APPROVED_WORKFLOW_DIGESTS = MappingProxyType(
     {
         ".github/workflows/ci.yml": (
-            "sha256:47f47a47093532c332f6f3df61dbd666ec6b4a13bcde4bcb6040bba3e2ce0b3e"
+            "sha256:ec261340a61d6090ec56ec77a902eb188d7709a670b913742898819eb2481ab9"
         )
     }
 )

@@ -1,8 +1,9 @@
-"""Pinned trusted-local exact realization for the Stage 1 source-native Part.
+"""Pinned trusted-local exact realization for the Stage 1 adapter Part.
 
-The Python source revision remains the only writable design authority. BREP and
-STEP files emitted here are immutable, attempt-scoped derivatives and carry no
-review, approval, release, or machine-actuation authority.
+The browser-local TypeScript revision remains the writable product authority.
+Python source, BREP, and STEP files handled here are external exact-CAD/reference
+adapter inputs or immutable attempt-scoped derivatives and carry no review,
+approval, release, or machine-actuation authority.
 """
 from __future__ import annotations
 

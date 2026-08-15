@@ -265,11 +265,13 @@ def test_threat_model_closes_required_scope_and_invalidation_contract():
     ):
         assert heading in threat_model
     for scope in (
-        "source-native Python",
+        "runnable browser-local TypeScript workbench",
+        "sole writable authored-revision authority",
+        "SQLite WASM/OPFS custody",
+        "Manifold WASM geometry worker",
+        "optional external Python exact-CAD/reference",
         "immutable project inputs",
-        "local custody",
-        "CI and build dependencies",
-        "precision workers",
+        "npm/PyPI/CI build dependencies",
         "review packets",
         "schemas and templates",
         "operator and human-review boundary",
@@ -289,8 +291,17 @@ def test_threat_model_closes_required_scope_and_invalidation_contract():
         "TM-11",
         "TM-12",
         "TM-13",
+        "TM-14",
     ):
         assert threat_id in threat_model
+    for browser_boundary in (
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm install --frozen-lockfile",
+        "PRAGMA user_version",
+        "tests-browser/e2e/golden-path.spec.ts",
+    ):
+        assert browser_boundary in threat_model
     for daemon_boundary in (
         "daemon command admission",
         "kernel-owned Unix peer credentials",
