@@ -50,13 +50,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends bubblewrap
       - name: Preflight precision-worker namespace policy
-        run: |
-          if ! bwrap --unshare-all --die-with-parent \
-            --ro-bind /usr /usr --ro-bind /lib /lib --ro-bind /lib64 /lib64 \
-            --proc /proc --dev /dev -- /usr/bin/true 2>/dev/null; then
-            printf '%s\n' 'precision-worker sandbox preflight failed: sandbox_namespace_policy_rejected'
-            exit 1
-          fi
+        run: uv run --frozen python -m piton.precision_worker_launch --preflight-sandbox
       - name: Sync exact locked dependencies
         run: uv sync --frozen --all-extras
       - name: Unit and contract tests

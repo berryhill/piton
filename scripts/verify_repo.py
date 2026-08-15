@@ -54,6 +54,7 @@ REQUIRED = [
     ROOT / "src/piton/storage/_backup_identity_process.py",
     ROOT / "src/piton/worker_contracts.py",
     ROOT / "src/piton/precision_worker.py",
+    ROOT / "src/piton/precision_worker_launch.py",
     ROOT / "src/piton/evidence.py",
     ROOT / "src/piton/assurance.py",
     ROOT / "src/piton/mesh_derivatives.py",
@@ -130,6 +131,7 @@ REQUIRED = [
     ROOT / "docs/fabrication-safety.md",
     ROOT / "docs/threat-model.md",
     ROOT / "tests/test_launch_assets.py",
+    ROOT / "tests/test_sandbox_preflight.py",
     ROOT / "tests/test_supply_chain_gate.py",
     ROOT / ".github/workflows/ci.yml",
 ]

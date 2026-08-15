@@ -585,8 +585,24 @@ def test_ci_pins_and_preflights_a_sandbox_capable_runner_without_policy_bypass()
 
     assert "runs-on: ubuntu-22.04" in ci
     assert "kernel.apparmor_restrict_unprivileged_userns" not in ci
-    assert "bwrap --unshare-all" in ci
-    assert "precision-worker sandbox preflight failed" in ci
+    assert "uv run --frozen python -m piton.precision_worker_launch --preflight-sandbox" in ci
+    assert "bwrap --unshare-all" not in ci
+    assert "precision-worker sandbox preflight failed" not in ci
+
+
+def test_readme_preflights_the_supported_linux_host_before_repository_verification() -> None:
+    readme = " ".join(
+        (ROOT / "README.md").read_text(encoding="utf-8").split()
+    )
+    sync = "uv sync --frozen --all-extras"
+    preflight = "uv run --frozen python -m piton.precision_worker_launch --preflight-sandbox"
+    test = "uv run --frozen python -m pytest -q"
+
+    assert "supported Linux host" in readme
+    assert "does not skip or weaken" in readme
+    assert sync in readme
+    assert preflight in readme
+    assert readme.index(sync) < readme.index(preflight) < readme.index(test)
 
 
 def test_browser_qualification_contract_is_in_repository_and_installed_proof_surfaces():

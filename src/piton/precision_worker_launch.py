@@ -7,10 +7,12 @@ import io
 import os
 import shutil
 import stat
+import subprocess
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from .revision import DesignRevision
 from .worker_contracts import PrecisionWorkerRequest, canonical_json_bytes
@@ -46,6 +48,73 @@ _WORKER_PYTHON_PAYLOAD = (
     "storage/db.py",
     "worker_contracts.py",
 )
+SANDBOX_EXECUTABLE = Path("/usr/bin/bwrap")
+
+
+def trusted_precision_worker_sandbox(sandbox: Path = SANDBOX_EXECUTABLE) -> Path:
+    """Return the sandbox path only when its executable trust properties hold."""
+    try:
+        metadata = sandbox.stat()
+    except FileNotFoundError:
+        raise RuntimeError("precision worker sandbox is unavailable") from None
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != 0
+        or metadata.st_mode & 0o022
+        or not os.access(sandbox, os.X_OK)
+    ):
+        raise RuntimeError("precision worker sandbox executable is not trusted")
+    return sandbox
+
+
+def preflight_precision_worker_sandbox(
+    sandbox: Path = SANDBOX_EXECUTABLE,
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
+) -> Path:
+    """Require one trusted bubblewrap executable and prove a bounded namespace launch."""
+    sandbox = trusted_precision_worker_sandbox(sandbox)
+    try:
+        completed = runner(
+            [
+                str(sandbox),
+                "--die-with-parent",
+                "--new-session",
+                "--unshare-all",
+                "--ro-bind",
+                "/usr",
+                "/usr",
+                "--ro-bind",
+                "/lib",
+                "/lib",
+                "--ro-bind",
+                "/lib64",
+                "/lib64",
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "--",
+                "/usr/bin/true",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd="/",
+            env={"PATH": os.defpath},
+            close_fds=True,
+            check=False,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            "precision worker sandbox preflight failed: sandbox_namespace_policy_rejected"
+        ) from None
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "precision worker sandbox preflight failed: sandbox_namespace_policy_rejected"
+        )
+    return sandbox
 
 
 def _manifest_digest(namespace: str, value: Mapping[str, Any]) -> str:
@@ -557,3 +626,9 @@ def publish_isolated_attempt(
         os.close(source_fd)
         os.close(root_fd)
     return canonical_root / project_id / attempt_id
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] != ["--preflight-sandbox"]:
+        raise SystemExit("usage: python -m piton.precision_worker_launch --preflight-sandbox")
+    preflight_precision_worker_sandbox()

@@ -62,7 +62,14 @@ The Playwright golden path exercises launch, seeded project, Manifold WASM previ
 
 The existing Python foundation and optional exact-CAD adapter remain independently verified:
 
+Run verification on a supported Linux host with a root-owned, non-group/world-writable
+`/usr/bin/bwrap` and an enabled unprivileged namespace policy. The shared preflight
+fails closed before the test suite when that host contract is unavailable and does not
+skip or weaken the precision-worker sandbox and custody checks.
+
 ```bash
+uv sync --frozen --all-extras
+uv run --frozen python -m piton.precision_worker_launch --preflight-sandbox
 uv run --frozen python -m pytest -q
 uv run --frozen python scripts/verify_repo.py
 ```
