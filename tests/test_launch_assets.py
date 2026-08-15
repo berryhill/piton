@@ -571,6 +571,16 @@ def test_installed_launch_asset_surface_has_runtime_dependency_and_packaged_sche
     assert "--no-deps dist/*.whl" not in ci
 
 
+def test_ci_activates_pnpm_before_setup_node_requests_the_pnpm_cache() -> None:
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    activate = "corepack prepare pnpm@11.1.3 --activate"
+    setup_node = "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020"
+    assert activate in ci
+    assert setup_node in ci
+    assert ci.index(activate) < ci.index(setup_node)
+
+
 def test_ci_provisions_the_required_precision_worker_sandbox_before_tests():
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
