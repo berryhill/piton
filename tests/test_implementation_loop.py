@@ -92,6 +92,57 @@ class ImplementationLoopTests(unittest.TestCase):
         self.assertIn("perform the safe merge", gate["prompt_template"])
         self.assertIn("same task/session/worktree/branch/PR", gate["prompt_template"])
 
+    def test_runtime_template_routes_retryable_reviews_to_the_sole_loop_gate(self):
+        path = pathlib.Path(__file__).parents[1] / "flows/piton_implementation_loop_v1.json"
+        template = json.loads(path.read_text(encoding="utf-8"))
+        contract = template["route_contract"]
+        self.assertEqual("route", contract["decision_field"])
+        self.assertEqual("route_evidence", contract["evidence_field"])
+        gates = {gate["step_id"]: gate["routes"] for gate in contract["gates"]}
+        self.assertEqual(
+            {
+                "pass": "review_launch_assets",
+                "retryable_product_failure": "merge_on_success_or_loop",
+            },
+            gates["review_security_boundaries"],
+        )
+        self.assertEqual(
+            {
+                "pass": "final_verification",
+                "retryable_product_failure": "merge_on_success_or_loop",
+            },
+            gates["review_launch_assets"],
+        )
+        self.assertIn(
+            "missing_publication_authorization",
+            template["loop"]["gate_output_contract"]["waiting_classes"],
+        )
+
+    def test_runtime_template_routes_publication_authority_wait_without_step_retry(self):
+        path = pathlib.Path(__file__).parents[1] / "flows/piton_implementation_loop_v1.json"
+        template = json.loads(path.read_text(encoding="utf-8"))
+        gates = {
+            gate["step_id"]: gate["routes"]
+            for gate in template["route_contract"]["gates"]
+        }
+        self.assertEqual(
+            {
+                "published": "watch_cicd",
+                "publication_authority_wait": "merge_on_success_or_loop",
+            },
+            gates["push_feature_branch"],
+        )
+        prompts = {step["step_id"]: step["prompt_template"] for step in template["steps"]}
+        self.assertIn("Do not emit marker status=retry", prompts["push_feature_branch"])
+        self.assertIn("route=publication_authority_wait", prompts["push_feature_branch"])
+        self.assertIn("failure_class=missing_publication_authorization", prompts["merge_on_success_or_loop"])
+
+    def test_runtime_template_version_seven_binds_route_contract_in_snapshot(self):
+        path = pathlib.Path(__file__).parents[1] / "flows/piton_implementation_loop_v1.json"
+        template = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(7, template["version"])
+        self.assertIn("route_contract", template)
+
     def test_runtime_template_requires_same_repository_pr_publication(self):
         path = pathlib.Path(__file__).parents[1] / "flows/piton_implementation_loop_v1.json"
         template = json.loads(path.read_text(encoding="utf-8"))
