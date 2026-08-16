@@ -20,7 +20,15 @@ from ..human_review import (
     HumanReviewIntake,
     HumanReviewIntakeError,
 )
-from ..model import ChangeProposal, _derive_change_candidate
+from ..model import (
+    BuildAttempt,
+    ChangeProposal,
+    DraftExport,
+    EvidenceClosure,
+    ProposalDisposition,
+    ProposalDispositionState,
+    _derive_change_candidate,
+)
 from ..portfolio import (
     Authority,
     Disposition,
@@ -37,7 +45,18 @@ from ..review_packet import ReviewPacket, build_review_packet, validate_review_p
 from ..revision import DesignRevision
 from ..source_tree import SourceTree, SourceTreeFile
 from ..storage.blobs import BlobStore
-from ..storage.build_attempts import BuildAttemptCoordinator, CoordinatorState, DurableBuildAttempt
+from ..lifecycle_contracts import (
+    ApprovalRecord,
+    FabricationRelease,
+    ReleasedPackageProjection,
+)
+from ..storage.build_attempts import (
+    BuildAdmission,
+    BuildAttemptCoordinator,
+    CoordinatorState,
+    DurableBuildAttempt,
+    _issue_server_admission_capability,
+)
 from ..storage.db import Database
 from ..storage.custody import (
     BackupIdentity,
@@ -52,17 +71,27 @@ from ..storage.custody import (
 )
 from ..storage.revisions import (
     ChannelConflictError,
+    ChannelPointer,
     RevisionRepository,
     _issue_server_mutation_capability,
 )
 from .commands import (
+    AdmitBuildAttempt,
+    AdmitChangeProposal,
     BeginDraft,
     CommitDraft,
+    CreateDraftExport,
     CreateProject,
     DeleteProject,
     DiscardDraft,
     ImportSourceBase,
+    MoveChannel,
+    RecordEvidenceClosure,
+    RecordProposalDisposition,
+    RecordReleasedPackageProjection,
+    RejectFabricationRelease,
     RestoreForward,
+    SignApproval,
     UpdateDraft,
 )
 from .drafts import DraftRecord, DraftStore
@@ -821,6 +850,30 @@ class PitonApplicationService:
             CommitDraft: ("commit_draft", self._commit_draft),
             DiscardDraft: ("discard_draft", self._discard_draft),
             RestoreForward: ("restore_forward", self._restore_forward),
+            AdmitChangeProposal: (
+                "admit_change_proposal",
+                self._admit_change_proposal,
+            ),
+            RecordProposalDisposition: (
+                "record_proposal_disposition",
+                self._record_proposal_disposition,
+            ),
+            AdmitBuildAttempt: ("admit_build_attempt", self._admit_build_attempt),
+            RecordEvidenceClosure: (
+                "record_evidence_closure",
+                self._record_evidence_closure,
+            ),
+            MoveChannel: ("move_channel", self._move_channel),
+            SignApproval: ("sign_approval", self._sign_approval),
+            CreateDraftExport: ("create_draft_export", self._create_draft_export),
+            RejectFabricationRelease: (
+                "reject_fabrication_release",
+                self._reject_fabrication_release,
+            ),
+            RecordReleasedPackageProjection: (
+                "record_released_package_projection",
+                self._record_released_package_projection,
+            ),
         }
         route = routes.get(type(command))
         if route is None:
@@ -1061,6 +1114,228 @@ class PitonApplicationService:
             raise StaleDraftBaseError("workspace changed before restore-forward") from error
         return self._command_receipt(cmd.command_id, cmd.project_id, "restore_forward", revision)
 
+    def _admit_change_proposal(
+        self, cmd: AdmitChangeProposal, ctx: PrincipalContext
+    ) -> CommandReceipt:
+        """Admit one immutable proposal and derive a candidate, but never authorize it."""
+        self._require(cmd, AdmitChangeProposal, ctx)
+        proposal = ChangeProposal(
+            proposal_id=cmd.proposal_id,
+            base_revision_id=cmd.base_revision_id,
+            parameter_id=cmd.parameter_id,
+            expected_old_quantity=cmd.expected_old_quantity,
+            new_quantity=cmd.new_quantity,
+            requirement_ids=cmd.requirement_ids,
+        )
+        _ = self.derive_change_candidate(cmd.project_id, proposal, ctx)
+        return CommandReceipt(
+            command_id=cmd.command_id,
+            project_id=cmd.project_id,
+            kind="admit_change_proposal",
+            persisted_revision_id=cmd.base_revision_id,
+            parent_revision_id=cmd.base_revision_id,
+        )
+
+    def _record_proposal_disposition(
+        self, cmd: RecordProposalDisposition, ctx: PrincipalContext
+    ) -> CommandReceipt:
+        """Record one immutable proposal disposition; acceptance is not approval."""
+        self._require(cmd, RecordProposalDisposition, ctx)
+        disposition = ProposalDisposition(
+            disposition_id=cmd.disposition_id,
+            proposal_id=cmd.proposal_id,
+            base_revision_id=cmd.base_revision_id,
+            state=ProposalDispositionState(cmd.state),
+            reason=cmd.reason,
+        )
+        if disposition.issues_engineering_approval or disposition.issues_fabrication_release:
+            raise RuntimeError(
+                "ProposalDisposition cannot mint engineering approval or fabrication release"
+            )
+        return CommandReceipt(
+            command_id=cmd.command_id,
+            project_id=cmd.project_id,
+            kind="record_proposal_disposition",
+            persisted_revision_id=cmd.base_revision_id,
+            parent_revision_id=cmd.base_revision_id,
+        )
+
+    def _admit_build_attempt(
+        self, cmd: AdmitBuildAttempt, ctx: PrincipalContext
+    ) -> CommandReceipt:
+        """Admit one durable build attempt; the row is persisted, no worker is invoked."""
+        self._require(cmd, AdmitBuildAttempt, ctx)
+        admission = BuildAdmission(
+            project_id=cmd.project_id,
+            revision_id=cmd.revision_id,
+            input_manifest_digest=cmd.input_manifest_digest,
+            recipe_digest=cmd.recipe_digest,
+            toolchain_digest=cmd.toolchain_digest,
+            capability_manifest_digest=cmd.capability_manifest_digest,
+            resource_limits_digest=cmd.resource_limits_digest,
+            expected_outputs_digest=cmd.expected_outputs_digest,
+            request_signature_digest=cmd.request_signature_digest,
+            worker_id=cmd.worker_id,
+            isolation_class=cmd.isolation_class,
+        )
+        attempt = self.__build_attempt_coordinator.admit(
+            admission,
+            capability=_issue_server_admission_capability(),
+        )
+        return CommandReceipt(
+            command_id=cmd.command_id,
+            project_id=cmd.project_id,
+            kind="admit_build_attempt",
+            persisted_revision_id=attempt.revision_id,
+            parent_revision_id=cmd.revision_id,
+        )
+
+    def _record_evidence_closure(
+        self, cmd: RecordEvidenceClosure, ctx: PrincipalContext
+    ) -> CommandReceipt:
+        """Record one immutable EvidenceClosure over the exact build attempt outcome."""
+        self._require(cmd, RecordEvidenceClosure, ctx)
+        _ = EvidenceClosure(
+            closure_id=cmd.closure_id,
+            revision_id=cmd.revision_id,
+            attempt_id=cmd.attempt_id,
+            requirement_ids=cmd.requirement_ids,
+            receipt_digests=cmd.receipt_digests,
+            policy_digest=cmd.policy_digest,
+        )
+        attempt = self.__build_attempt_coordinator.get_attempt(
+            cmd.project_id, cmd.attempt_id
+        )
+        if attempt.revision_id != cmd.revision_id or attempt.project_id != cmd.project_id:
+            raise ValueError("evidence closure must bind the exact revision and project")
+        state = self.__build_attempt_coordinator.get_state(cmd.project_id, cmd.attempt_id)
+        if state.state != "succeeded":
+            raise EvidenceClosureError(
+                "evidence closure requires a successful build attempt"
+            )
+        return CommandReceipt(
+            command_id=cmd.command_id,
+            project_id=cmd.project_id,
+            kind="record_evidence_closure",
+            persisted_revision_id=cmd.revision_id,
+            parent_revision_id=cmd.revision_id,
+        )
+
+    def _move_channel(
+        self, cmd: MoveChannel, ctx: PrincipalContext
+    ) -> CommandReceipt:
+        """Move a ChannelPointer under expected head + generation CAS."""
+        self._require(cmd, MoveChannel, ctx)
+        try:
+            pointer = self.__repository.move_channel(
+                cmd.project_id,
+                cmd.channel,
+                cmd.target_revision_id,
+                expected_revision_id=cmd.expected_revision_id,
+                expected_generation=cmd.expected_generation,
+                capability=self.__mutation_capability,
+            )
+        except ChannelConflictError as error:
+            raise StaleBaseConflictError(str(error)) from error
+        return CommandReceipt(
+            command_id=cmd.command_id,
+            project_id=cmd.project_id,
+            kind="move_channel",
+            persisted_revision_id=pointer.revision_id,
+            parent_revision_id=cmd.expected_revision_id,
+        )
+
+    def _sign_approval(
+        self, cmd: SignApproval, ctx: PrincipalContext
+    ) -> CommandReceipt:
+        """Sign-approval is hard-closed at Stage 1: outcome is always rejected."""
+        self._require(cmd, SignApproval, ctx)
+        _ = ApprovalRecord(
+            receipt_id=cmd.receipt_id,
+            revision_id=cmd.revision_id,
+            evidence_closure_id=cmd.evidence_closure_id,
+            scoped_decision=cmd.scoped_decision,
+            scope_reason=cmd.scope_reason,
+            declared_at=cmd.declared_at,
+        )
+        return CommandReceipt(
+            command_id=cmd.command_id,
+            project_id=cmd.project_id,
+            kind="sign_approval",
+            outcome="rejected",
+            persisted_revision_id=cmd.revision_id,
+            parent_revision_id=cmd.revision_id,
+        )
+
+    def _create_draft_export(
+        self, cmd: CreateDraftExport, ctx: PrincipalContext
+    ) -> CommandReceipt:
+        """Create one DraftExport receipt; the receipt is visibly unreleased."""
+        self._require(cmd, CreateDraftExport, ctx)
+        _ = DraftExport(
+            receipt_id=cmd.receipt_id,
+            export_id=cmd.export_id,
+            project_id=cmd.project_id,
+            revision_id=cmd.revision_id,
+            attempt_id=cmd.attempt_id,
+            authority_profile=cmd.authority_profile,
+            exact_body_digest=cmd.exact_body_digest,
+            step_digest=cmd.step_digest,
+            units=cmd.units,
+            warnings=cmd.warnings,
+            environment_lock_digest=cmd.environment_lock_digest,
+            validation_report_digest=cmd.validation_report_digest,
+        )
+        return CommandReceipt(
+            command_id=cmd.command_id,
+            project_id=cmd.project_id,
+            kind="create_draft_export",
+            persisted_revision_id=cmd.revision_id,
+            parent_revision_id=cmd.revision_id,
+        )
+
+    def _reject_fabrication_release(
+        self, cmd: RejectFabricationRelease, ctx: PrincipalContext
+    ) -> CommandReceipt:
+        """Fabrication release is hard-closed at Stage 1: outcome is always rejected."""
+        self._require(cmd, RejectFabricationRelease, ctx)
+        _ = FabricationRelease(
+            release_id=cmd.release_id,
+            approval_receipt_id=cmd.approval_receipt_id,
+            revision_id=cmd.revision_id,
+            deliverables_digest=cmd.deliverables_digest,
+            declared_at=cmd.declared_at,
+        )
+        return CommandReceipt(
+            command_id=cmd.command_id,
+            project_id=cmd.project_id,
+            kind="reject_fabrication_release",
+            outcome="rejected",
+            persisted_revision_id=cmd.revision_id,
+            parent_revision_id=cmd.revision_id,
+        )
+
+    def _record_released_package_projection(
+        self, cmd: RecordReleasedPackageProjection, ctx: PrincipalContext
+    ) -> CommandReceipt:
+        """Released package projection is hard-closed at Stage 1: outcome is always rejected."""
+        self._require(cmd, RecordReleasedPackageProjection, ctx)
+        _ = ReleasedPackageProjection(
+            projection_id=cmd.projection_id,
+            release_id=cmd.release_id,
+            package_digest=cmd.package_digest,
+            units=cmd.units,
+            declared_at=cmd.declared_at,
+        )
+        return CommandReceipt(
+            command_id=cmd.command_id,
+            project_id=cmd.project_id,
+            kind="record_released_package_projection",
+            outcome="rejected",
+            persisted_revision_id=None,
+            parent_revision_id=None,
+        )
+
     def expire_drafts(self) -> tuple[str, ...]:
         """Crash/maintenance cleanup creates no committed-work claim."""
         return self.__drafts.recover_after_crash()
@@ -1223,11 +1498,15 @@ class PitonApplicationService:
         identity = f"{command_id}\0{project_id}\0{ctx.principal_id}".encode("utf-8")
         receipt_id = "receipt_" + hashlib.sha256(identity).hexdigest()
         now = self._now()
+        if isinstance(receipt, CommandReceipt):
+            outcome = receipt.outcome
+        else:
+            outcome = "applied"
         with self.__database.immediate() as connection:
             connection.execute(
                 "INSERT INTO command_receipts(receipt_id, command_id, project_id, actor_id, "
                 "kind, request_digest, outcome, receipt_json, committed_at) "
-                "VALUES(?, ?, ?, ?, ?, ?, 'applied', ?, ?)",
+                "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     receipt_id,
                     command_id,
@@ -1235,6 +1514,7 @@ class PitonApplicationService:
                     ctx.principal_id,
                     kind,
                     request_digest,
+                    outcome,
                     receipt_json,
                     now,
                 ),

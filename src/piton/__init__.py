@@ -20,6 +20,12 @@ from .assurance import (
     emit_unavailable_p4_receipts,
     validate_p4_evidence_policy_binding,
 )
+from .lifecycle_contracts import (
+    ApprovalRecord,
+    FabricationRelease,
+    HardenedChannelPointer,
+    ReleasedPackageProjection,
+)
 from .model import (
     BuildAttempt,
     BuildStatus,
@@ -79,6 +85,7 @@ from .seeded_readiness import ReadinessPacketClosure, close_readiness_packet
 
 __all__ = [
     "AdmissionDecision",
+    "ApprovalRecord",
     "AdmissionPolicy",
     "AssuranceRequirement",
     "AutonomyGrant",
@@ -91,6 +98,8 @@ __all__ = [
     "DesignRevision",
     "Disposition",
     "DraftExport",
+    "FabricationRelease",
+    "HardenedChannelPointer",
     "Effect",
     "EngineeringRequest",
     "EvidenceArtifact",
@@ -118,6 +127,7 @@ __all__ = [
     "ProposalDisposition",
     "ProposalDispositionState",
     "ProjectFormatError",
+    "ReleasedPackageProjection",
     "ReviewDisposition",
     "ReviewDispositionRecord",
     "ReviewDispositionState",

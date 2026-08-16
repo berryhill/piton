@@ -25,13 +25,22 @@ from .application import (
     _issue_principal_context,
 )
 from .commands import (
+    AdmitBuildAttempt,
+    AdmitChangeProposal,
     BeginDraft,
     CommitDraft,
+    CreateDraftExport,
     CreateProject,
     DeleteProject,
     DiscardDraft,
     ImportSourceBase,
+    MoveChannel,
+    RecordEvidenceClosure,
+    RecordProposalDisposition,
+    RecordReleasedPackageProjection,
+    RejectFabricationRelease,
     RestoreForward,
+    SignApproval,
     UpdateDraft,
 )
 
@@ -151,6 +160,120 @@ _COMMAND_FIELDS = MappingProxyType(
                 "expected_generation",
             )
         ),
+        "admit_change_proposal": frozenset(
+            (
+                "command_id",
+                "project_id",
+                "proposal_id",
+                "base_revision_id",
+                "parameter_id",
+                "expected_old_quantity",
+                "new_quantity",
+                "requirement_ids",
+            )
+        ),
+        "record_proposal_disposition": frozenset(
+            (
+                "command_id",
+                "project_id",
+                "disposition_id",
+                "proposal_id",
+                "base_revision_id",
+                "state",
+                "reason",
+            )
+        ),
+        "admit_build_attempt": frozenset(
+            (
+                "command_id",
+                "project_id",
+                "attempt_id",
+                "revision_id",
+                "recipe_digest",
+                "environment_digest",
+                "toolchain_digest",
+                "capability_manifest_digest",
+                "resource_limits_digest",
+                "expected_outputs_digest",
+                "request_signature_digest",
+                "input_manifest_digest",
+                "worker_id",
+                "isolation_class",
+            )
+        ),
+        "record_evidence_closure": frozenset(
+            (
+                "command_id",
+                "project_id",
+                "closure_id",
+                "revision_id",
+                "attempt_id",
+                "requirement_ids",
+                "receipt_digests",
+                "policy_digest",
+            )
+        ),
+        "move_channel": frozenset(
+            (
+                "command_id",
+                "project_id",
+                "channel",
+                "target_revision_id",
+                "expected_revision_id",
+                "expected_generation",
+            )
+        ),
+        "sign_approval": frozenset(
+            (
+                "command_id",
+                "project_id",
+                "receipt_id",
+                "revision_id",
+                "evidence_closure_id",
+                "scoped_decision",
+                "scope_reason",
+                "declared_at",
+            )
+        ),
+        "create_draft_export": frozenset(
+            (
+                "command_id",
+                "project_id",
+                "receipt_id",
+                "export_id",
+                "revision_id",
+                "attempt_id",
+                "authority_profile",
+                "exact_body_digest",
+                "step_digest",
+                "units",
+                "warnings",
+                "environment_lock_digest",
+                "validation_report_digest",
+            )
+        ),
+        "reject_fabrication_release": frozenset(
+            (
+                "command_id",
+                "project_id",
+                "release_id",
+                "approval_receipt_id",
+                "revision_id",
+                "deliverables_digest",
+                "declared_at",
+            )
+        ),
+        "record_released_package_projection": frozenset(
+            (
+                "command_id",
+                "project_id",
+                "projection_id",
+                "release_id",
+                "package_digest",
+                "units",
+                "declared_at",
+            )
+        ),
     }
 )
 _SOURCE_TREE_FIELDS = frozenset(
@@ -252,7 +375,79 @@ def _parse_command(content: object) -> object:
             )
         if command_type == "discard_draft":
             return DiscardDraft(**payload)
-        return RestoreForward(**payload)
+        if command_type == "restore_forward":
+            return RestoreForward(**payload)
+        if command_type == "admit_change_proposal":
+            ids = payload["requirement_ids"]
+            if not isinstance(ids, list) or not ids:
+                raise CommandAdmissionError("requirement_ids does not match the closed schema")
+            if not all(isinstance(item, str) and item for item in ids):
+                raise CommandAdmissionError("requirement_ids does not match the closed schema")
+            return AdmitChangeProposal(
+                command_id=payload["command_id"],
+                project_id=payload["project_id"],
+                proposal_id=payload["proposal_id"],
+                base_revision_id=payload["base_revision_id"],
+                parameter_id=payload["parameter_id"],
+                expected_old_quantity=payload["expected_old_quantity"],
+                new_quantity=payload["new_quantity"],
+                requirement_ids=tuple(ids),
+            )
+        if command_type == "record_proposal_disposition":
+            return RecordProposalDisposition(**payload)
+        if command_type == "admit_build_attempt":
+            return AdmitBuildAttempt(**payload)
+        if command_type == "record_evidence_closure":
+            reqs = payload["requirement_ids"]
+            recs = payload["receipt_digests"]
+            if not isinstance(reqs, list) or not reqs:
+                raise CommandAdmissionError("requirement_ids does not match the closed schema")
+            if not all(isinstance(item, str) and item for item in reqs):
+                raise CommandAdmissionError("requirement_ids does not match the closed schema")
+            if not isinstance(recs, list) or not recs:
+                raise CommandAdmissionError("receipt_digests does not match the closed schema")
+            if not all(isinstance(item, str) and item for item in recs):
+                raise CommandAdmissionError("receipt_digests does not match the closed schema")
+            return RecordEvidenceClosure(
+                command_id=payload["command_id"],
+                project_id=payload["project_id"],
+                closure_id=payload["closure_id"],
+                revision_id=payload["revision_id"],
+                attempt_id=payload["attempt_id"],
+                requirement_ids=tuple(reqs),
+                receipt_digests=tuple(recs),
+                policy_digest=payload["policy_digest"],
+            )
+        if command_type == "move_channel":
+            return MoveChannel(**payload)
+        if command_type == "sign_approval":
+            return SignApproval(**payload)
+        if command_type == "create_draft_export":
+            warnings = payload["warnings"]
+            if not isinstance(warnings, list):
+                raise CommandAdmissionError("warnings does not match the closed schema")
+            if not all(isinstance(item, str) and item for item in warnings):
+                raise CommandAdmissionError("warnings does not match the closed schema")
+            return CreateDraftExport(
+                command_id=payload["command_id"],
+                project_id=payload["project_id"],
+                receipt_id=payload["receipt_id"],
+                export_id=payload["export_id"],
+                revision_id=payload["revision_id"],
+                attempt_id=payload["attempt_id"],
+                authority_profile=payload["authority_profile"],
+                exact_body_digest=payload["exact_body_digest"],
+                step_digest=payload["step_digest"],
+                units=payload["units"],
+                warnings=tuple(warnings),
+                environment_lock_digest=payload["environment_lock_digest"],
+                validation_report_digest=payload["validation_report_digest"],
+            )
+        if command_type == "reject_fabrication_release":
+            return RejectFabricationRelease(**payload)
+        if command_type == "record_released_package_projection":
+            return RecordReleasedPackageProjection(**payload)
+        raise CommandAdmissionError("unsupported command type")
     except CommandAdmissionError:
         raise
     except (TypeError, ValueError) as error:

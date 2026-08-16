@@ -11,13 +11,22 @@ from .application import (
     StaleDraftBaseError,
 )
 from .commands import (
+    AdmitBuildAttempt,
+    AdmitChangeProposal,
     BeginDraft,
     CommitDraft,
+    CreateDraftExport,
     CreateProject,
     DeleteProject,
     DiscardDraft,
     ImportSourceBase,
+    MoveChannel,
+    RecordEvidenceClosure,
+    RecordProposalDisposition,
+    RecordReleasedPackageProjection,
+    RejectFabricationRelease,
     RestoreForward,
+    SignApproval,
     UpdateDraft,
 )
 from .drafts import (
@@ -30,10 +39,13 @@ from .drafts import (
 from .daemon import CommandAdmissionError, LocalDaemonCommandAdapter, LocalDaemonHealthAdapter
 
 __all__ = [
+    "AdmitBuildAttempt",
+    "AdmitChangeProposal",
     "BeginDraft",
     "CommandAdmissionError",
     "CommandReceipt",
     "CommitDraft",
+    "CreateDraftExport",
     "CreateProject",
     "DeleteProject",
     "DiscardDraft",
@@ -47,10 +59,16 @@ __all__ = [
     "ImportSourceBase",
     "LocalDaemonCommandAdapter",
     "LocalDaemonHealthAdapter",
+    "MoveChannel",
     "PitonApplicationService",
     "PrincipalAuthorityError",
     "PrincipalContext",
+    "RecordEvidenceClosure",
+    "RecordProposalDisposition",
+    "RecordReleasedPackageProjection",
+    "RejectFabricationRelease",
     "RestoreForward",
+    "SignApproval",
     "StaleBaseConflictError",
     "StaleDraftBaseError",
     "UpdateDraft",
