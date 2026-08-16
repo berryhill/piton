@@ -6,6 +6,15 @@ export interface GeometryWorkerSurface {
   onmessageerror: ((event: MessageEvent) => void) | null;
 }
 
+let nextWorkerGeneration = 0;
+const workerGenerations = new WeakMap<object, number>();
+
+export function geometryWorkerGeneration(worker: GeometryWorkerSurface): number {
+  const generation = workerGenerations.get(worker);
+  if (!generation) throw new Error("Geometry worker was not constructed by the guarded client");
+  return generation;
+}
+
 export function postGeometryWorkerMessage(
   worker: GeometryWorkerSurface,
   message: unknown,
@@ -36,5 +45,7 @@ export function constructGeometryWorker<T extends GeometryWorkerSurface>(
     onFailure(`Geometry worker runtime failed: ${event.message || "unknown worker error"}`);
   };
   worker.onmessageerror = () => onFailure("Geometry worker message decoding failed");
+  nextWorkerGeneration += 1;
+  workerGenerations.set(worker, nextWorkerGeneration);
   return worker;
 }
