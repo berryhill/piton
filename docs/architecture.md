@@ -72,12 +72,15 @@ fabrication release, or machine actuation.
 No two of these collapse. The forbidden implications chain is in `docs/mvi-doctrine.md`.
 
 The browser OPFS schema version 3 gives every concept a distinct strict SQLite
-table and a distinct closed TypeScript record. The repository currently admits
-append-only proposal, disposition, build-attempt, and evidence facts plus
-expected-version CAS channel movement. Approval-, export-, fabrication-release-,
-and released-package-shaped tables are inert under Stage 1: the repository has
-no issuance path for them, and release/actuation columns are constrained to
-false. Mutable `build_status` remains preview status and is not a `BuildAttempt`.
+table and a distinct closed TypeScript record. Caller writes are limited to
+current-head-CAS proposals and dispositions plus revision-bound admitted build
+attempts; expected-version CAS controls channel movement. Successful/terminal
+attempt states and evidence closure require trusted coordinator custody, which
+the browser repository does not mint or accept from callers. Approval-, export-,
+fabrication-release-, and released-package-shaped tables are likewise inert
+under Stage 1: the repository has no issuance path for them, and release/actuation
+columns are constrained to false. Mutable `build_status` remains preview status
+and is not a `BuildAttempt`.
 
 ## Stage 1 viewer contract
 

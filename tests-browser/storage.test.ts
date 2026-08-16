@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { CURRENT_SCHEMA_VERSION, LIFECYCLE_TABLES, migrationStatements } from "../browser-src/storage/schema";
 import { MemoryProjectRepository, migrateSqliteDatabase, waitForSqliteWorker } from "../browser-src/storage/repository";
+import type { BuildAdmission } from "../browser-src/storage/repository";
 import type { Worker1Promiser } from "@sqlite.org/sqlite-wasm";
 import { deriveGeometryBinding } from "../browser-src/geometry/binding";
-import type { BuildAttempt, ChangeProposal, EvidenceClosure, FabricationRelease } from "../browser-src/lifecycle";
+import type { ChangeProposal, EvidenceClosure, FabricationRelease, ProposalDisposition } from "../browser-src/lifecycle";
 import { assertLifecycleRecord } from "../browser-src/lifecycle";
 
 describe("browser SQLite schema", () => {
@@ -99,23 +100,25 @@ describe("browser SQLite schema", () => {
       baseRevisionId: revisionId, command: { type: "set-leg-length", value: 90 },
       createdAt: "2026-08-16T00:00:00.000Z",
     };
-    await repository.appendLifecycleRecord(proposal);
-    await expect(repository.appendLifecycleRecord(proposal)).rejects.toThrow("duplicate lifecycle identity");
-    await expect(repository.appendLifecycleRecord({ ...proposal, id: `proposal-${hex("2")}`, projectId: "other" })).rejects.toThrow(
+    await repository.appendLifecycleRecord(proposal, revisionId);
+    await expect(repository.appendLifecycleRecord(proposal, revisionId)).rejects.toThrow("duplicate lifecycle identity");
+    await expect(repository.appendLifecycleRecord({ ...proposal, id: `proposal-${hex("2")}`, projectId: "other" }, revisionId)).rejects.toThrow(
       "lifecycle project authority mismatch",
     );
 
-    const attempt: BuildAttempt = {
+    const attempt: BuildAdmission = {
       kind: "build_attempt", id: `attempt-${hex("3")}`, projectId: project.id, revisionId,
-      recipeDigest: hex("a"), state: "succeeded", createdAt: "2026-08-16T00:01:00.000Z",
+      recipeDigest: hex("a"), state: "admitted", createdAt: "2026-08-16T00:01:00.000Z",
     };
-    await repository.appendLifecycleRecord(attempt);
+    await repository.appendLifecycleRecord(attempt, revisionId);
     const evidence: EvidenceClosure = {
       kind: "evidence_closure", id: `evidence-${hex("4")}`, projectId: project.id, revisionId,
       buildAttemptId: attempt.id, requirementIds: ["AC-01"], artifactDigests: [hex("b")],
       createdAt: "2026-08-16T00:02:00.000Z",
     };
-    await repository.appendLifecycleRecord(evidence);
+    await expect(repository.appendLifecycleRecord(evidence as never, revisionId)).rejects.toThrow(
+      "evidence closure requires trusted coordinator custody",
+    );
     await repository.moveChannel({
       kind: "channel_pointer", projectId: project.id, channel: "candidate", revisionId,
       version: 1, updatedAt: "2026-08-16T00:03:00.000Z",
@@ -124,7 +127,35 @@ describe("browser SQLite schema", () => {
       kind: "channel_pointer", projectId: project.id, channel: "candidate", revisionId,
       version: 2, updatedAt: "2026-08-16T00:04:00.000Z",
     }, 0)).rejects.toThrow("stale channel pointer");
-    expect(await repository.loadLifecycleRecords(project.id)).toHaveLength(4);
+    expect(await repository.loadLifecycleRecords(project.id)).toHaveLength(3);
+  });
+
+  it("binds proposal acceptance to the current head and denies caller-minted success or evidence", async () => {
+    const repository = new MemoryProjectRepository();
+    const project = await repository.initialize();
+    const hex = (character: string) => character.repeat(64);
+    const proposal: ChangeProposal = {
+      kind: "change_proposal", id: `proposal-${hex("7")}`, projectId: project.id,
+      baseRevisionId: project.currentRevisionId, command: { type: "set-leg-length", value: 90 },
+      createdAt: "2026-08-16T00:00:00.000Z",
+    };
+    await repository.appendLifecycleRecord(proposal, project.currentRevisionId);
+    const disposition: ProposalDisposition = {
+      kind: "proposal_disposition", id: `disposition-${hex("8")}`, projectId: project.id,
+      proposalId: proposal.id, disposition: "accepted_for_build", reason: "bounded review candidate",
+      createdAt: "2026-08-16T00:01:00.000Z",
+    };
+    await repository.appendLifecycleRecord(disposition, project.currentRevisionId);
+    expect(await repository.loadLifecycleRecords(project.id)).toContainEqual(disposition);
+    const advanced = await repository.commitCandidate(project.currentRevisionId, { type: "set-leg-length", value: 92 });
+    const staleDisposition = { ...disposition, id: `disposition-${hex("a")}` };
+    await expect(repository.appendLifecycleRecord(staleDisposition, project.currentRevisionId)).rejects.toThrow("stale current revision");
+    await expect(repository.appendLifecycleRecord(staleDisposition, advanced.currentRevisionId)).rejects.toThrow("proposal base revision is stale");
+    await expect(repository.appendLifecycleRecord({
+      kind: "build_attempt", id: `attempt-${hex("9")}`, projectId: project.id,
+      revisionId: advanced.currentRevisionId, recipeDigest: hex("d"), state: "succeeded",
+      createdAt: "2026-08-16T00:02:00.000Z",
+    } as never, advanced.currentRevisionId)).rejects.toThrow("successful build attempt requires trusted coordinator custody");
   });
 
   it("rolls back an invalid evidence write without replacing durable facts", async () => {
@@ -135,7 +166,7 @@ describe("browser SQLite schema", () => {
       kind: "evidence_closure", id: `evidence-${hex("5")}`, projectId: project.id,
       revisionId: project.currentRevisionId, buildAttemptId: `attempt-${hex("6")}`,
       requirementIds: ["AC-01"], artifactDigests: [hex("c")], createdAt: "2026-08-16T00:00:00.000Z",
-    })).rejects.toThrow("evidence build attempt reference is missing");
+    } as never, project.currentRevisionId)).rejects.toThrow("evidence closure requires trusted coordinator custody");
     expect(await repository.loadLifecycleRecords(project.id)).toEqual([]);
     expect((await repository.load())?.currentRevisionId).toBe(project.currentRevisionId);
   });

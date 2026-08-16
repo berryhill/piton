@@ -3,8 +3,11 @@ import type { BrowserProject, CandidateCommand, DesignRevision } from "../domain
 import { assertProjectIntegrity, deriveCandidateFromCommand, seedProject } from "../domain";
 import { CURRENT_SCHEMA_VERSION, migrationStatements } from "./schema";
 import type { GeometryAuthorityBinding } from "../geometry/binding";
-import type { ChannelPointer, LifecycleRecord } from "../lifecycle";
+import type { BuildAttempt, ChangeProposal, ChannelPointer, LifecycleRecord, ProposalDisposition } from "../lifecycle";
 import { assertLifecycleRecord } from "../lifecycle";
+
+export type BuildAdmission = Omit<BuildAttempt, "state"> & Readonly<{ state: "admitted" }>;
+export type CallerLifecycleRecord = ChangeProposal | ProposalDisposition | BuildAdmission;
 
 export interface BuildStatus {
   projectId: string;
@@ -40,7 +43,7 @@ export interface ProjectRepository {
   commitCandidate(expectedCurrentRevisionId: string, command: CandidateCommand): Promise<BrowserProject>;
   loadBuildStatus(projectId: string): Promise<BuildStatus | null>;
   saveBuildStatus(status: BuildStatus): Promise<void>;
-  appendLifecycleRecord(record: Exclude<LifecycleRecord, ChannelPointer>): Promise<void>;
+  appendLifecycleRecord(record: CallerLifecycleRecord, expectedCurrentRevisionId: string): Promise<void>;
   moveChannel(pointer: ChannelPointer, expectedVersion: number): Promise<void>;
   loadLifecycleRecords(projectId: string): Promise<LifecycleRecord[]>;
   persistenceLabel: string;
@@ -90,12 +93,9 @@ export class MemoryProjectRepository implements ProjectRepository {
     this.buildStatus = structuredClone(status);
   }
 
-  async appendLifecycleRecord(record: Exclude<LifecycleRecord, ChannelPointer>): Promise<void> {
+  async appendLifecycleRecord(record: CallerLifecycleRecord, expectedCurrentRevisionId: string): Promise<void> {
     if (!this.project) throw new Error("project is not initialized");
-    assertLifecycleWrite(record, this.project, this.lifecycleRecords);
-    if (["approval_record", "draft_export", "fabrication_release", "released_package_projection"].includes(record.kind)) {
-      throw new Error("Stage 1 lifecycle authority is not implemented");
-    }
+    assertCallerLifecycleWrite(record, expectedCurrentRevisionId, this.project, this.lifecycleRecords);
     if (this.lifecycleRecords.some((existing) => "id" in existing && existing.id === record.id)) {
       throw new Error("duplicate lifecycle identity");
     }
@@ -136,6 +136,34 @@ function assertLifecycleWrite(record: LifecycleRecord, project: BrowserProject, 
     if (attempt.projectId !== record.projectId || attempt.revisionId !== record.revisionId || attempt.state !== "succeeded") {
       throw new Error("evidence build attempt binding is invalid");
     }
+  }
+}
+
+function assertCallerLifecycleWrite(
+  callerRecord: CallerLifecycleRecord,
+  expectedCurrentRevisionId: string,
+  project: BrowserProject,
+  existing: readonly LifecycleRecord[],
+): void {
+  const record = callerRecord as LifecycleRecord;
+  if (record.kind === "evidence_closure") throw new Error("evidence closure requires trusted coordinator custody");
+  if (record.kind === "build_attempt" && record.state !== "admitted") {
+    throw new Error("successful build attempt requires trusted coordinator custody");
+  }
+  if (!["change_proposal", "proposal_disposition", "build_attempt"].includes(record.kind)) {
+    throw new Error("Stage 1 lifecycle authority is not implemented");
+  }
+  if (project.currentRevisionId !== expectedCurrentRevisionId) throw new Error("stale current revision");
+  assertLifecycleWrite(record, project, existing);
+  if (record.kind === "change_proposal" && record.baseRevisionId !== expectedCurrentRevisionId) {
+    throw new Error("proposal base revision is stale");
+  }
+  if (record.kind === "proposal_disposition" && record.disposition !== "changes_requested") {
+    const proposal = existing.find((item): item is ChangeProposal => item.kind === "change_proposal" && item.id === record.proposalId);
+    if (!proposal || proposal.baseRevisionId !== expectedCurrentRevisionId) throw new Error("proposal base revision is stale");
+  }
+  if (record.kind === "build_attempt" && record.revisionId !== expectedCurrentRevisionId) {
+    throw new Error("build attempt revision is stale");
   }
 }
 
@@ -355,16 +383,13 @@ export class SqliteOpfsProjectRepository implements ProjectRepository {
         status.state, status.message]);
   }
 
-  async appendLifecycleRecord(record: Exclude<LifecycleRecord, ChannelPointer>): Promise<void> {
-    if (["approval_record", "draft_export", "fabrication_release", "released_package_projection"].includes(record.kind)) {
-      throw new Error("Stage 1 lifecycle authority is not implemented");
-    }
+  async appendLifecycleRecord(record: CallerLifecycleRecord, expectedCurrentRevisionId: string): Promise<void> {
     await this.exec("BEGIN IMMEDIATE");
     try {
       const project = await this.load();
       if (!project) throw new Error("project is not initialized");
       const existing = await this.loadLifecycleRecords(project.id);
-      assertLifecycleWrite(record, project, existing);
+      assertCallerLifecycleWrite(record, expectedCurrentRevisionId, project, existing);
       if (existing.some((item) => "id" in item && item.id === record.id)) throw new Error("duplicate lifecycle identity");
       switch (record.kind) {
         case "change_proposal":
@@ -378,11 +403,6 @@ export class SqliteOpfsProjectRepository implements ProjectRepository {
         case "build_attempt":
           await this.exec("INSERT INTO build_attempts (id, project_id, revision_id, recipe_digest, state, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             [record.id, record.projectId, record.revisionId, record.recipeDigest, record.state, record.createdAt]);
-          break;
-        case "evidence_closure":
-          await this.exec("INSERT INTO evidence_closures (id, project_id, revision_id, build_attempt_id, requirements_json, artifacts_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [record.id, record.projectId, record.revisionId, record.buildAttemptId,
-              JSON.stringify(record.requirementIds), JSON.stringify(record.artifactDigests), record.createdAt]);
           break;
         default:
           throw new Error("Stage 1 lifecycle authority is not implemented");
