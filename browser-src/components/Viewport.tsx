@@ -5,7 +5,17 @@ import type { DesignRevision, LBracketParameters } from "../domain";
 import { deriveGeometryBinding, type GeometryAuthorityBinding } from "../geometry/binding";
 import { GeometryResultGate, installReplacement, type GeometryRequestIdentity, type GeometryResult } from "../geometry/gate";
 import { fitCameraToBounds, meshBounds, rolledCameraUp, selectedLegZone, type MeshBounds } from "../geometry/view";
-import { constructGeometryWorker, postGeometryWorkerMessage, type GeometryWorkerSurface } from "../geometry/workerClient";
+import {
+  constructGeometryWorker,
+  geometryWorkerGeneration,
+  postGeometryWorkerMessage,
+  type GeometryWorkerSurface,
+} from "../geometry/workerClient";
+import {
+  GEOMETRY_ENVIRONMENT_DIGEST,
+  geometryInputDigest,
+  parseGeometryWorkerMessage,
+} from "../geometry/protocol";
 
 interface PreviewBuildStatus {
   requestId: number;
@@ -192,8 +202,6 @@ export default function Viewport({
     if (disabled) return;
     updateZone.current(parameters);
     const binding = deriveGeometryBinding(authoritativeBase, parameters);
-    const request = gate.current.begin(binding);
-    activeRequest.current = request;
     const terminateFailedWorker = () => {
       const failedWorker = worker.current;
       worker.current = null;
@@ -214,11 +222,24 @@ export default function Viewport({
       );
       if (!worker.current) return;
       worker.current.onmessage = (event: MessageEvent) => {
-        const result = event.data as GeometryResult & { error?: string };
-        if (result.error) {
-          if (gate.current.isCurrent(result)) reportWorkerFailure(`Build failed: ${result.error}`);
+        const parsed = parseGeometryWorkerMessage(event.data);
+        if (!parsed.ok) {
+          reportWorkerFailure(`Build rejected: ${parsed.diagnostic.code}: ${parsed.diagnostic.message}`);
           return;
         }
+        const messageResult = parsed.value;
+        if (messageResult.type === "protocol-error") {
+          reportWorkerFailure(`Build rejected: ${messageResult.diagnostic.code}: ${messageResult.diagnostic.message}`);
+          return;
+        }
+        const current = activeRequest.current;
+        if (!current) return;
+        const identity = { ...messageResult, binding: current.binding };
+        if (messageResult.type === "review-mesh-failed") {
+          if (gate.current.isCurrent(identity)) reportWorkerFailure(`Build failed: ${messageResult.diagnostic.message}`);
+          return;
+        }
+        const result: GeometryResult = { ...messageResult, binding: current.binding };
         if (gate.current.validate(result)) {
           let bounds: MeshBounds;
           try {
@@ -242,10 +263,17 @@ export default function Viewport({
         }
       };
     }
+    const request = gate.current.begin(
+      binding,
+      geometryWorkerGeneration(worker.current),
+      geometryInputDigest(parameters),
+      GEOMETRY_ENVIRONMENT_DIGEST,
+    );
+    activeRequest.current = request;
     const message = "Building browser-local preview…";
     setStatus(message);
     statusSink.current?.({ ...request, state: "previewing", message });
-    postGeometryWorkerMessage(worker.current, { ...request, parameters }, reportWorkerFailure);
+    postGeometryWorkerMessage(worker.current, { type: "build-review-mesh", ...request, parameters }, reportWorkerFailure);
     return () => undefined;
   }, [parameters, authoritativeBase, disabled]);
 
