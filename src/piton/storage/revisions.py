@@ -62,6 +62,22 @@ class ChannelPointer:
     revision_id: str | None
     generation: int
     updated_at: str
+    review_state: str = "needs_human_review"
+    fabrication_release: bool = False
+    machine_actuation: bool = False
+
+    def __post_init__(self) -> None:
+        self.assert_safe()
+
+    def assert_safe(self) -> None:
+        if self.review_state != "needs_human_review":
+            raise ValueError(
+                "channel pointer review_state must remain needs_human_review"
+            )
+        if self.fabrication_release is not False:
+            raise ValueError("channel pointer cannot carry fabrication release")
+        if self.machine_actuation is not False:
+            raise ValueError("channel pointer cannot authorize machine actuation")
 
 
 def _now() -> str:
