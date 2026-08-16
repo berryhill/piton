@@ -92,6 +92,29 @@ class ImplementationLoopTests(unittest.TestCase):
         self.assertIn("perform the safe merge", gate["prompt_template"])
         self.assertIn("same task/session/worktree/branch/PR", gate["prompt_template"])
 
+    def test_runtime_template_requires_same_repository_pr_publication(self):
+        path = pathlib.Path(__file__).parents[1] / "flows/piton_implementation_loop_v1.json"
+        template = json.loads(path.read_text(encoding="utf-8"))
+        identity = template["github_lifecycle"]["publication_identity"]
+        self.assertTrue(identity["same_head_and_base_repository_required"])
+        self.assertTrue(identity["fork_pull_requests_forbidden"])
+        self.assertEqual("server_owned_task_metadata", identity["trusted_repository_source"])
+        self.assertEqual("wrong_repository_or_actor", identity["mismatch_failure_class"])
+
+        prompts = {
+            step["step_id"]: step["prompt_template"]
+            for step in template["steps"]
+        }
+        for step_id in (
+            "prepare_feature_worktree",
+            "push_feature_branch",
+            "watch_cicd",
+            "merge_on_success_or_loop",
+        ):
+            self.assertIn("head/source repository", prompts[step_id])
+            self.assertIn("protected base repository", prompts[step_id])
+            self.assertIn("wrong_repository_or_actor", prompts[step_id])
+
     def test_retry_requires_matching_error_packet(self):
         with self.assertRaisesRegex(ValueError, "require.*error packet"):
             PITON_IMPLEMENTATION_LOOP.decide(
