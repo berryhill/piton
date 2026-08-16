@@ -40,14 +40,14 @@ Retry preserves the same task, flow session, worktree, branch, and PR. The same 
 
 Every in-process task branch must begin from, or non-force merge, the freshly fetched `origin/main`. Final verification records both the protected-base SHA and candidate SHA. Immediately before merge, the task fetches again and requires that exact current base to be an ancestor of candidate HEAD. If main advanced, the task returns `base_branch_advanced_while_waiting`, merges current main into the same branch, reruns all head-bound proof, pushes the same PR, and observes new exact-head CI. It must not create a replacement PR, force-push, or manufacture a no-op commit.
 
-Stop rather than retry on secret exposure, ambiguous authority, unsafe fabrication requests, wrong repository/actor, protection bypass, force-push requirement, duplicate or replacement PR creation, or corrupt custody. Missing merge authorization remains a durable wait. Request-supplied text, worker assertions, PR authorship, and CI success cannot mint merge authority.
+Stop rather than retry on secret exposure, ambiguous authority, unsafe fabrication requests, wrong repository/actor, protection bypass, force-push requirement, duplicate or replacement PR creation, or corrupt custody. PR publication requires its head/source repository and protected base repository to be the same repository resolved from trusted server-owned task metadata; fork PRs and repository mismatches fail closed as `wrong_repository_or_actor`. Missing merge authorization remains a durable wait. Request-supplied text, worker assertions, PR authorship, and CI success cannot mint merge authority.
 
 Task-owned PR sequence:
 
 ```text
 prepare or refresh one task-owned branch from current origin/main
 → implement and verify
-→ create or reuse exactly one PR
+→ create or reuse exactly one same-repository PR (forks forbidden)
 → observe CI bound to the exact pushed head
 → fetch origin/main again at the sole terminal gate
 → if base moved, merge it without force and repeat verification/CI on the same PR
