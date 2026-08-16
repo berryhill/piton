@@ -1,14 +1,17 @@
 import type { GeometryAuthorityBinding } from "./binding";
 import { sameGeometryBinding } from "./binding";
+import { GEOMETRY_ENVIRONMENT_DIGEST } from "./protocol";
 
 export interface GeometryRequestIdentity {
   requestId: number;
+  workerGeneration: number;
+  sourceRevisionId: string;
+  inputDigest: string;
+  environmentDigest: string;
   binding: GeometryAuthorityBinding;
 }
 
-export interface GeometryResult {
-  requestId: number;
-  binding: GeometryAuthorityBinding;
+export interface GeometryResult extends GeometryRequestIdentity {
   vertices: number[];
   triangles: number[];
 }
@@ -40,20 +43,37 @@ export function installReplacement<T>(
 
 export class GeometryResultGate {
   private currentRequestId = 0;
-  private currentBinding: GeometryAuthorityBinding | null = null;
+  private currentIdentity: GeometryRequestIdentity | null = null;
   lastGood: GeometryResult | null = null;
   lastError: string | null = null;
 
-  begin(binding: GeometryAuthorityBinding): GeometryRequestIdentity {
+  begin(
+    binding: GeometryAuthorityBinding,
+    workerGeneration = 1,
+    inputDigest = binding.previewDigest,
+    environmentDigest = GEOMETRY_ENVIRONMENT_DIGEST,
+  ): GeometryRequestIdentity {
     this.currentRequestId += 1;
-    this.currentBinding = { ...binding };
-    return { requestId: this.currentRequestId, binding: { ...binding } };
+    this.currentIdentity = {
+      requestId: this.currentRequestId,
+      workerGeneration,
+      sourceRevisionId: binding.baseRevisionId,
+      inputDigest,
+      environmentDigest,
+      binding: { ...binding },
+    };
+    return { ...this.currentIdentity, binding: { ...binding } };
   }
 
   isCurrent(identity: GeometryRequestIdentity): boolean {
-    return identity.requestId === this.currentRequestId
-      && this.currentBinding !== null
-      && sameGeometryBinding(identity.binding, this.currentBinding);
+    const current = this.currentIdentity;
+    return current !== null
+      && identity.requestId === current.requestId
+      && identity.workerGeneration === current.workerGeneration
+      && identity.sourceRevisionId === current.sourceRevisionId
+      && identity.inputDigest === current.inputDigest
+      && identity.environmentDigest === current.environmentDigest
+      && sameGeometryBinding(identity.binding, current.binding);
   }
 
   validate(result: GeometryResult): boolean {
