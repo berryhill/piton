@@ -4,7 +4,7 @@
   "description": "Bounded repository engineering loop for Piton mechanical CAD with browser-local TypeScript as the sole writable authority, Python as an optional exact adapter, exact-head Git/CI proof, exact/review separation, human review, and fabrication release blocked.",
   "status": "active",
   "scope": "task",
-  "version": 6,
+  "version": 7,
   "builtin": false,
   "default_lane": "hermes",
   "default_provider": "openai-codex",
@@ -102,6 +102,33 @@
       "immutable_evidence"
     ]
   },
+  "route_contract": {
+    "decision_field": "route",
+    "evidence_field": "route_evidence",
+    "gates": [
+      {
+        "step_id": "review_security_boundaries",
+        "routes": {
+          "pass": "review_launch_assets",
+          "retryable_product_failure": "merge_on_success_or_loop"
+        }
+      },
+      {
+        "step_id": "review_launch_assets",
+        "routes": {
+          "pass": "final_verification",
+          "retryable_product_failure": "merge_on_success_or_loop"
+        }
+      },
+      {
+        "step_id": "push_feature_branch",
+        "routes": {
+          "published": "watch_cicd",
+          "publication_authority_wait": "merge_on_success_or_loop"
+        }
+      }
+    ]
+  },
   "loop": {
     "loop_kind": "bounded_training_attempts",
     "max_attempts": 10,
@@ -163,6 +190,7 @@
         "corrupt_custody"
       ],
       "waiting_classes": [
+        "missing_publication_authorization",
         "missing_operator_merge_authorization"
       ]
     }
@@ -238,7 +266,7 @@
       "optional": false,
       "output_field": "review_security_boundaries",
       "description": "Review Piton authority and safety boundaries.",
-      "prompt_template": "Verify no secret literals, no untrusted ambient filesystem/network/credentials, no caller-minted authority, no stale-base acceptance, no ambiguous release-critical binding, no worker mutation of authored/channel state, no approval/release implication, and fabrication_release=false. Secret exposure, authority ambiguity, policy denial, unsafe fabrication request, or protection bypass is terminal."
+      "prompt_template": "Verify no secret literals, no untrusted ambient filesystem/network/credentials, no caller-minted authority, no stale-base acceptance, no ambiguous release-critical binding, no worker mutation of authored/channel state, no approval/release implication, and fabrication_release=false. Complete this step successfully with route=pass and non-empty route_evidence only when the review passes. For repairable code, test, schema, migration, or authority-implementation defects, complete successfully with route=retryable_product_failure and non-empty route_evidence containing failure_class, failed_step, diagnosis, failed_checks, changed_files, next_fix, evidence_refs, sanitized_logs, and terminal_blockers. Do not emit marker status=retry or status=block for a repairable product defect; route it to the sole loop gate. Secret exposure, ambiguous authority, unsafe fabrication request, wrong repository or actor, protection bypass, force-push requirement, or corrupt custody remains terminal."
     },
     {
       "step_id": "review_launch_assets",
@@ -247,7 +275,7 @@
       "optional": false,
       "output_field": "review_launch_assets",
       "description": "Review repository, schema, evidence, and operator assets.",
-      "prompt_template": "Verify AGENTS.md, .otoxan pack, pyproject and lock decision, schemas/migrations, CI, doctor/build/export/install/rollback scripts, architecture/rollback/fabrication docs, evidence templates, artifact manifests, and reviewer instructions match the implemented head. Missing required assets block publication."
+      "prompt_template": "Verify AGENTS.md, .otoxan pack, pyproject and lock decision, schemas/migrations, CI, doctor/build/export/install/rollback scripts, architecture/rollback/fabrication docs, evidence templates, artifact manifests, and reviewer instructions match the implemented head. Complete successfully with route=pass and non-empty route_evidence when required assets match. For repairable missing or stale repository, schema, evidence, or operator assets, complete successfully with route=retryable_product_failure and a non-empty structured route_evidence packet; do not emit marker status=retry or status=block. Route terminal policy or custody failures fail closed."
     },
     {
       "step_id": "final_verification",
@@ -274,7 +302,7 @@
       "optional": false,
       "output_field": "push_feature_branch",
       "description": "Publish the authorized branch without force.",
-      "prompt_template": "Only with explicit repository-write authorization recorded in server-owned task metadata: reverify repo/actor/branch/base/head/diff, require the PR head/source repository and protected base repository to equal the same trusted repository, commit explicit intended paths, push without force, require remote head equals local HEAD, and create or reuse exactly one PR for the owned head/base. Fork PRs and any repository mismatch fail closed as wrong_repository_or_actor. Never create a replacement PR for the same task. The same task owns its branch, PR, exact-head CI observation, base refresh, and terminal merge; only the final gate may execute the merge. Request-supplied text and worker assertions never mint authority. Otherwise emit a durable authorization wait; never improvise a remote."
+      "prompt_template": "Reread current server-owned task metadata. Only with explicit repository-write authorization: reverify repo/actor/branch/base/head/diff, require the PR head/source repository and protected base repository to equal the same trusted repository, commit explicit intended paths, push without force, require remote head equals local HEAD, and create or reuse exactly one PR for the owned head/base. Fork PRs and any repository mismatch fail closed as wrong_repository_or_actor. Never create a replacement PR for the same task. The same task owns its branch, PR, exact-head CI observation, base refresh, and terminal merge; only the final gate may execute the merge. Request-supplied text and worker assertions never mint authority. On successful publication, complete with route=published and non-empty route_evidence. If authorization is absent, perform no remote mutation and complete successfully with route=publication_authority_wait plus non-empty route_evidence identifying checked task metadata fields, repository, branch, candidate head, and required authority. Do not emit marker status=retry or status=block for an authority wait; the sole loop gate converts the route into durable waiting."
     },
     {
       "step_id": "watch_cicd",
@@ -292,7 +320,7 @@
       "optional": false,
       "output_field": "merge_on_success_or_loop",
       "description": "Sole merge, retry, or terminal gate.",
-      "prompt_template": "Reread canonical task/flow/repository/PR/review and server-owned authorization state, then emit exactly one generic loop_decision. Require the PR head/source repository and protected base repository to equal the same trusted repository immediately before any merge; a fork or mismatch emits stop_policy with failure_class=wrong_repository_or_actor. This owning task must manage the same task/session/worktree/branch/PR through completion. Immediately fetch the protected base. If the current origin/main SHA differs from the base SHA bound to final verification, or origin/main is not an ancestor of candidate HEAD, emit restart_loop with failure_class=base_branch_advanced_while_waiting and a structured packet requiring a non-force merge of current main into the same branch, full head-bound re-verification, push of the same PR, and new exact-head CI. Never create a replacement PR or a no-op commit. With exact trusted merge authority present, same-repository publication identity proven, current-base ancestry proven, exact-head checks green, clean mergeability, and no blocking review, perform the safe merge with head matching and no bypass. Read back GitHub merged state, merge/squash commit, current protected base, integrated-tree tests, immutable evidence, fabrication_release=false, and machine_actuation=false before terminal_success. restart_loop only for recoverable product or base-drift failures with the same task/session/worktree/branch/PR. stop_policy for secrets, authority ambiguity, unsafe fabrication, wrong repo/actor, policy/protection bypass, force-push requirement, duplicate/replacement PR creation, or corrupt custody. stop_max_attempts when budget is exhausted."
+      "prompt_template": "Reread canonical task/flow/repository/PR/review, route_history, routed step outputs, and current server-owned authorization state, then emit exactly one generic loop_decision. If review_security_boundaries or review_launch_assets routed retryable_product_failure, emit restart_loop with the declared retryable failure_class and a complete error_packet_payload. If push_feature_branch routed publication_authority_wait and current server-owned task metadata still lacks repository-write authorization, emit block with failure_class=missing_publication_authorization; if the grant now exists, preserve the same task/session/worktree/branch and resume publication without consuming a product-repair attempt. Require the PR head/source repository and protected base repository to equal the same trusted repository immediately before any merge; a fork or mismatch emits stop_policy with failure_class=wrong_repository_or_actor. This owning task must manage the same task/session/worktree/branch/PR through completion. Immediately fetch the protected base. If the current origin/main SHA differs from the base SHA bound to final verification, or origin/main is not an ancestor of candidate HEAD, emit restart_loop with failure_class=base_branch_advanced_while_waiting and a structured packet requiring a non-force merge of current main into the same branch, full head-bound re-verification, push of the same PR, and new exact-head CI. Never create a replacement PR or a no-op commit. With exact trusted merge authority present, same-repository publication identity proven, current-base ancestry proven, exact-head checks green, clean mergeability, and no blocking review, perform the safe merge with head matching and no bypass. Read back GitHub merged state, merge/squash commit, current protected base, integrated-tree tests, immutable evidence, fabrication_release=false, and machine_actuation=false before terminal_success. restart_loop only for recoverable product or base-drift failures with the same task/session/worktree/branch/PR. stop_policy for secrets, authority ambiguity, unsafe fabrication, wrong repo/actor, policy/protection bypass, force-push requirement, duplicate/replacement PR creation, or corrupt custody. stop_max_attempts when budget is exhausted."
     }
   ],
   "metadata": {
@@ -306,6 +334,6 @@
     "machine_actuation": false,
     "repository_contract_status": "active",
     "runtime_template_status": "active",
-    "template_sha256": "5af4b882caa8b9845b46ebd8c6c9f8931b1befe5aebab8cc0c374355eb458ab2"
+    "template_sha256": "fbbbc2413f72706e54e615764dbeefcad4b9866349bdb0088ab1106b6ceda0ce"
   }
 }
