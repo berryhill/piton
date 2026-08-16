@@ -130,9 +130,12 @@ REQUIRED = [
     ROOT / "docs/rollback.md",
     ROOT / "docs/fabrication-safety.md",
     ROOT / "docs/threat-model.md",
+    ROOT / "docs/baseline-freeze-8af59d7.md",
+    ROOT / "docs/migration-inventory.md",
     ROOT / "tests/test_launch_assets.py",
     ROOT / "tests/test_sandbox_preflight.py",
     ROOT / "tests/test_supply_chain_gate.py",
+    ROOT / "tests/test_cutover_artifacts.py",
     ROOT / ".github/workflows/ci.yml",
 ]
 
