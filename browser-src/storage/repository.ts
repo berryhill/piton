@@ -3,6 +3,8 @@ import type { BrowserProject, CandidateCommand, DesignRevision } from "../domain
 import { assertProjectIntegrity, deriveCandidateFromCommand, seedProject } from "../domain";
 import { CURRENT_SCHEMA_VERSION, migrationStatements } from "./schema";
 import type { GeometryAuthorityBinding } from "../geometry/binding";
+import type { ChannelPointer, LifecycleRecord } from "../lifecycle";
+import { assertLifecycleRecord } from "../lifecycle";
 
 export interface BuildStatus {
   projectId: string;
@@ -38,12 +40,16 @@ export interface ProjectRepository {
   commitCandidate(expectedCurrentRevisionId: string, command: CandidateCommand): Promise<BrowserProject>;
   loadBuildStatus(projectId: string): Promise<BuildStatus | null>;
   saveBuildStatus(status: BuildStatus): Promise<void>;
+  appendLifecycleRecord(record: Exclude<LifecycleRecord, ChannelPointer>): Promise<void>;
+  moveChannel(pointer: ChannelPointer, expectedVersion: number): Promise<void>;
+  loadLifecycleRecords(projectId: string): Promise<LifecycleRecord[]>;
   persistenceLabel: string;
 }
 
 export class MemoryProjectRepository implements ProjectRepository {
   private project: BrowserProject | null = null;
   private buildStatus: BuildStatus | null = null;
+  private lifecycleRecords: LifecycleRecord[] = [];
   persistenceLabel = "test memory";
 
   async load(): Promise<BrowserProject | null> {
@@ -82,6 +88,54 @@ export class MemoryProjectRepository implements ProjectRepository {
     if (!this.project) throw new Error("project is not initialized");
     assertBuildStatusBinding(status, this.project);
     this.buildStatus = structuredClone(status);
+  }
+
+  async appendLifecycleRecord(record: Exclude<LifecycleRecord, ChannelPointer>): Promise<void> {
+    if (!this.project) throw new Error("project is not initialized");
+    assertLifecycleWrite(record, this.project, this.lifecycleRecords);
+    if (["approval_record", "draft_export", "fabrication_release", "released_package_projection"].includes(record.kind)) {
+      throw new Error("Stage 1 lifecycle authority is not implemented");
+    }
+    if (this.lifecycleRecords.some((existing) => "id" in existing && existing.id === record.id)) {
+      throw new Error("duplicate lifecycle identity");
+    }
+    this.lifecycleRecords.push(structuredClone(record));
+  }
+
+  async moveChannel(pointer: ChannelPointer, expectedVersion: number): Promise<void> {
+    if (!this.project) throw new Error("project is not initialized");
+    assertLifecycleWrite(pointer, this.project, this.lifecycleRecords);
+    const index = this.lifecycleRecords.findIndex((record) => record.kind === "channel_pointer" && record.channel === pointer.channel);
+    const actualVersion = index < 0 ? 0 : (this.lifecycleRecords[index] as ChannelPointer).version;
+    if (actualVersion !== expectedVersion || pointer.version !== expectedVersion + 1) throw new Error("stale channel pointer");
+    if (index < 0) this.lifecycleRecords.push(structuredClone(pointer));
+    else this.lifecycleRecords[index] = structuredClone(pointer);
+  }
+
+  async loadLifecycleRecords(projectId: string): Promise<LifecycleRecord[]> {
+    if (!this.project || projectId !== this.project.id) throw new Error("lifecycle project authority mismatch");
+    this.lifecycleRecords.forEach(assertLifecycleRecord);
+    return structuredClone(this.lifecycleRecords);
+  }
+}
+
+function assertLifecycleWrite(record: LifecycleRecord, project: BrowserProject, existing: readonly LifecycleRecord[]): void {
+  assertLifecycleRecord(record);
+  if (record.projectId !== project.id) throw new Error("lifecycle project authority mismatch");
+  const revisionIds = new Set(project.revisions.map((revision) => revision.id));
+  const boundRevision = record.kind === "change_proposal" ? record.baseRevisionId
+    : "revisionId" in record ? record.revisionId : undefined;
+  if (boundRevision && !revisionIds.has(boundRevision)) throw new Error("lifecycle revision reference is missing");
+  if (record.kind === "proposal_disposition") {
+    const proposal = existing.find((item) => item.kind === "change_proposal" && item.id === record.proposalId);
+    if (!proposal) throw new Error("proposal disposition reference is missing");
+  }
+  if (record.kind === "evidence_closure") {
+    const attempt = existing.find((item) => item.kind === "build_attempt" && item.id === record.buildAttemptId);
+    if (!attempt || attempt.kind !== "build_attempt") throw new Error("evidence build attempt reference is missing");
+    if (attempt.projectId !== record.projectId || attempt.revisionId !== record.revisionId || attempt.state !== "succeeded") {
+      throw new Error("evidence build attempt binding is invalid");
+    }
   }
 }
 
@@ -123,6 +177,33 @@ export function waitForSqliteWorker(
   });
 }
 
+export function startSqliteWorker(): Promise<Worker1Promiser> {
+  return waitForSqliteWorker(({ onready, onerror }) => sqlite3Worker1Promiser({ onready, onerror }));
+}
+
+export async function migrateSqliteDatabase(promiser: Worker1Promiser, dbId: string): Promise<void> {
+  const exec = (sql: string) => promiser({
+    type: "exec", dbId, args: { sql, returnValue: "resultRows", rowMode: "object" },
+  });
+  const versionResult = await exec("PRAGMA user_version");
+  const fromVersion = Number((versionResult.result.resultRows as Row[])[0]?.user_version);
+  const migrations = migrationStatements(fromVersion);
+  if (migrations.length) {
+    await exec("BEGIN IMMEDIATE");
+    try {
+      for (const sql of migrations) await exec(sql);
+      await exec("COMMIT");
+    } catch (error) {
+      await exec("ROLLBACK");
+      throw error;
+    }
+  }
+  const migratedVersion = await exec("PRAGMA user_version");
+  if (Number((migratedVersion.result.resultRows as Row[])[0]?.user_version) !== CURRENT_SCHEMA_VERSION) {
+    throw new Error("SQLite schema migration did not reach the supported version");
+  }
+}
+
 export class SqliteOpfsProjectRepository implements ProjectRepository {
   private promiser!: Worker1Promiser;
   private dbId!: string;
@@ -133,28 +214,10 @@ export class SqliteOpfsProjectRepository implements ProjectRepository {
       throw new Error("OPFS persistence requires a cross-origin-isolated browser context");
     }
     const repository = new SqliteOpfsProjectRepository();
-    repository.promiser = await waitForSqliteWorker(({ onready, onerror }) => {
-      sqlite3Worker1Promiser({ onready, onerror });
-    });
+    repository.promiser = await startSqliteWorker();
     const opened = await repository.promiser("open", { filename: "file:piton.sqlite3?vfs=opfs" });
     repository.dbId = opened.result.dbId;
-    const versionResult = await repository.exec("PRAGMA user_version");
-    const fromVersion = Number((versionResult.result.resultRows as Row[])[0]?.user_version);
-    const migrations = migrationStatements(fromVersion);
-    if (migrations.length) {
-      await repository.exec("BEGIN IMMEDIATE");
-      try {
-        for (const sql of migrations) await repository.exec(sql);
-        await repository.exec("COMMIT");
-      } catch (error) {
-        await repository.exec("ROLLBACK");
-        throw error;
-      }
-    }
-    const migratedVersion = await repository.exec("PRAGMA user_version");
-    if (Number((migratedVersion.result.resultRows as Row[])[0]?.user_version) !== CURRENT_SCHEMA_VERSION) {
-      throw new Error("SQLite schema migration did not reach the supported version");
-    }
+    await migrateSqliteDatabase(repository.promiser, repository.dbId);
     return repository;
   }
 
@@ -290,6 +353,103 @@ export class SqliteOpfsProjectRepository implements ProjectRepository {
         message=excluded.message`,
       [status.projectId, status.requestId, status.binding.baseRevisionId, status.binding.previewDigest,
         status.state, status.message]);
+  }
+
+  async appendLifecycleRecord(record: Exclude<LifecycleRecord, ChannelPointer>): Promise<void> {
+    if (["approval_record", "draft_export", "fabrication_release", "released_package_projection"].includes(record.kind)) {
+      throw new Error("Stage 1 lifecycle authority is not implemented");
+    }
+    await this.exec("BEGIN IMMEDIATE");
+    try {
+      const project = await this.load();
+      if (!project) throw new Error("project is not initialized");
+      const existing = await this.loadLifecycleRecords(project.id);
+      assertLifecycleWrite(record, project, existing);
+      if (existing.some((item) => "id" in item && item.id === record.id)) throw new Error("duplicate lifecycle identity");
+      switch (record.kind) {
+        case "change_proposal":
+          await this.exec("INSERT INTO change_proposals (id, project_id, base_revision_id, command_json, created_at) VALUES (?, ?, ?, ?, ?)",
+            [record.id, record.projectId, record.baseRevisionId, JSON.stringify(record.command), record.createdAt]);
+          break;
+        case "proposal_disposition":
+          await this.exec("INSERT INTO proposal_dispositions (id, project_id, proposal_id, disposition, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            [record.id, record.projectId, record.proposalId, record.disposition, record.reason, record.createdAt]);
+          break;
+        case "build_attempt":
+          await this.exec("INSERT INTO build_attempts (id, project_id, revision_id, recipe_digest, state, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            [record.id, record.projectId, record.revisionId, record.recipeDigest, record.state, record.createdAt]);
+          break;
+        case "evidence_closure":
+          await this.exec("INSERT INTO evidence_closures (id, project_id, revision_id, build_attempt_id, requirements_json, artifacts_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [record.id, record.projectId, record.revisionId, record.buildAttemptId,
+              JSON.stringify(record.requirementIds), JSON.stringify(record.artifactDigests), record.createdAt]);
+          break;
+        default:
+          throw new Error("Stage 1 lifecycle authority is not implemented");
+      }
+      await this.exec("COMMIT");
+    } catch (error) {
+      await this.exec("ROLLBACK");
+      if (error instanceof Error && /UNIQUE constraint failed/.test(error.message)) throw new Error("duplicate lifecycle identity");
+      throw error;
+    }
+  }
+
+  async moveChannel(pointer: ChannelPointer, expectedVersion: number): Promise<void> {
+    await this.exec("BEGIN IMMEDIATE");
+    try {
+      const project = await this.load();
+      if (!project) throw new Error("project is not initialized");
+      assertLifecycleWrite(pointer, project, await this.loadLifecycleRecords(project.id));
+      if (pointer.version !== expectedVersion + 1) throw new Error("stale channel pointer");
+      if (expectedVersion === 0) {
+        await this.exec("INSERT INTO channel_pointers (project_id, channel, revision_id, version, updated_at) VALUES (?, ?, ?, ?, ?)",
+          [pointer.projectId, pointer.channel, pointer.revisionId, pointer.version, pointer.updatedAt]);
+      } else {
+        await this.exec("UPDATE channel_pointers SET revision_id = ?, version = ?, updated_at = ? WHERE project_id = ? AND channel = ? AND version = ?",
+          [pointer.revisionId, pointer.version, pointer.updatedAt, pointer.projectId, pointer.channel, expectedVersion]);
+        const changes = await this.exec("SELECT changes() AS changed_rows");
+        if (Number((changes.result.resultRows as Row[])[0]?.changed_rows ?? 0) !== 1) throw new Error("stale channel pointer");
+      }
+      await this.exec("COMMIT");
+    } catch (error) {
+      await this.exec("ROLLBACK");
+      if (error instanceof Error && /UNIQUE constraint failed/.test(error.message)) throw new Error("stale channel pointer");
+      throw error;
+    }
+  }
+
+  async loadLifecycleRecords(projectId: string): Promise<LifecycleRecord[]> {
+    const project = await this.load();
+    if (!project || project.id !== projectId) throw new Error("lifecycle project authority mismatch");
+    const records: LifecycleRecord[] = [];
+    const rows = async (table: string) => (await this.exec(`SELECT * FROM ${table} WHERE project_id = ? ORDER BY created_at, rowid`, [projectId])).result.resultRows as Row[];
+    for (const row of await rows("change_proposals")) records.push({
+      kind: "change_proposal", id: String(row.id), projectId: String(row.project_id), baseRevisionId: String(row.base_revision_id),
+      command: JSON.parse(String(row.command_json)) as CandidateCommand, createdAt: String(row.created_at),
+    });
+    for (const row of await rows("proposal_dispositions")) records.push({
+      kind: "proposal_disposition", id: String(row.id), projectId: String(row.project_id), proposalId: String(row.proposal_id),
+      disposition: String(row.disposition) as "changes_requested" | "accepted_for_build" | "accepted_for_review",
+      reason: String(row.reason), createdAt: String(row.created_at),
+    });
+    for (const row of await rows("build_attempts")) records.push({
+      kind: "build_attempt", id: String(row.id), projectId: String(row.project_id), revisionId: String(row.revision_id),
+      recipeDigest: String(row.recipe_digest), state: String(row.state) as "admitted" | "running" | "succeeded" | "failed" | "blocked",
+      createdAt: String(row.created_at),
+    });
+    for (const row of await rows("evidence_closures")) records.push({
+      kind: "evidence_closure", id: String(row.id), projectId: String(row.project_id), revisionId: String(row.revision_id),
+      buildAttemptId: String(row.build_attempt_id), requirementIds: JSON.parse(String(row.requirements_json)) as string[],
+      artifactDigests: JSON.parse(String(row.artifacts_json)) as string[], createdAt: String(row.created_at),
+    });
+    const pointerResult = await this.exec("SELECT * FROM channel_pointers WHERE project_id = ? ORDER BY channel", [projectId]);
+    for (const row of pointerResult.result.resultRows as Row[]) records.push({
+      kind: "channel_pointer", projectId: String(row.project_id), channel: String(row.channel) as "workspace" | "candidate" | "review",
+      revisionId: String(row.revision_id), version: Number(row.version), updatedAt: String(row.updated_at),
+    });
+    records.forEach(assertLifecycleRecord);
+    return records;
   }
 
   async readMigrationEvidence(): Promise<SqliteMigrationEvidence> {

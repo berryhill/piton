@@ -62,12 +62,90 @@ test("SQLite WASM reports migrated schema and direct durable readback", async ({
   });
 
   expect(evidence).toEqual({
-    sqliteUserVersion: 2,
-    projectSchemaVersion: 2,
+    sqliteUserVersion: 3,
+    projectSchemaVersion: 3,
     projectId: "piton-seeded-l-bracket",
     revisionCount: expect.any(Number),
     currentRevisionReadback: expect.stringMatching(/^rev-[0-9a-f]{64}$/),
-    tables: ["build_status", "projects", "revisions"],
+    tables: [
+      "approval_records", "build_attempts", "build_status", "change_proposals",
+      "channel_pointers", "draft_exports", "evidence_closures", "fabrication_releases",
+      "projects", "proposal_dispositions", "released_package_projections", "revisions",
+    ],
   });
   expect(evidence.revisionCount).toBeGreaterThanOrEqual(1);
+});
+
+test("executes a version-2 OPFS migration and durably reopens lifecycle custody", async ({ page }) => {
+  await page.goto("/@vite/client");
+  const evidence = await page.evaluate(async () => {
+    const { migrateSqliteDatabase, startSqliteWorker } = await import("../../browser-src/storage/repository");
+    const { seedProject } = await import("../../browser-src/domain");
+    const promiser = await startSqliteWorker();
+    const filename = "file:piton-migration-v2.sqlite3?vfs=opfs";
+    const open = async () => (await promiser("open", { filename })).result.dbId;
+    const exec = async (dbId: string, sql: string, bind?: (string | number | null)[]) => promiser({
+      type: "exec", dbId, args: { sql, bind, returnValue: "resultRows", rowMode: "object" },
+    });
+
+    let dbId = await open();
+    const oldTables = await exec(dbId, "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+    for (const row of oldTables.result.resultRows as { name: string }[]) await exec(dbId, `DROP TABLE ${row.name}`);
+    await exec(dbId, `CREATE TABLE projects (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, accepted_revision_id TEXT NOT NULL,
+      current_revision_id TEXT NOT NULL, schema_version INTEGER NOT NULL) STRICT`);
+    await exec(dbId, `CREATE TABLE revisions (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_revision_id TEXT, created_at TEXT NOT NULL,
+      authority_profile TEXT NOT NULL, parameters_json TEXT NOT NULL, review_state TEXT NOT NULL,
+      fabrication_release INTEGER NOT NULL, machine_actuation INTEGER NOT NULL, release_state TEXT NOT NULL,
+      UNIQUE(project_id, id)) STRICT`);
+    await exec(dbId, `CREATE TABLE build_status (
+      project_id TEXT PRIMARY KEY, request_id INTEGER NOT NULL, base_revision_id TEXT NOT NULL,
+      preview_digest TEXT NOT NULL, state TEXT NOT NULL, message TEXT NOT NULL) STRICT`);
+    const project = seedProject();
+    const revision = project.revisions[0];
+    await exec(dbId, "INSERT INTO projects VALUES (?, ?, ?, ?, 2)",
+      [project.id, project.name, project.acceptedRevisionId, project.currentRevisionId]);
+    await exec(dbId, "INSERT INTO revisions VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?)", [
+      revision.id, project.id, revision.parentRevisionId, revision.createdAt, revision.authorityProfile,
+      JSON.stringify(revision.parameters), revision.reviewState, revision.releaseState,
+    ]);
+    await exec(dbId, "PRAGMA user_version = 2");
+    await promiser({ type: "close", dbId });
+
+    dbId = await open();
+    await migrateSqliteDatabase(promiser, dbId);
+    const version = await exec(dbId, "PRAGMA user_version");
+    const migratedProject = await exec(dbId, "SELECT * FROM projects");
+    const migratedRevision = await exec(dbId, "SELECT * FROM revisions");
+    await exec(dbId, "INSERT INTO change_proposals VALUES (?, ?, ?, ?, ?)", [
+      `proposal-${"1".repeat(64)}`, project.id, revision.id,
+      JSON.stringify({ type: "set-leg-length", value: 90 }), "2026-08-16T00:00:00.000Z",
+    ]);
+    await promiser({ type: "close", dbId });
+
+    dbId = await open();
+    const proposal = await exec(dbId, "SELECT * FROM change_proposals");
+    const tables = await exec(dbId, "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
+    await promiser({ type: "close", dbId });
+    return {
+      version: (version.result.resultRows as { user_version: number }[])[0].user_version,
+      project: (migratedProject.result.resultRows as Record<string, unknown>[])[0],
+      revision: (migratedRevision.result.resultRows as Record<string, unknown>[])[0],
+      proposal: (proposal.result.resultRows as Record<string, unknown>[])[0],
+      tables: (tables.result.resultRows as { name: string }[]).map((row) => row.name),
+    };
+  });
+
+  expect(evidence.version).toBe(3);
+  expect(evidence.project.schema_version).toBe(3);
+  expect(evidence.project.accepted_revision_id).toBe(evidence.revision.id);
+  expect(evidence.project.current_revision_id).toBe(evidence.revision.id);
+  expect(evidence.revision.authority_profile).toBe("browser-typescript/v1");
+  expect(evidence.revision.review_state).toBe("needs_human_review");
+  expect(evidence.revision.fabrication_release).toBe(0);
+  expect(evidence.revision.machine_actuation).toBe(0);
+  expect(evidence.proposal.base_revision_id).toBe(evidence.revision.id);
+  expect(evidence.tables).toContain("evidence_closures");
+  expect(evidence.tables).toContain("fabrication_releases");
 });
