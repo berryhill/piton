@@ -4,10 +4,23 @@ import Viewport from "./components/Viewport";
 import type { BuildStatus, ProjectRepository } from "./storage/repository";
 import { openSeededRepository } from "./storage/repository";
 import type { MeshBounds } from "./geometry/view";
+import { reviewDistanceMm } from "./geometry/view";
 import { durableGeometryStatusLabel } from "./geometry/binding";
 import "./styles.css";
 
 interface Props { repository?: ProjectRepository; geometryDisabled?: boolean; }
+
+type FixtureKind = "part" | "assembly";
+type SelectionMode = "smart" | "face" | "component";
+export type SemanticSelectionId = "face:top" | "component:l-bracket:1" | "origin" | "plane:top" | "mate:review-only";
+
+const SEMANTIC_SELECTIONS: ReadonlyArray<{ id: SemanticSelectionId; label: string }> = [
+  { id: "face:top", label: "Top review face" },
+  { id: "component:l-bracket:1", label: "Component / reference" },
+  { id: "origin", label: "Origin" },
+  { id: "plane:top", label: "Top plane" },
+  { id: "mate:review-only", label: "Review mate" },
+];
 
 export default function App({ repository: suppliedRepository, geometryDisabled }: Props) {
   const [repository, setRepository] = useState<ProjectRepository | null>(suppliedRepository ?? null);
@@ -16,6 +29,12 @@ export default function App({ repository: suppliedRepository, geometryDisabled }
   const [message, setMessage] = useState("Opening browser-local custody…");
   const [durableBuildStatus, setDurableBuildStatus] = useState<BuildStatus | null>(null);
   const [renderedBounds, setRenderedBounds] = useState<MeshBounds | null>(null);
+  const [fixtureKind, setFixtureKind] = useState<FixtureKind>("part");
+  const [selectionMode, setSelectionMode] = useState<SelectionMode>("smart");
+  const [navigationContext, setNavigationContext] = useState("Source-Part · L-bracket Part");
+  const [currentSelection, setCurrentSelection] = useState<SemanticSelectionId | null>(null);
+  const [attachedContext, setAttachedContext] = useState<{ id: SemanticSelectionId; label: string; revisionId: string } | null>(null);
+  const [measurementMm, setMeasurementMm] = useState<number | null>(null);
 
   useEffect(() => { void (async () => {
     try {
@@ -38,6 +57,29 @@ export default function App({ repository: suppliedRepository, geometryDisabled }
     return { ...current.parameters, leg_length_mm: value };
   }, [current, value]);
   const changed = Boolean(current && previewParameters && value !== current.parameters.leg_length_mm);
+  const currentSelectionLabel = SEMANTIC_SELECTIONS.find((selection) => selection.id === currentSelection)?.label ?? "None";
+
+  function selectSemantic(id: SemanticSelectionId) {
+    setCurrentSelection(id);
+    setMeasurementMm(null);
+  }
+
+  function measureSelection() {
+    if (!previewParameters || !currentSelection) return;
+    const height = previewParameters.base_thickness_mm + previewParameters.leg_length_mm;
+    const endpointBySelection: Record<SemanticSelectionId, [number, number, number]> = {
+      "face:top": [0, 0, previewParameters.leg_length_mm],
+      "component:l-bracket:1": [previewParameters.base_length_mm, previewParameters.leg_width_mm, height],
+      origin: [0, 0, 0],
+      "plane:top": [previewParameters.base_length_mm, 0, 0],
+      "mate:review-only": [previewParameters.leg_thickness_mm, previewParameters.leg_width_mm, 0],
+    };
+    setMeasurementMm(reviewDistanceMm([0, 0, 0], endpointBySelection[currentSelection]));
+  }
+
+  useEffect(() => {
+    if (!previewParameters) setMeasurementMm(null);
+  }, [previewParameters]);
 
   async function commit() {
     if (!project || !repository || !changed) return;
@@ -70,7 +112,39 @@ export default function App({ repository: suppliedRepository, geometryDisabled }
       <Truth label="release_state" value={current.releaseState} />
     </section>
     <div className="workspace">
-      <aside className="panel"><h2>Source parameters</h2><p className="muted">TypeScript authored authority</p>
+      <aside className="panel model-panel">
+        <h2>Review fixture</h2>
+        <div className="segmented" role="group" aria-label="Review fixture kind">
+          <button aria-pressed={fixtureKind === "part"} onClick={() => { setFixtureKind("part"); setSelectionMode("smart"); }}>Part fixture</button>
+          <button aria-pressed={fixtureKind === "assembly"} onClick={() => setFixtureKind("assembly")}>Assembly fixture</button>
+        </div>
+        <p className="boundary-note">{fixtureKind === "assembly"
+          ? "Assembly fixture is review-only interaction evidence. It cannot author occurrences, mates, transforms, or Assembly revisions."
+          : "Part is the active consequential Stage 1 artifact."}</p>
+        <h2>Model tree</h2>
+        <nav className="model-tree" aria-label="Model tree">
+          <button onClick={() => setNavigationContext("Source-Part · L-bracket Part")}>▣ Source-Part · L-bracket Part</button>
+          <button onClick={() => setNavigationContext("Displayed occurrence · L-bracket:1")}>◇ Displayed occurrence · L-bracket:1</button>
+        </nav>
+        <div className="navigation-context" data-testid="navigation-context">Navigation: {navigationContext}</div>
+        <h2>Selection</h2>
+        <div className="segmented" role="group" aria-label="Selection mode">
+          {(["smart", "face", "component"] as const).map((mode) => <button key={mode} disabled={fixtureKind === "part" && mode === "component"} aria-pressed={selectionMode === mode} onClick={() => setSelectionMode(mode)}>{mode[0].toUpperCase() + mode.slice(1)}</button>)}
+        </div>
+        <div className="semantic-list" aria-label="Fixture-local semantic review selections">
+          {SEMANTIC_SELECTIONS.map((selection) => <button key={selection.id} aria-pressed={currentSelection === selection.id} onClick={() => selectSemantic(selection.id)}>{selection.label}</button>)}
+        </div>
+        <div className="context-card"><span>Current selection</span><b data-testid="current-selection">{currentSelectionLabel}</b></div>
+        <div className="context-card"><span>Attached context</span><b data-testid="attached-context">{attachedContext ? `${attachedContext.label} · ${attachedContext.revisionId}` : "None"}</b></div>
+        <div className="context-actions">
+          <button disabled={!currentSelection || !current} onClick={() => {
+            const selection = SEMANTIC_SELECTIONS.find((candidate) => candidate.id === currentSelection);
+            if (selection && current) setAttachedContext({ ...selection, revisionId: current.id });
+          }}>Attach current selection</button>
+          <button disabled={!currentSelection} onClick={() => { setCurrentSelection(null); setMeasurementMm(null); }}>Clear current selection</button>
+        </div>
+        <small className="identity-note">Fixture-local review IDs · admitted artifact scope · not durable topology.</small>
+        <h2>Source parameters</h2><p className="muted">TypeScript authored authority</p>
         <label>Leg length (mm)<input aria-label="Leg length (mm)" type="number" min="40" max="160" value={value} onChange={(e) => setValue(Number(e.target.value))} /></label>
         <div className="zone selected"><b>Selected zone</b><span>Vertical leg height</span><small>Bounded 40–160 mm</small></div>
         <Parameter label="Leg width" value={current.parameters.leg_width_mm} />
@@ -83,6 +157,7 @@ export default function App({ repository: suppliedRepository, geometryDisabled }
         parameters={(previewParameters ?? current.parameters) as DesignRevision["parameters"]}
         authoritativeBase={current}
         disabled={geometryDisabled}
+        semanticSelection={currentSelection}
         onGeometryAdmitted={(bounds) => setRenderedBounds(bounds)}
         onBuildStatus={(status) => {
           if (!repository) return;
@@ -95,6 +170,12 @@ export default function App({ repository: suppliedRepository, geometryDisabled }
         <div className="bbox">{renderedBounds
           ? <>BBOX <b>{renderedBounds.size.map(formatMillimetres).join(" × ")} mm</b></>
           : "BBOX awaiting admitted review geometry"}</div>
+        <div className="measurement-panel">
+          <button disabled={!currentSelection || !previewParameters} onClick={measureSelection}>Measure selected review entity</button>
+          <output data-testid="review-measurement">{measurementMm === null
+            ? "Review-mesh distance · select an entity"
+            : `Approx. review-mesh distance ${formatMillimetres(measurementMm)} mm · review-only, not exact B-rep`}</output>
+        </div>
       </section>
       <aside className="panel revision"><h2>Revision custody</h2><div className="state-card"><span>Accepted immutable revision</span><code>{accepted.id}</code><small>Retained unchanged</small></div>
         <div className="state-card"><span>Current revision</span><code>{current.id}</code></div>
@@ -104,6 +185,7 @@ export default function App({ repository: suppliedRepository, geometryDisabled }
           <span>Durable preview status · {durableGeometryStatusLabel(durableBuildStatus.binding, current.id)}</span>
           <b>{durableBuildStatus.state}</b><small>{durableBuildStatus.message}</small>
         </div> : <p className="muted">No durable preview status recovered.</p>}
+        <div className="state-card validation-issues"><span>Validation / issues</span><b>Review checks only</b><small>Exact B-rep checks not run · no fabrication suitability or release claim</small></div>
         <div className="disclosure"><b>Claim scope</b><p>Browser Manifold mesh is review geometry, not exact B-rep or topology authority. Commit does not approve, export, release, or actuate.</p></div>
       </aside>
     </div>

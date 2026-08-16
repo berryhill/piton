@@ -73,8 +73,67 @@ describe("Piton workbench", () => {
   it("does not display an invalid raw input as rendered bbox truth", async () => {
     render(<App repository={new MemoryProjectRepository()} geometryDisabled />);
     await screen.findByText("Accepted immutable revision");
+    fireEvent.click(screen.getByRole("button", { name: "Top review face" }));
+    fireEvent.click(screen.getByRole("button", { name: "Measure selected review entity" }));
+    expect(screen.getByTestId("review-measurement")).toHaveTextContent("80 mm");
     fireEvent.change(screen.getByLabelText("Leg length (mm)"), { target: { value: "999" } });
     expect(screen.getByText("BBOX awaiting admitted review geometry")).toBeVisible();
     expect(screen.queryByText(/1007 mm/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("review-measurement")).toHaveTextContent("select an entity");
+    expect(screen.getByText("Validation / issues")).toBeVisible();
+  });
+
+  it("exposes R14 fixture, semantic navigation, and selection vocabulary without authoring an Assembly", async () => {
+    render(<App repository={new MemoryProjectRepository()} geometryDisabled />);
+    await screen.findByText("Accepted immutable revision");
+
+    expect(screen.getByRole("button", { name: "Part fixture" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Assembly fixture" }));
+    expect(screen.getByText(/review-only interaction evidence/i)).toBeVisible();
+    expect(screen.getByText(/cannot author occurrences, mates, transforms, or Assembly revisions/i)).toBeVisible();
+
+    expect(screen.getByRole("navigation", { name: "Model tree" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /Source-Part/ }));
+    expect(screen.getByTestId("navigation-context")).toHaveTextContent("Source-Part");
+    fireEvent.click(screen.getByRole("button", { name: /Displayed occurrence/ }));
+    expect(screen.getByTestId("navigation-context")).toHaveTextContent("Displayed occurrence");
+
+    for (const mode of ["Smart", "Face", "Component"]) {
+      expect(screen.getByRole("button", { name: mode })).toBeVisible();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Component" }));
+    expect(screen.getByRole("button", { name: "Component" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Smart" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("keeps current selection separate from explicitly attached review context", async () => {
+    render(<App repository={new MemoryProjectRepository()} geometryDisabled />);
+    await screen.findByText("Accepted immutable revision");
+
+    fireEvent.click(screen.getByRole("button", { name: "Top review face" }));
+    expect(screen.getByTestId("current-selection")).toHaveTextContent("Top review face");
+    fireEvent.click(screen.getByRole("button", { name: "Attach current selection" }));
+    expect(screen.getByTestId("attached-context")).toHaveTextContent("Top review face");
+
+    fireEvent.click(screen.getByRole("button", { name: "Origin" }));
+    expect(screen.getByTestId("current-selection")).toHaveTextContent("Origin");
+    expect(screen.getByTestId("attached-context")).toHaveTextContent("Top review face");
+    fireEvent.click(screen.getByRole("button", { name: "Clear current selection" }));
+    expect(screen.getByTestId("current-selection")).toHaveTextContent("None");
+    expect(screen.getByTestId("attached-context")).toHaveTextContent("Top review face");
+  });
+
+  it("labels all fixture-local highlight categories and measurement as review-only", async () => {
+    render(<App repository={new MemoryProjectRepository()} geometryDisabled />);
+    await screen.findByText("Accepted immutable revision");
+
+    for (const selection of ["Top review face", "Component / reference", "Origin", "Top plane", "Review mate"]) {
+      expect(screen.getByRole("button", { name: selection })).toBeVisible();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Top review face" }));
+    fireEvent.click(screen.getByRole("button", { name: "Measure selected review entity" }));
+    expect(screen.getByTestId("review-measurement")).toHaveTextContent(/mm/);
+    expect(screen.getByTestId("review-measurement")).toHaveTextContent(/review-mesh/i);
+    expect(screen.getByText(/fixture-local review IDs.*not durable topology/i)).toBeVisible();
   });
 });

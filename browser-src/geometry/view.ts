@@ -26,6 +26,21 @@ export interface CameraFit {
   far: number;
 }
 
+export type CameraPreset = "iso" | "front" | "top";
+
+export function cameraPresetDirection(preset: CameraPreset): Vector3Value {
+  if (preset === "front") return { x: 0, y: -1, z: 0 };
+  if (preset === "top") return { x: 0, y: 0, z: 1 };
+  return { x: 1, y: -1, z: 0.75 };
+}
+
+export function reviewDistanceMm(
+  start: [number, number, number],
+  end: [number, number, number],
+): number {
+  return Math.hypot(end[0] - start[0], end[1] - start[1], end[2] - start[2]);
+}
+
 export function meshBounds(vertices: number[]): MeshBounds {
   if (vertices.length < 3 || vertices.length % 3 !== 0 || vertices.some((value) => !Number.isFinite(value))) {
     throw new Error("cannot derive bounds from malformed geometry");
