@@ -2,14 +2,102 @@ import { describe, expect, it } from "vitest";
 import { GeometryResultGate, installReplacement } from "../browser-src/geometry/gate";
 import { deriveGeometryBinding, durableGeometryStatusLabel } from "../browser-src/geometry/binding";
 import { seedProject } from "../browser-src/domain";
-import { constructGeometryWorker, postGeometryWorkerMessage, type GeometryWorkerSurface } from "../browser-src/geometry/workerClient";
+import {
+  constructGeometryWorker,
+  geometryWorkerGeneration,
+  postGeometryWorkerMessage,
+  type GeometryWorkerSurface,
+} from "../browser-src/geometry/workerClient";
 import { bracketHole } from "../browser-src/geometry/bracket";
+import {
+  GEOMETRY_ENVIRONMENT_DIGEST,
+  geometryInputDigest,
+  parseGeometryBuildRequest,
+  parseGeometryWorkerMessage,
+  type GeometryBuildRequest,
+  type GeometryWorkerSuccess,
+} from "../browser-src/geometry/protocol";
 
 const base = seedProject().revisions[0];
 const committedBinding = deriveGeometryBinding(base, base.parameters);
 const previewBinding = deriveGeometryBinding(base, { ...base.parameters, leg_length_mm: 90 });
 
 describe("geometry result admission", () => {
+  const protocolRequest = (overrides: Partial<GeometryBuildRequest> = {}): GeometryBuildRequest => ({
+    type: "build-review-mesh",
+    requestId: 1,
+    workerGeneration: 1,
+    sourceRevisionId: base.id,
+    inputDigest: geometryInputDigest(base.parameters),
+    environmentDigest: GEOMETRY_ENVIRONMENT_DIGEST,
+    binding: committedBinding,
+    parameters: { ...base.parameters },
+    ...overrides,
+  });
+
+  const protocolSuccess = (request = protocolRequest()): GeometryWorkerSuccess => ({
+    type: "review-mesh-built",
+    requestId: request.requestId,
+    workerGeneration: request.workerGeneration,
+    sourceRevisionId: request.sourceRevisionId,
+    inputDigest: request.inputDigest,
+    environmentDigest: request.environmentDigest,
+    vertices: [0, 0, 0, 1, 0, 0, 0, 1, 1],
+    triangles: [0, 1, 2],
+  });
+
+  it("validates a closed request/result protocol and returns typed diagnostics", () => {
+    expect(parseGeometryBuildRequest(protocolRequest()).ok).toBe(true);
+    expect(parseGeometryWorkerMessage(protocolSuccess()).ok).toBe(true);
+
+    for (const invalid of [
+      { ...protocolRequest(), surprise: true },
+      { ...protocolRequest(), requestId: 1.5 },
+      { ...protocolRequest(), inputDigest: "not-a-digest" },
+      { ...protocolRequest(), parameters: { ...base.parameters, leg_length_mm: Number.NaN } },
+      { ...protocolRequest(), parameters: { ...base.parameters, leg_length_mm: 999 } },
+      { ...protocolRequest(), sourceRevisionId: "rev-" + "0".repeat(64) },
+      { ...protocolRequest(), inputDigest: geometryInputDigest({ ...base.parameters, leg_length_mm: 90 }) },
+    ]) {
+      const parsed = parseGeometryBuildRequest(invalid);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.diagnostic.code).toMatch(/^protocol_/);
+    }
+
+    const mixed = { ...protocolSuccess(), diagnostic: { code: "build_failed", message: "nope" } };
+    expect(parseGeometryWorkerMessage(mixed).ok).toBe(false);
+    expect(parseGeometryWorkerMessage({ ...protocolSuccess(), vertices: [Number.POSITIVE_INFINITY, 0, 0] }).ok).toBe(false);
+  });
+
+  it("rejects each independently wrong active request binding before mesh admission", () => {
+    const gate = new GeometryResultGate();
+    const active = gate.begin(committedBinding, 7, geometryInputDigest(base.parameters), GEOMETRY_ENVIRONMENT_DIGEST);
+    const success = { ...protocolSuccess({ ...protocolRequest(), ...active }), binding: committedBinding };
+    expect(gate.accept(success)).toBe(true);
+    const mismatches = [
+      { requestId: active.requestId + 1 },
+      { workerGeneration: active.workerGeneration + 1 },
+      { sourceRevisionId: "rev-" + "0".repeat(64) },
+      { inputDigest: geometryInputDigest({ ...base.parameters, leg_length_mm: 90 }) },
+      { environmentDigest: "sha256-" + "0".repeat(64) },
+    ];
+    for (const mismatch of mismatches) {
+      expect(gate.accept({ ...success, ...mismatch })).toBe(false);
+      expect(gate.lastGood).toEqual(success);
+    }
+  });
+
+  it("assigns a new worker generation whenever a worker is reconstructed", () => {
+    const fake = (): GeometryWorkerSurface => ({
+      postMessage() {}, terminate() {}, onmessage: null, onerror: null, onmessageerror: null,
+    });
+    const first = constructGeometryWorker(fake, () => {});
+    const second = constructGeometryWorker(fake, () => {});
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+    expect(geometryWorkerGeneration(second!)).toBeGreaterThan(geometryWorkerGeneration(first!));
+  });
+
   it("surfaces worker construction, runtime, and message decoding failures", () => {
     const failures: string[] = [];
     expect(constructGeometryWorker(() => { throw new Error("constructor blocked"); }, (message) => failures.push(message))).toBeNull();
