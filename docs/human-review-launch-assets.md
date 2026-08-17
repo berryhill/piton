@@ -27,7 +27,7 @@ The primary runnable reviewer path is the browser workbench below. The later Pyt
    pnpm test:e2e
    ```
 
-   `tests-browser/e2e/golden-path.spec.ts` opens the real SQLite WASM OPFS database and directly reads `PRAGMA user_version`, the non-internal table inventory, the project row's schema version, revision count, and current-revision match. It proves durable version-2 schema/project/revision readback for the opened browser database. `tests-browser/storage.test.ts` verifies the ordered v1-to-v2 migration statement plan and that a newer unsupported schema fails closed; it does not execute a real OPFS database seeded at v1, so no actual v1-to-v2 browser migration is claimed. Playwright success remains test evidence only; it does not approve, export, release, or actuate.
+   `tests-browser/e2e/golden-path.spec.ts` opens the real SQLite WASM OPFS database and directly reads `PRAGMA user_version`, the non-internal table inventory, the project row's schema version, revision count, and current-revision match. It also seeds a separate real OPFS database at version 2, executes the product migration to version 3, verifies unchanged project/revision authority and safety fields, writes one revision-bound proposal row, closes, reopens, and proves durable lifecycle readback. `tests-browser/storage.test.ts` verifies ordered v1-to-v2 and v2-to-v3 plans, atomic rollback on an injected migration failure, and fail-closed rejection of a newer unsupported schema. Playwright success remains test evidence only; it does not approve, export, release, or actuate.
 
 The remaining procedures are optional Python exact-adapter/framework review surfaces.
 
