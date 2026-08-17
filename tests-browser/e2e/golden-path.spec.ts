@@ -10,6 +10,33 @@ test("seeded edit preview commit and OPFS reload remain unreleased", async ({ pa
   await expect(page.getByTestId("viewport")).toHaveAttribute("data-build-volume", "350 × 350 × 350 mm");
   await expect(page.getByTestId("viewport")).toHaveAttribute("data-rendered-bbox", /120 × 40 × 88/);
   expect(Number(await page.getByTestId("viewport").getAttribute("data-rendered-vertex-count"))).toBeGreaterThan(16);
+
+  await expect(page.getByRole("button", { name: "Part fixture" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Assembly fixture" }).click();
+  await expect(page.getByText(/Assembly fixture is review-only interaction evidence/)).toBeVisible();
+  await page.getByRole("button", { name: "Part fixture" }).click();
+  await page.getByRole("button", { name: /Displayed occurrence/ }).click();
+  await expect(page.getByTestId("navigation-context")).toContainText("Displayed occurrence");
+  await page.getByRole("button", { name: "Face", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Face", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Top review face" }).click();
+  await expect(page.getByTestId("viewport")).toHaveAttribute("data-selected-review-id", "face:top");
+  await page.getByRole("button", { name: "Attach current selection" }).click();
+  await page.getByRole("button", { name: "Origin", exact: true }).click();
+  await expect(page.getByTestId("attached-context")).toContainText("Top review face");
+  await page.getByRole("button", { name: "Clear current selection" }).click();
+  await expect(page.getByTestId("attached-context")).toContainText("Top review face");
+  await page.getByRole("button", { name: "Top review face" }).click();
+  await page.getByRole("button", { name: "Measure selected review entity" }).click();
+  await expect(page.getByTestId("review-measurement")).toContainText("mm · review-only, not exact B-rep");
+
+  for (const preset of ["Front", "Top", "Iso"] as const) {
+    await page.getByRole("button", { name: preset, exact: true }).click();
+    await expect(page.getByTestId("viewport")).toHaveAttribute("data-camera-preset", preset.toLowerCase());
+  }
+  await page.getByRole("button", { name: "Fit", exact: true }).click();
+  await expect(page.getByTestId("viewport")).toHaveAttribute("data-view-state", "fit-to-rendered-bbox");
+
   const canvas = page.getByTestId("viewport").locator("canvas");
   await expect(canvas).toBeVisible();
   const beforeOrbit = await canvas.screenshot();

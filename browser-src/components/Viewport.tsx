@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { DesignRevision, LBracketParameters } from "../domain";
+import type { SemanticSelectionId } from "../App";
 import { deriveGeometryBinding, type GeometryAuthorityBinding } from "../geometry/binding";
 import { GeometryResultGate, installReplacement, type GeometryRequestIdentity, type GeometryResult } from "../geometry/gate";
-import { fitCameraToBounds, meshBounds, rolledCameraUp, selectedLegZone, type MeshBounds } from "../geometry/view";
+import { cameraPresetDirection, fitCameraToBounds, meshBounds, rolledCameraUp, selectedLegZone, type CameraPreset, type MeshBounds } from "../geometry/view";
 import {
   constructGeometryWorker,
   geometryWorkerGeneration,
@@ -28,6 +29,7 @@ interface Props {
   parameters: LBracketParameters;
   authoritativeBase: DesignRevision;
   disabled?: boolean;
+  semanticSelection?: SemanticSelectionId | null;
   onBuildStatus?: (status: PreviewBuildStatus) => void;
   onGeometryAdmitted?: (bounds: MeshBounds, binding: GeometryAuthorityBinding) => void;
 }
@@ -36,6 +38,7 @@ export default function Viewport({
   parameters,
   authoritativeBase,
   disabled = false,
+  semanticSelection = null,
   onBuildStatus,
   onGeometryAdmitted,
 }: Props) {
@@ -45,6 +48,7 @@ export default function Viewport({
   const activeRequest = useRef<GeometryRequestIdentity | null>(null);
   const updateMesh = useRef<(result: GeometryResult) => MeshBounds>(() => { throw new Error("viewport is not initialized"); });
   const updateZone = useRef<(next: LBracketParameters) => void>(() => {});
+  const updateSemantic = useRef<(selection: SemanticSelectionId | null, next: LBracketParameters) => void>(() => {});
   const statusSink = useRef(onBuildStatus);
   const geometrySink = useRef(onGeometryAdmitted);
   const [status, setStatus] = useState(disabled ? "Geometry disabled in component test" : "Initializing Manifold WASM…");
@@ -93,6 +97,55 @@ export default function Viewport({
       zoneHighlight.geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(...nextZone.size));
       zoneHighlight.position.set(...nextZone.center);
     };
+    const semanticOverlay = new THREE.Group();
+    semanticOverlay.name = "fixture-local-semantic-highlight";
+    scene.add(semanticOverlay);
+    const disposeSemanticOverlay = () => {
+      for (const child of [...semanticOverlay.children]) {
+        semanticOverlay.remove(child);
+        child.traverse((object) => {
+          const disposable = object as THREE.Object3D & { geometry?: THREE.BufferGeometry; material?: THREE.Material | THREE.Material[] };
+          disposable.geometry?.dispose();
+          const materials = disposable.material ? (Array.isArray(disposable.material) ? disposable.material : [disposable.material]) : [];
+          materials.forEach((material) => material.dispose());
+        });
+      }
+    };
+    updateSemantic.current = (selection, next) => {
+      disposeSemanticOverlay();
+      if (selection) element.dataset.selectedReviewId = selection;
+      else delete element.dataset.selectedReviewId;
+      const height = next.base_thickness_mm + next.leg_length_mm;
+      if (selection === "face:top") {
+        const zone = selectedLegZone(next);
+        const highlight = new THREE.LineSegments(
+          new THREE.EdgesGeometry(new THREE.BoxGeometry(...zone.size)),
+          new THREE.LineBasicMaterial({ color: 0xffd166 }),
+        );
+        highlight.position.set(...zone.center);
+        semanticOverlay.add(highlight);
+      } else if (selection === "component:l-bracket:1") {
+        const highlight = new THREE.LineSegments(
+          new THREE.EdgesGeometry(new THREE.BoxGeometry(next.base_length_mm, next.leg_width_mm, height)),
+          new THREE.LineBasicMaterial({ color: 0x59d8ff }),
+        );
+        highlight.position.set(next.base_length_mm / 2, next.leg_width_mm / 2, height / 2);
+        semanticOverlay.add(highlight);
+      } else if (selection === "origin") {
+        semanticOverlay.add(new THREE.AxesHelper(30));
+      } else if (selection === "plane:top") {
+        const plane = new THREE.GridHelper(140, 14, 0x70e1b5, 0x356b58);
+        plane.rotation.x = Math.PI / 2;
+        semanticOverlay.add(plane);
+      } else if (selection === "mate:review-only") {
+        const geometry = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(next.leg_thickness_mm, next.leg_width_mm / 2, next.base_thickness_mm),
+          new THREE.Vector3(next.base_length_mm / 2, next.leg_width_mm / 2, next.base_thickness_mm),
+        ]);
+        semanticOverlay.add(new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0xf47ac3 })));
+      }
+    };
+    updateSemantic.current(semanticSelection, parameters);
     const buildVolume = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.BoxGeometry(350, 350, 350)),
       new THREE.LineBasicMaterial({ color: 0x33526e, transparent: true, opacity: 0.3 }),
@@ -113,9 +166,9 @@ export default function Viewport({
       const materials = Array.isArray(installed.mesh.material) ? installed.mesh.material : [installed.mesh.material];
       materials.forEach((material) => material.dispose());
     };
-    const fitCurrentMesh = () => {
+    const fitCurrentMesh = (preset: CameraPreset = "iso") => {
       if (!admittedBounds) return;
-      const fit = fitCameraToBounds(admittedBounds, camera.fov, camera.aspect, { x: 1, y: -1, z: 0.75 });
+      const fit = fitCameraToBounds(admittedBounds, camera.fov, camera.aspect, cameraPresetDirection(preset));
       camera.position.set(...fit.position);
       camera.up.set(0, 0, 1);
       camera.near = fit.near;
@@ -123,6 +176,7 @@ export default function Viewport({
       camera.updateProjectionMatrix();
       controls.target.set(...fit.target);
       controls.update();
+      element.dataset.cameraPreset = preset;
       element.dataset.fitDistance = fit.distance.toFixed(3);
       element.dataset.fitTarget = fit.target.join(",");
     };
@@ -176,10 +230,18 @@ export default function Viewport({
       frame = requestAnimationFrame(draw);
     };
     draw();
-    const actions = element as HTMLDivElement & { resetView?: () => void; rollView?: () => void };
+    const actions = element as HTMLDivElement & { resetView?: () => void; rollView?: () => void; setView?: (preset: CameraPreset) => void; fitView?: () => void };
     actions.resetView = () => {
-      fitCurrentMesh();
+      fitCurrentMesh("iso");
       element.dataset.viewState = "fit-to-rendered-bbox";
+    };
+    actions.fitView = () => {
+      fitCurrentMesh((element.dataset.cameraPreset as CameraPreset | undefined) ?? "iso");
+      element.dataset.viewState = "fit-to-rendered-bbox";
+    };
+    actions.setView = (preset) => {
+      fitCurrentMesh(preset);
+      element.dataset.viewState = preset;
     };
     actions.rollView = () => {
       const sightLine = controls.target.clone().sub(camera.position).normalize();
@@ -192,11 +254,17 @@ export default function Viewport({
       cancelAnimationFrame(frame);
       observer.disconnect();
       controls.dispose();
+      disposeSemanticOverlay();
       if (part) disposePart(part);
       renderer.dispose();
       element.replaceChildren();
     };
   }, [disabled]);
+
+  useEffect(() => {
+    if (disabled) return;
+    updateSemantic.current(semanticSelection, parameters);
+  }, [disabled, parameters, semanticSelection]);
 
   useEffect(() => {
     if (disabled) return;
@@ -285,7 +353,9 @@ export default function Viewport({
   return <div className="viewport-shell">
     <div ref={host} className="viewport" data-testid="viewport" />
     <div className="viewport-status">{status}</div>
-    <div className="view-actions">
+    <div className="view-actions" aria-label="Review camera controls">
+      {(["iso", "front", "top"] as const).map((preset) => <button key={preset} onClick={() => (host.current as HTMLDivElement & { setView?: (value: CameraPreset) => void })?.setView?.(preset)}>{preset[0].toUpperCase() + preset.slice(1)}</button>)}
+      <button onClick={() => (host.current as HTMLDivElement & { fitView?: () => void })?.fitView?.()}>Fit</button>
       <button onClick={() => (host.current as HTMLDivElement & { rollView?: () => void })?.rollView?.()}>Roll 15°</button>
       <button onClick={() => (host.current as HTMLDivElement & { resetView?: () => void })?.resetView?.()}>Reset / fit</button>
     </div>

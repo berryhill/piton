@@ -215,6 +215,27 @@ def test_launch_docs_define_p3_p4_authority_admission_and_stop_conditions():
         assert required in instructions
 
 
+def test_browser_review_instructions_cover_r14_review_interaction_vocabulary():
+    instructions = (ROOT / "docs/human-review-launch-assets.md").read_text(
+        encoding="utf-8"
+    )
+    for required in (
+        "Part fixture",
+        "Assembly fixture",
+        "Source-Part",
+        "Displayed occurrence",
+        "Smart`, `Face`, and `Component",
+        "fixture-local",
+        "not durable topology",
+        "attached context",
+        "Iso`, `Front`, and `Top",
+        "review-mesh distance",
+        "not exact B-rep",
+        "Validation / issues",
+    ):
+        assert required in instructions
+
+
 def test_launch_manifest_closes_current_exact_and_review_roles_with_independent_receipts():
     payload = json.loads((ROOT / "templates/artifact-manifest-v1.json").read_text(encoding="utf-8"))
 

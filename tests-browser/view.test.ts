@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fitCameraToBounds, meshBounds, selectedLegZone, rolledCameraUp } from "../browser-src/geometry/view";
+import { cameraPresetDirection, fitCameraToBounds, meshBounds, reviewDistanceMm, selectedLegZone, rolledCameraUp } from "../browser-src/geometry/view";
 import { DEFAULT_PARAMETERS } from "../browser-src/domain";
 
 describe("review viewport interaction geometry", () => {
@@ -49,6 +49,16 @@ describe("review viewport interaction geometry", () => {
     const bounds = meshBounds([2, 3, 0, 4, 7, 9, 2, 7, 0]);
     expect(bounds.min[2]).toBe(0);
     expect(bounds.max).toEqual([4, 7, 9]);
+  });
+
+  it("uses deterministic Iso, Front, and Top camera directions", () => {
+    expect(cameraPresetDirection("iso")).toEqual({ x: 1, y: -1, z: 0.75 });
+    expect(cameraPresetDirection("front")).toEqual({ x: 0, y: -1, z: 0 });
+    expect(cameraPresetDirection("top")).toEqual({ x: 0, y: 0, z: 1 });
+  });
+
+  it("computes review-mesh point distance in millimetres", () => {
+    expect(reviewDistanceMm([0, 0, 0], [3, 4, 12])).toBe(13);
   });
 });
 
