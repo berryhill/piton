@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -17,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "package.json"
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 LAUNCHER = ROOT / "launch-browser-mvi.sh"
+THREAT_MODEL = ROOT / "docs" / "threat-model.md"
 
 FORBIDDEN_BROWSER_RUNTIME_TOKENS = (
     "python",
@@ -60,6 +62,23 @@ def test_browser_ci_uses_the_canonical_gate_and_keeps_python_separate() -> None:
     assert all(token not in browser_job.lower() for token in FORBIDDEN_BROWSER_RUNTIME_TOKENS)
     assert "uv sync --frozen --all-extras" in python_job
     assert "python -m pytest -q" in python_job
+
+
+def test_threat_model_uses_the_canonical_browser_verification_gate() -> None:
+    threat_model = THREAT_MODEL.read_text(encoding="utf-8")
+    validation_section = threat_model.split("## Validation evidence", maxsplit=1)[1]
+    commands = re.search(r"```bash\n(.*?)\n```", validation_section, re.DOTALL)
+
+    assert commands is not None
+    command_lines = commands.group(1).splitlines()
+    assert "pnpm verify:mvi" in command_lines
+    assert not {
+        "pnpm install --frozen-lockfile",
+        "pnpm typecheck",
+        "pnpm test",
+        "pnpm build",
+        "pnpm test:e2e",
+    }.intersection(command_lines)
 
 
 def _write_fake_pnpm(bin_dir: Path) -> None:

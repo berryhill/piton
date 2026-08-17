@@ -14,9 +14,9 @@ Every tracked file at the candidate HEAD is classified under exactly one cutover
 
 | role | surface | files at publication |
 | --- | --- | --- |
-| `primary-writable-authority-browser` | `browser-src/**`, `tests-browser/**`, `index.html` | 22 |
+| `primary-writable-authority-browser` | `browser-src/**`, `tests-browser/**`, `index.html` | 26 |
 | `review-artifacts-viewer` | `src/piton/viewer_assets/**` | 4 |
-| `external-exact-cad-adapter` | `src/**` (minus viewer assets and entry shims), `scripts/**`, `tests/**`, `examples/**` | 143 |
+| `external-exact-cad-adapter` | `src/**` (minus viewer assets and entry shims), `scripts/**`, `tests/**`, `examples/**` | 148 |
 | `verification-ci` | `.github/**`, toolchain pins, lockfiles, and the browser launcher at the root | 13 |
 | `docs-authority-text` | `README.md`, `AGENTS.md`, `docs/**`, `.otoxan/**`, `flows/**` | 20 |
 | `schemas-templates` | `schemas/**`, `templates/**` | 18 |
@@ -24,13 +24,13 @@ Every tracked file at the candidate HEAD is classified under exactly one cutover
 
 ## Machine-checked classification rules
 
-The fenced block below is the classification source of truth. `tests/test_cutover_artifacts.py` recomputes the tracked file list with `git ls-files` and enforces that every tracked file matches exactly one role, that the single writable-authority role matches exactly `browser-src/**`, `tests-browser/**`, and `index.html`, and that the pinned browser-authority statements remain intact. Pattern semantics: `some/dir/**` matches everything under that directory; any other pattern is an exact path or glob relative to the repository root. `files_at_publication` counts are an informational snapshot at publication (base `8af59d7` plus this change), not a pinned invariant; the load-bearing checks are recomputed live.
+The fenced block below is the classification source of truth. `tests/test_cutover_artifacts.py` recomputes the tracked file list with `git ls-files` and enforces that every tracked file matches exactly one role, that the single writable-authority role matches exactly `browser-src/**`, `tests-browser/**`, and `index.html`, and that the pinned browser-authority statements remain intact. Pattern semantics: `some/dir/**` matches everything under that directory; any other pattern is an exact path or glob relative to the repository root. `files_at_publication` counts are a machine-checked snapshot of the current candidate tree; the checks recompute both classification and counts from `git ls-files`.
 
 ```json cutover-roles-v1
 {
   "schema": "piton/cutover-roles/v1",
   "base_sha": "8af59d7ecf3253beb644a6a3c747d771cc48a3f8",
-  "candidate_head_note": "Classification applies to every tracked file at the candidate HEAD that first adds this inventory (base 8af59d7 plus this change: two docs/ files and one tests/ file).",
+  "candidate_head_note": "Classification applies to every tracked file at the current candidate HEAD, including the direct browser entry, canonical browser-only verification gate, local launcher, and their documentation and acceptance tests.",
   "safety": {
     "review_state": "needs_human_review",
     "fabrication_release": false,
@@ -42,7 +42,7 @@ The fenced block below is the classification source of truth. `tests/test_cutove
       "authority_profile": "browser-typescript/v1",
       "includes": ["browser-src/**", "tests-browser/**", "index.html"],
       "excludes": [],
-      "files_at_publication": 22,
+      "files_at_publication": 26,
       "statement": "Sole writable authored authority: browser-local TypeScript commands and immutable revision state persisted in SQLite WASM/OPFS. index.html is the Vite root entry of this workbench."
     },
     {
@@ -56,14 +56,14 @@ The fenced block below is the classification source of truth. `tests/test_cutove
       "role": "external-exact-cad-adapter",
       "includes": ["src/**", "scripts/**", "tests/**", "examples/**"],
       "excludes": ["src/piton/viewer_assets/**"],
-      "files_at_publication": 143,
+      "files_at_publication": 148,
       "statement": "Optional pinned external exact-CAD/reference and lifecycle adapter (Python/build123d/OCP), its scripts, its tests, and the minimal example fixture. Read-only relative to browser-authored revisions; adapter-internal schema consts such as piton-project-v1 authority.writable=source-native-python describe the adapter's own project format and are not product authority."
     },
     {
       "role": "verification-ci",
       "includes": [".github/**", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.json", "vite.config.ts", "playwright.config.ts", "launch-browser-mvi.sh", "pyproject.toml", "uv.lock", ".python-version", ".gitignore"],
       "excludes": [],
-      "files_at_publication": 12,
+      "files_at_publication": 13,
       "statement": "Toolchain pins, lockfiles, CI wiring, and the local browser-only launcher; no authored-revision authority."
     },
     {
@@ -102,6 +102,6 @@ The fenced block below is the classification source of truth. `tests/test_cutove
 
 ## Counts at publication
 
-Total tracked files at the candidate HEAD: 250 — the 247 files of base `8af59d7` plus the two `docs/` artifacts and one `tests/` gate this change adds. Per-role counts appear in the roles block above.
+Total tracked files at the candidate HEAD: 258. Per-role counts appear in the summary table and machine-readable roles block above; acceptance tests bind both representations to the current tracked-file classification.
 
 Companion artifact: `docs/baseline-freeze-8af59d7.md` records the frozen verification command set and results.
