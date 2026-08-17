@@ -25,7 +25,7 @@ describe("browser SQLite schema", () => {
   });
   it("defines ordered idempotent migrations for immutable revisions and explicit head", () => {
     const migrations = migrationStatements(0);
-    expect(CURRENT_SCHEMA_VERSION).toBe(3);
+    expect(CURRENT_SCHEMA_VERSION).toBe(4);
     expect(migrations.join("\n")).toContain("CREATE TABLE IF NOT EXISTS revisions");
     expect(migrations.join("\n")).toContain("current_revision_id");
     expect(migrations.join("\n")).toContain("fabrication_release INTEGER NOT NULL CHECK (fabrication_release = 0)");
@@ -44,7 +44,9 @@ describe("browser SQLite schema", () => {
     expect(lifecycleUpgrade).toContain("CREATE TABLE draft_exports");
     expect(lifecycleUpgrade).toContain("CREATE TABLE fabrication_releases");
     expect(lifecycleUpgrade).toContain("CREATE TABLE released_package_projections");
-    expect(lifecycleUpgrade).toContain("PRAGMA user_version = 3");
+    expect(lifecycleUpgrade).toContain("CREATE TABLE command_receipts");
+    expect(lifecycleUpgrade).toContain("PRAGMA user_version = 4");
+    expect(migrationStatements(3).join("\n")).toContain("CREATE TABLE command_receipts");
     expect(LIFECYCLE_TABLES).toEqual([
       "change_proposals", "proposal_dispositions", "revisions", "build_attempts",
       "evidence_closures", "channel_pointers", "approval_records", "draft_exports",
@@ -54,7 +56,7 @@ describe("browser SQLite schema", () => {
 
   it("fails closed rather than opening a database from a newer schema", () => {
     expect(() => migrationStatements(CURRENT_SCHEMA_VERSION + 1)).toThrow(
-      "SQLite schema version 4 is newer than supported version 3",
+      "SQLite schema version 5 is newer than supported version 4",
     );
   });
 

@@ -36,6 +36,30 @@ export interface BrowserProject {
 
 export type CandidateCommand = Readonly<{ type: "set-leg-length"; value: number }>;
 
+export interface CadCommandRequest {
+  format: "piton-command/v1";
+  projectId: string;
+  expectedCurrentRevisionId: string;
+  idempotencyKey: string;
+  command: Readonly<{
+    type: "set-leg-length";
+    quantity: Readonly<{ value: number; unit: "mm" }>;
+  }>;
+}
+
+export interface CadCommandReceipt {
+  format: "piton-command-receipt/v1";
+  projectId: string;
+  baseRevisionId: string;
+  resultingRevisionId: string;
+  canonicalRequestDigest: string;
+  authorityProfile: "browser-typescript/v1";
+  reviewState: "needs_human_review";
+  fabricationRelease: false;
+  machineActuation: false;
+  releaseState: "unreleased";
+}
+
 export const DEFAULT_PARAMETERS: Readonly<LBracketParameters> = Object.freeze({
   leg_length_mm: 80,
   leg_width_mm: 40,
