@@ -244,12 +244,13 @@ def test_migration_inventory_pins_safety_truths() -> None:
         assert f"`{truth}`" in text, f"migration inventory must state the safety truth {truth!r}"
 
 
-def test_migration_inventory_records_the_entry_shim_correction() -> None:
+def test_migration_inventory_records_direct_entry_and_removed_shims() -> None:
     text = INVENTORY_DOC.read_text(encoding="utf-8")
     assert "src/main.tsx" in text and "src/App.tsx" in text
-    assert "browser-entry-chain" in text, (
-        "the entry shims must be classified as browser entry-chain, not adapter code or empty vestige"
-    )
+    assert "obsolete" in text and "forwarding shims were removed" in text
+    assert '"role": "browser-entry-chain"' not in text
+    assert not (REPO_ROOT / "src" / "main.tsx").exists()
+    assert not (REPO_ROOT / "src" / "App.tsx").exists()
 
 
 # ---------------------------------------------------------------------------

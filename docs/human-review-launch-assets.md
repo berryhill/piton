@@ -6,11 +6,10 @@ The primary runnable reviewer path is the browser workbench below. The later Pyt
 
 ## Browser workbench review
 
-1. From a fresh checkout, install the exact browser graph and launch the cross-origin-isolated local origin:
+1. From a fresh checkout, launch the exact browser graph and cross-origin-isolated local origin with the repository-native launcher. It resolves the checkout root, runs `pnpm install --frozen-lockfile`, and starts only the local Vite server:
 
    ```console
-   pnpm install --frozen-lockfile
-   pnpm dev
+   pnpm launch:mvi
    ```
 
 2. Open the Vite URL (normally `http://127.0.0.1:5173`). Confirm the page identifies persistence as `SQLite WASM · OPFS`; failure to obtain OPFS must be visible and must not fall back to transient writable state.
@@ -27,16 +26,13 @@ The primary runnable reviewer path is the browser workbench below. The later Pyt
 6. Run the automated browser gates from the same candidate:
 
    ```console
-   pnpm typecheck
-   pnpm test
-   pnpm build
-   pnpm exec playwright install --with-deps chromium
-   pnpm test:e2e
+   pnpm exec playwright install chromium
+   pnpm verify:mvi
    ```
 
-   `tests-browser/e2e/golden-path.spec.ts` opens the real SQLite WASM OPFS database and directly reads `PRAGMA user_version`, the non-internal table inventory, the project row's schema version, revision count, and current-revision match. It also seeds a separate real OPFS database at version 2, executes the product migration to version 3, verifies unchanged project/revision authority and safety fields, writes one revision-bound proposal row, closes, reopens, and proves durable lifecycle readback. `tests-browser/storage.test.ts` verifies ordered v1-to-v2 and v2-to-v3 plans, atomic rollback on an injected migration failure, and fail-closed rejection of a newer unsupported schema. Playwright success remains test evidence only; it does not approve, export, release, or actuate.
+   `pnpm verify:mvi` is the fail-fast canonical browser-only gate; it runs TypeScript checking, unit/component tests, the production build, and Playwright without invoking Python, uv, build123d, OCP, adapter scripts, credentials, remote services, deployment, or machine control. `tests-browser/e2e/golden-path.spec.ts` opens the real SQLite WASM OPFS database and directly reads `PRAGMA user_version`, the non-internal table inventory, the project row's schema version, revision count, and current-revision match. It also seeds a separate real OPFS database at version 2, executes the product migration to version 3, verifies unchanged project/revision authority and safety fields, writes one revision-bound proposal row, closes, reopens, and proves durable lifecycle readback. `tests-browser/storage.test.ts` verifies ordered v1-to-v2 and v2-to-v3 plans, atomic rollback on an injected migration failure, and fail-closed rejection of a newer unsupported schema. Playwright success remains test evidence only; it does not approve, export, release, or actuate.
 
-The remaining procedures are optional Python exact-adapter/framework review surfaces.
+The remaining procedures use the optional external exact-CAD/reference adapter and are not browser launch or `verify:mvi` prerequisites.
 
 ## Review-only project receipt
 
