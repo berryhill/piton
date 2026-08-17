@@ -1,12 +1,17 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import App from "../browser-src/App";
+import { CadApplication } from "../browser-src/application";
 import { MemoryProjectRepository } from "../browser-src/storage/repository";
 import { deriveGeometryBinding } from "../browser-src/geometry/binding";
 
 describe("Piton workbench", () => {
+  function application(repository = new MemoryProjectRepository()) {
+    return new CadApplication(repository);
+  }
+
   it("shows safety truth and a preview diff before commit", async () => {
-    render(<App repository={new MemoryProjectRepository()} geometryDisabled />);
+    render(<App application={application()} geometryDisabled />);
     expect(await screen.findByText("Accepted immutable revision")).toBeVisible();
     expect(screen.getByTestId("fabrication-release")).toHaveTextContent("false");
     expect(screen.getByTestId("machine-actuation")).toHaveTextContent("false");
@@ -27,7 +32,7 @@ describe("Piton workbench", () => {
 
   it("commits a candidate while retaining the accepted revision", async () => {
     const repository = new MemoryProjectRepository();
-    render(<App repository={repository} geometryDisabled />);
+    render(<App application={application(repository)} geometryDisabled />);
     await screen.findByText("Accepted immutable revision");
     fireEvent.change(screen.getByLabelText("Leg length (mm)"), { target: { value: "90" } });
     fireEvent.click(screen.getByRole("button", { name: "Commit candidate" }));
@@ -41,7 +46,7 @@ describe("Piton workbench", () => {
   it("uses the closed command API rather than saving caller-assembled project state", async () => {
     const repository = new MemoryProjectRepository();
     const commitCandidate = vi.spyOn(repository, "commitCandidate");
-    render(<App repository={repository} geometryDisabled />);
+    render(<App application={application(repository)} geometryDisabled />);
     await screen.findByText("Accepted immutable revision");
     fireEvent.change(screen.getByLabelText("Leg length (mm)"), { target: { value: "95" } });
     fireEvent.click(screen.getByRole("button", { name: "Commit candidate" }));
@@ -63,7 +68,7 @@ describe("Piton workbench", () => {
     });
     await repository.commitCandidate(seeded.currentRevisionId, { type: "set-leg-length", value: 90 });
 
-    render(<App repository={repository} geometryDisabled />);
+    render(<App application={application(repository)} geometryDisabled />);
 
     expect(await screen.findByText(/Durable preview status · stale disclosure only/)).toBeVisible();
     expect(screen.getByText(/durable prior preview/)).toBeVisible();
@@ -71,7 +76,7 @@ describe("Piton workbench", () => {
   });
 
   it("does not display an invalid raw input as rendered bbox truth", async () => {
-    render(<App repository={new MemoryProjectRepository()} geometryDisabled />);
+    render(<App application={application()} geometryDisabled />);
     await screen.findByText("Accepted immutable revision");
     fireEvent.change(screen.getByLabelText("Leg length (mm)"), { target: { value: "999" } });
     expect(screen.getByText("BBOX awaiting admitted review geometry")).toBeVisible();
