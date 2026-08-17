@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import type { BrowserProject, DesignRevision } from "./domain";
+import type { BuildStatus, CadApplication } from "./application";
 import Viewport from "./components/Viewport";
-import type { BuildStatus, ProjectRepository } from "./storage/repository";
-import { openSeededRepository } from "./storage/repository";
 import type { MeshBounds } from "./geometry/view";
 import { reviewDistanceMm } from "./geometry/view";
 import { durableGeometryStatusLabel } from "./geometry/binding";
 import "./styles.css";
 
-interface Props { repository?: ProjectRepository; geometryDisabled?: boolean; }
+interface Props { application: CadApplication; geometryDisabled?: boolean; }
 
 type FixtureKind = "part" | "assembly";
 type SelectionMode = "smart" | "face" | "component";
@@ -22,8 +21,7 @@ const SEMANTIC_SELECTIONS: ReadonlyArray<{ id: SemanticSelectionId; label: strin
   { id: "mate:review-only", label: "Review mate" },
 ];
 
-export default function App({ repository: suppliedRepository, geometryDisabled }: Props) {
-  const [repository, setRepository] = useState<ProjectRepository | null>(suppliedRepository ?? null);
+export default function App({ application, geometryDisabled }: Props) {
   const [project, setProject] = useState<BrowserProject | null>(null);
   const [value, setValue] = useState(80);
   const [message, setMessage] = useState("Opening browser-local custody…");
@@ -38,16 +36,12 @@ export default function App({ repository: suppliedRepository, geometryDisabled }
 
   useEffect(() => { void (async () => {
     try {
-      const repo = suppliedRepository ?? await openSeededRepository();
-      await repo.initialize();
-      const loaded = await repo.load();
-      if (!loaded) throw new Error("initialized project disappeared");
-      const recoveredBuildStatus = await repo.loadBuildStatus(loaded.id);
-      setRepository(repo); setProject(loaded); setDurableBuildStatus(recoveredBuildStatus);
-      setValue(loaded.revisions.find((r) => r.id === loaded.currentRevisionId)!.parameters.leg_length_mm);
-      setMessage(`Reopened from ${repo.persistenceLabel}`);
+      const opened = await application.open();
+      setProject(opened.project); setDurableBuildStatus(opened.buildStatus);
+      setValue(opened.project.revisions.find((r) => r.id === opened.project.currentRevisionId)!.parameters.leg_length_mm);
+      setMessage(`Reopened from ${opened.persistenceLabel}`);
     } catch (error) { setMessage(`Persistence unavailable: ${error instanceof Error ? error.message : "unknown error"}`); }
-  })(); }, [suppliedRepository]);
+  })(); }, [application]);
 
   const current = project?.revisions.find((revision) => revision.id === project.currentRevisionId) ?? null;
   const accepted = project?.revisions.find((revision) => revision.id === project.acceptedRevisionId) ?? null;
@@ -82,22 +76,20 @@ export default function App({ repository: suppliedRepository, geometryDisabled }
   }, [previewParameters]);
 
   async function commit() {
-    if (!project || !repository || !changed) return;
+    if (!project || !changed) return;
     try {
-      await repository.commitCandidate(project.currentRevisionId, { type: "set-leg-length", value });
-      const authoritative = await repository.load();
-      if (!authoritative) throw new Error("committed project disappeared");
+      const authoritative = await application.commitCandidate(project.currentRevisionId, { type: "set-leg-length", value });
       setProject(authoritative);
       const authoritativeCurrent = authoritative.revisions.find((revision) => revision.id === authoritative.currentRevisionId)!;
       setValue(authoritativeCurrent.parameters.leg_length_mm);
       setMessage("Candidate committed locally");
     } catch (error) {
-      const authoritative = await repository.load();
-      if (authoritative) {
+      try {
+        const authoritative = await application.loadProject();
         setProject(authoritative);
         const authoritativeCurrent = authoritative.revisions.find((revision) => revision.id === authoritative.currentRevisionId)!;
         setValue(authoritativeCurrent.parameters.leg_length_mm);
-      }
+      } catch { /* Preserve the original commit rejection when custody reload also fails. */ }
       setMessage(`Commit rejected: ${error instanceof Error ? error.message : "unknown error"}`);
     }
   }
@@ -160,9 +152,8 @@ export default function App({ repository: suppliedRepository, geometryDisabled }
         semanticSelection={currentSelection}
         onGeometryAdmitted={(bounds) => setRenderedBounds(bounds)}
         onBuildStatus={(status) => {
-          if (!repository) return;
           const durable = { ...status, projectId: project.id };
-          void repository.saveBuildStatus(durable).then(() => setDurableBuildStatus(durable)).catch((error: unknown) => {
+          void application.recordBuildStatus(durable).then(setDurableBuildStatus).catch((error: unknown) => {
             setMessage(`Preview status persistence failed: ${error instanceof Error ? error.message : "unknown error"}`);
           });
         }}

@@ -326,8 +326,6 @@ export class SqliteOpfsProjectRepository implements ProjectRepository {
   }
 }
 
-export async function openSeededRepository(): Promise<ProjectRepository> {
-  const repository = await SqliteOpfsProjectRepository.open();
-  await repository.initialize();
-  return repository;
+export function openProjectRepository(): Promise<ProjectRepository> {
+  return SqliteOpfsProjectRepository.open();
 }
