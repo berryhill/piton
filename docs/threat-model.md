@@ -140,11 +140,7 @@ Run at the exact candidate head:
 uv run --frozen python -m pytest -q tests/test_supply_chain_gate.py
 uv run --frozen python scripts/verify_repo.py
 uv run --frozen python -m pytest -q
-pnpm install --frozen-lockfile
-pnpm typecheck
-pnpm test
-pnpm build
-pnpm test:e2e
+pnpm verify:mvi
 ```
 
 The focused tests prove the current repository passes and representative mutations fail: mutable action tag, unapproved action publisher, non-exact direct dependency, missing locked artifact hash, symlinked policy input, and an unapproved install hidden in a multiline workflow run block. `tests/integration/test_daemon_command_admission.py` separately proves the current secretless local command boundary derives its principal from the peer UID, rejects unmapped peers and authority-shaped fields, and reaches the one typed custody service. `scripts/verify_repo.py` executes the supply-chain gate in CI and requires the threat model, gate source, daemon source, and both acceptance-test surfaces to exist.

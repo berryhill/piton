@@ -26,11 +26,11 @@ Prerequisites:
 - pnpm 11.1.3
 - Chromium 145+ on Linux (the currently verified browser/platform combination)
 
-Install only from the committed lockfile and launch:
+Use the repository launcher. It resolves the checkout root, installs only from
+the committed lockfile, and starts the local cross-origin-isolated Vite server:
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm dev
+pnpm launch:mvi
 ```
 
 Open the URL printed by Vite (normally `http://127.0.0.1:5173`). The dev server supplies the cross-origin-isolation headers required by SQLite WASM OPFS. The app fails visibly rather than falling back to transient writable state when OPFS is unavailable.
@@ -48,19 +48,23 @@ Manual smoke:
 
 ## Browser verification
 
+Install Chromium once with `pnpm exec playwright install chromium`, then run the
+single canonical browser gate:
+
 ```bash
-pnpm typecheck
-pnpm test
-pnpm build
-pnpm exec playwright install --with-deps chromium
-pnpm test:e2e
+pnpm verify:mvi
 ```
+
+The gate runs TypeScript checking, unit/component tests, the production build,
+and the Playwright golden path in sequence and propagates any failure. It is a
+browser-only dependency path: Python, uv, build123d, and OCP are not browser
+launch or verification prerequisites.
 
 The Playwright golden path exercises launch, seeded project, Manifold WASM preview, CAD Z-min=0/grid status, immutable candidate commit, OPFS reload, and safety truth.
 
 ## Python exact-adapter verification
 
-The existing Python foundation and optional exact-CAD adapter remain independently verified:
+The existing Python foundation and optional external exact-CAD/reference adapter remain independently verified:
 
 Run verification on a supported Linux host with a root-owned, non-group/world-writable
 `/usr/bin/bwrap` and an enabled unprivileged namespace policy. The shared preflight
