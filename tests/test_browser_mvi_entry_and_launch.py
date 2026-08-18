@@ -170,4 +170,6 @@ def test_launcher_is_local_browser_only_and_docs_use_canonical_commands() -> Non
     for document in (readme, review):
         assert "pnpm launch:mvi" in document
         assert "pnpm verify:mvi" in document
-        assert "optional external exact-CAD/reference adapter" in document
+        assert "pre-cutover" in document
+        assert "Python/build123d/OCP" in document
+        assert "optional external exact-CAD/reference adapter" not in document

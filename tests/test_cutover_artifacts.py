@@ -61,29 +61,35 @@ SAFETY_TRUTHS = (
 # substrings only, so reflowed wording elsewhere cannot silently weaken them.
 AUTHORITY_TEXT_PINS = {
     "README.md": (
-        "an optional external exact-CAD/reference adapter. It is not required "
-        "by the browser editing loop and cannot mutate browser-authored "
-        "revisions.",
+        "Browser-local TypeScript under `browser-src/**` is the sole current "
+        "product and writable revision authority.",
+        "It is not a product, backend, adapter, verification authority, or "
+        "writable authority for the browser MVI",
     ),
     "AGENTS.md": (
         "writable product authority in the runnable first slice",
     ),
     "docs/architecture.md": (
-        "It is an adapter, not writable product authority.",
+        "It is not a current product,",
+        "backend, adapter, verification authority, or writable authority.",
         "one writable browser-local TypeScript authority",
     ),
     "docs/mvi-doctrine.md": (
         "One writable authority per revision. The runnable browser MVI authors",
-        "Python/build123d remains a separately pinned,",
+        "Tracked Python/build123d material is pre-cutover",
+        "backend, adapter, verification authority, or writable authority.",
     ),
     "docs/threat-model.md": (
         "browser-local TypeScript workbench and its sole writable "
         "authored-revision authority",
+        "pre-cutover Python/build123d/OCP evidence lane",
     ),
     ".otoxan/rules/safety.md": (
-        "primary writable Stage 1 product authority",
+        "sole writable Stage 1 product authority",
     ),
 }
+
+FORBIDDEN_CURRENT_ADAPTER_TEXT = "optional external exact-CAD/reference adapter"
 
 ROLES_BLOCK_RE = re.compile(r"```json cutover-roles-v1\n(.*?)\n```", re.DOTALL)
 
@@ -201,6 +207,8 @@ def test_migration_inventory_roles_block_is_well_formed() -> None:
     assert roles, "roles block must define at least one role"
     names = [role["role"] for role in roles]
     assert len(names) == len(set(names)), "role names must be unique"
+    assert "pre-cutover-python-legacy" in names
+    assert "external-exact-cad-adapter" not in names
     for role in roles:
         assert role["includes"], f"role {role['role']} must declare includes"
         assert role.get("statement"), f"role {role['role']} must declare a statement"
@@ -285,6 +293,9 @@ def test_browser_authority_statements_intact() -> None:
             assert pin in text, (
                 f"{relative_path} must keep its browser-authority statement intact: {pin!r}"
             )
+        assert FORBIDDEN_CURRENT_ADAPTER_TEXT not in text, (
+            f"{relative_path} must not restore Python/build123d as a current adapter"
+        )
 
 
 # ---------------------------------------------------------------------------
