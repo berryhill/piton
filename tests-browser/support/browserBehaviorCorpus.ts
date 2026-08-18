@@ -11,7 +11,7 @@ import { exportPortableCustody, parsePortableCustody } from "../../browser-src/p
 import { MemoryProjectRepository } from "../../browser-src/storage/repository";
 
 const CORPUS_FORMAT = "piton-browser-behavior-corpus/v1" as const;
-const CAMPAIGN_FORMAT = "piton-browser-failure-campaign/v1" as const;
+const CAMPAIGN_FORMAT = "piton-browser-failure-campaign/v2" as const;
 const CAMPAIGN_SEEDS = 1_000;
 
 export const FAILURE_CLASSES = Object.freeze([
@@ -257,7 +257,7 @@ export async function runBrowserBehaviorCorpus(): Promise<BrowserScenarioOutcome
 
 export interface CampaignOutcome {
   seed: number;
-  scheduleId: string;
+  replayId: string;
   scenarioId: string;
   failureClass: FailureClass;
   passed: true;
@@ -308,7 +308,7 @@ const SCENARIO_INDEX_BY_FAILURE_CLASS: Record<FailureClass, number> = {
 };
 const expectedClass = (seed: number): FailureClass => FAILURE_CLASSES[seed % FAILURE_CLASSES.length];
 const expectedScenario = (seed: number) => BROWSER_BEHAVIOR_CORPUS[SCENARIO_INDEX_BY_FAILURE_CLASS[expectedClass(seed)]].id;
-const scheduleId = (seed: number) => digest(`${CAMPAIGN_FORMAT}:${seed}:${expectedClass(seed)}:${expectedScenario(seed)}`);
+const replayId = (seed: number) => digest(`${CAMPAIGN_FORMAT}:${seed}:${expectedClass(seed)}:${expectedScenario(seed)}`);
 
 async function exerciseFailureClass(failureClass: FailureClass): Promise<void> {
   await executeScenario(SCENARIO_INDEX_BY_FAILURE_CLASS[failureClass]);
@@ -335,7 +335,7 @@ export async function runBrowserFailureCampaign(productSource: string): Promise<
     const failureClass = expectedClass(seed);
     await exerciseFailureClass(failureClass);
     outcomes.push({
-      seed, scheduleId: scheduleId(seed), scenarioId: expectedScenario(seed), failureClass, passed: true,
+      seed, replayId: replayId(seed), scenarioId: expectedScenario(seed), failureClass, passed: true,
       falseSuccess: 0, falseRelease: 0, staleHeadReplacement: 0, duplicateAuthoredRevision: 0,
       unauthorizedLifecycleAuthority: 0, crossProjectCustodyRead: 0,
     });
@@ -361,13 +361,13 @@ export function verifyBrowserFailureCampaign(receipt: BrowserFailureCampaignRece
     throw new Error("campaign contract binding mismatch");
   }
   if (!Array.isArray(receipt.outcomes) || receipt.outcomes.length !== CAMPAIGN_SEEDS) throw new Error("campaign must contain exactly 1000 outcomes");
-  const outcomeKeys = ["seed", "scheduleId", "scenarioId", "failureClass", "passed", "falseSuccess", "falseRelease",
+  const outcomeKeys = ["seed", "replayId", "scenarioId", "failureClass", "passed", "falseSuccess", "falseRelease",
     "staleHeadReplacement", "duplicateAuthoredRevision", "unauthorizedLifecycleAuthority", "crossProjectCustodyRead"].sort().join("\u0000");
   for (let seed = 0; seed < CAMPAIGN_SEEDS; seed += 1) {
     const outcome = receipt.outcomes[seed];
     if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)
       || Object.keys(outcome).sort().join("\u0000") !== outcomeKeys
-      || outcome.seed !== seed || outcome.scheduleId !== scheduleId(seed) || outcome.scenarioId !== expectedScenario(seed)) {
+      || outcome.seed !== seed || outcome.replayId !== replayId(seed) || outcome.scenarioId !== expectedScenario(seed)) {
       throw new Error("campaign outcome identity or order mismatch");
     }
     if (outcome.failureClass !== expectedClass(seed)) throw new Error("campaign outcome class mismatch");

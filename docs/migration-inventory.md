@@ -30,7 +30,7 @@ The fenced block below is the classification source of truth. `tests/test_cutove
 {
   "schema": "piton/cutover-roles/v1",
   "base_sha": "8af59d7ecf3253beb644a6a3c747d771cc48a3f8",
-  "candidate_head_note": "Classification applies to every tracked file at the current candidate HEAD, including the direct browser entry, canonical browser-only verification gate, closed 25-scenario browser behavior corpus, deterministic 1,000-schedule browser failure campaign, local launcher, and their documentation and acceptance tests.",
+  "candidate_head_note": "Classification applies to every tracked file at the current candidate HEAD, including the direct browser entry, canonical browser-only verification gate, closed 25-scenario browser behavior corpus, deterministic 1,000-replay browser failure-class campaign over 15 predeclared failure scenarios, local launcher, and their documentation and acceptance tests.",
   "safety": {
     "review_state": "needs_human_review",
     "fabrication_release": false,
