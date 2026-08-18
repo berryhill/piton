@@ -1,4 +1,9 @@
-# Piton baseline freeze — 8af59d7
+# Piton baseline freeze — `8af59d7`
+
+> Historical record: this freeze predates the browser-only cutover. Commands and
+> adapter capabilities recorded below are preserved as historical evidence and
+> are not present in the current repository. Current verification is
+> `pnpm verify:mvi`.
 
 ## Status
 

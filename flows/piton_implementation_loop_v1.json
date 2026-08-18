@@ -1,7 +1,7 @@
 {
   "flow_id": "piton_implementation_loop",
   "name": "Piton Repository Implementation Loop",
-  "description": "Bounded repository engineering loop for Piton mechanical CAD with browser-local TypeScript as the sole writable authority, Python as an optional exact adapter, exact-head Git/CI proof, exact/review separation, human review, and fabrication release blocked.",
+  "description": "Bounded repository engineering loop for Piton mechanical CAD with browser-local TypeScript as the sole writable authority, exact-head Git/CI proof, review-geometry claim boundaries, human review, and fabrication release blocked.",
   "status": "active",
   "scope": "task",
   "version": 7,

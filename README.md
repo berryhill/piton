@@ -9,12 +9,9 @@ machine_actuation = false
 release_state = unreleased
 ```
 
-## Product surfaces
+## Product surface
 
-- Browser MVI — the primary runnable product. Browser-local TypeScript commands author immutable revisions; Manifold WASM generates fast review meshes in a Web Worker; SQLite WASM stores the local project in OPFS.
-- Python/build123d/OCP — an optional external exact-CAD/reference adapter. It is not required by the browser editing loop and cannot mutate browser-authored revisions.
-- Generated packet viewer — a disconnected, revision-pinned review artifact, not an authoring or exact-geometry surface.
-- Repository verification — automated proof for these surfaces, not a substitute for launching and manually testing the product.
+The browser MVI is the application. Browser-local TypeScript commands author immutable revisions, Manifold WASM generates revision-scoped review meshes in a Web Worker, and SQLite WASM stores the local project in OPFS. Generated review geometry is not exact geometry, and no build or verification result grants review acceptance, approval, export, release, or machine actuation.
 
 Piton was named after the OpenDesign R14 Bench Clamp Fixture prototype (project `8da9ea71-1dce-454a-bc4a-7e835eadfdd5`, conversation `76d3d331-cb2e-4a40-aca7-f6737ea538fe`, revision `r14-05729d28`). Canonical doctrine: [`docs/mvi-doctrine.md`](docs/mvi-doctrine.md).
 
@@ -26,74 +23,38 @@ Prerequisites:
 - pnpm 11.1.3
 - Chromium 145+ on Linux (the currently verified browser/platform combination)
 
-Use the repository launcher. It resolves the checkout root, installs only from
-the committed lockfile, and starts the local cross-origin-isolated Vite server:
-
 ```bash
 pnpm launch:mvi
 ```
 
-Open the URL printed by Vite (normally `http://127.0.0.1:5173`). The dev server supplies the cross-origin-isolation headers required by SQLite WASM OPFS. The app fails visibly rather than falling back to transient writable state when OPFS is unavailable.
+Open the URL printed by Vite (normally `http://127.0.0.1:5173`). The server supplies the cross-origin-isolation headers required by SQLite WASM OPFS. The app fails visibly rather than falling back to transient writable state when OPFS is unavailable.
 
-Manual smoke:
+## Manual smoke
 
 1. Confirm the seeded L-bracket and accepted immutable revision appear.
-2. Orbit, pan, zoom, and use Reset / fit. Confirm the physical grid is CAD Z=0 and the status says the review mesh has Z-min 0 on the grid.
+2. Orbit, pan, zoom, and use Reset / fit. Confirm CAD Z=0 sits on the physical grid.
 3. Inspect the source-parameter zone, bbox, build-volume context, and review-only disclosure.
 4. Change Leg length from 80 mm to a bounded value between 40 and 160 mm.
 5. Confirm the exact old/new diff says Preview only · not committed.
 6. Commit the candidate. Confirm the accepted revision ID remains unchanged.
-7. Reload the page. Confirm the candidate and parameter value reopen from SQLite WASM · OPFS.
-8. Confirm fabrication_release and machine_actuation remain false.
+7. Reload. Confirm the candidate and parameter value reopen from SQLite WASM OPFS.
+8. Confirm `fabrication_release` and `machine_actuation` remain false.
 
-## Browser verification
+## Verification
 
-Install Chromium once with `pnpm exec playwright install chromium`, then run the
-single canonical browser gate:
+Install Chromium once with `pnpm exec playwright install chromium`, then run:
 
 ```bash
 pnpm verify:mvi
 ```
 
-The gate runs TypeScript checking, unit/component tests, the production build,
-and Playwright in sequence and propagates any failure. The browser test surface
-includes a closed, ordered 25-scenario behavior corpus and a deterministic
-1,000-replay failure-class campaign. Each replay has a unique receipt identity,
-while the exercised behavior is the 15 predeclared failure-class scenarios; it
-does not claim 1,000 distinct operation schedules. The campaign rejects incomplete,
-reordered, substituted, forged, or source-stale evidence and requires zero
-false success, false release, stale-head replacement, duplicate authored
-revision, unauthorized lifecycle authority, and cross-project custody reads.
-It is a browser-only dependency path: Python, uv, build123d, and OCP are not
-browser launch or verification prerequisites.
-
-The Playwright suites exercise the golden path plus the same source-bound
-25-scenario corpus and 1,000-replay campaign in Chromium. These results are
-candidate-bound browser behavior evidence only. They do not replace the
-separate Python readiness campaign, close broader browser/OS/GPU qualification,
-accept G2, approve review, export, release, or authorize machine actuation.
-
-## Python exact-adapter verification
-
-The existing Python foundation and optional external exact-CAD/reference adapter remain independently verified:
-
-Run verification on a supported Linux host with a root-owned, non-group/world-writable
-`/usr/bin/bwrap` and an enabled unprivileged namespace policy. The shared preflight
-fails closed before the test suite when that host contract is unavailable and does not
-skip or weaken the precision-worker sandbox and custody checks.
-
-```bash
-uv sync --frozen --all-extras
-uv run --frozen python -m piton.precision_worker_launch --preflight-sandbox
-uv run --frozen python -m pytest -q
-uv run --frozen python scripts/verify_repo.py
-```
+The canonical gate runs TypeScript checking, unit/component tests, the production build, and Playwright in sequence. The browser test surface includes the closed ordered 25-scenario behavior corpus and deterministic 1,000-replay failure-class campaign. These results are candidate-bound browser behavior evidence only.
 
 ## Current limitations
 
 - One seeded single Part and one writable bounded parameter (`leg_length_mm`).
-- Browser Manifold output is a review mesh, not exact B-rep or durable topology authority.
-- Python exact realization is an optional external adapter and is not yet invoked from the browser workbench.
+- Manifold output is review mesh geometry, not exact B-rep or durable topology authority.
+- No exact-CAD adapter or exact-geometry export is included in this repository.
 - No engineering approval issuance, fabrication release, machine actuation, printer, CNC, slicer, G-code, CAM, or deployment capability exists.
 - No assembly authoring or general persistent topology.
 

@@ -50,9 +50,9 @@ Every other property below assumes this invariant.
 
 - One writable authority per revision. The runnable browser MVI authors
   immutable `DesignRevision` records through browser-local TypeScript commands
-  using `browser-typescript/v1`. Python/build123d remains a separately pinned,
-  optional external exact-CAD/reference adapter. A worker realization never
-  becomes a second writable copy and cannot mutate the browser-authored revision.
+  using `browser-typescript/v1`. The repository has no external exact-CAD
+  adapter. A review-mesh realization never becomes a second writable copy and
+  cannot mutate the browser-authored revision.
 - Semantic Part/feature/parameter/requirement records are read-only
   query/navigation/evidence overlays. Generated text is never a second
   writable copy.
@@ -457,8 +457,8 @@ A Stage 1 design/code review must answer yes to every applicable item.
 **Authority**
 
 - One writable authority per revision
-- Browser-local TypeScript command/revision authority; Python/build123d is an
-  optional pinned exact-CAD/reference adapter
+- Browser-local TypeScript command/revision authority; no external exact-CAD
+  adapter is included in the repository
 - Semantic/source projections read-only
 - Migration creates new revision and receipt
 
