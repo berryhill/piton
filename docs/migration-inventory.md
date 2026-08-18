@@ -14,7 +14,7 @@ Every tracked file at the candidate HEAD is classified under exactly one cutover
 
 | role | surface | files at publication |
 | --- | --- | --- |
-| `primary-writable-authority-browser` | `browser-src/**`, `tests-browser/**`, `index.html` | 28 |
+| `primary-writable-authority-browser` | `browser-src/**`, `tests-browser/**`, `index.html` | 31 |
 | `review-artifacts-viewer` | `src/piton/viewer_assets/**` | 4 |
 | `external-exact-cad-adapter` | `src/**` (minus viewer assets and entry shims), `scripts/**`, `tests/**`, `examples/**` | 148 |
 | `verification-ci` | `.github/**`, toolchain pins, lockfiles, and the browser launcher at the root | 13 |
@@ -30,7 +30,7 @@ The fenced block below is the classification source of truth. `tests/test_cutove
 {
   "schema": "piton/cutover-roles/v1",
   "base_sha": "8af59d7ecf3253beb644a6a3c747d771cc48a3f8",
-  "candidate_head_note": "Classification applies to every tracked file at the current candidate HEAD, including the direct browser entry, canonical browser-only verification gate, local launcher, and their documentation and acceptance tests.",
+  "candidate_head_note": "Classification applies to every tracked file at the current candidate HEAD, including the direct browser entry, canonical browser-only verification gate, closed 25-scenario browser behavior corpus, deterministic 1,000-schedule browser failure campaign, local launcher, and their documentation and acceptance tests.",
   "safety": {
     "review_state": "needs_human_review",
     "fabrication_release": false,
@@ -42,7 +42,7 @@ The fenced block below is the classification source of truth. `tests/test_cutove
       "authority_profile": "browser-typescript/v1",
       "includes": ["browser-src/**", "tests-browser/**", "index.html"],
       "excludes": [],
-      "files_at_publication": 28,
+      "files_at_publication": 31,
       "statement": "Sole writable authored authority: browser-local TypeScript commands and immutable revision state persisted in SQLite WASM/OPFS. index.html is the Vite root entry of this workbench."
     },
     {
@@ -102,6 +102,6 @@ The fenced block below is the classification source of truth. `tests/test_cutove
 
 ## Counts at publication
 
-Total tracked files at the candidate HEAD: 261. Per-role counts appear in the summary table and machine-readable roles block above; acceptance tests bind both representations to the current tracked-file classification.
+Total tracked files at the candidate HEAD: 264. Per-role counts appear in the summary table and machine-readable roles block above; acceptance tests bind both representations to the current tracked-file classification.
 
 Companion artifact: `docs/baseline-freeze-8af59d7.md` records the frozen verification command set and results.

@@ -56,11 +56,20 @@ pnpm verify:mvi
 ```
 
 The gate runs TypeScript checking, unit/component tests, the production build,
-and the Playwright golden path in sequence and propagates any failure. It is a
-browser-only dependency path: Python, uv, build123d, and OCP are not browser
-launch or verification prerequisites.
+and Playwright in sequence and propagates any failure. The browser test surface
+includes a closed, ordered 25-scenario behavior corpus and a deterministic
+1,000-schedule failure/concurrency campaign. The campaign rejects incomplete,
+reordered, substituted, forged, or source-stale evidence and requires zero
+false success, false release, stale-head replacement, duplicate authored
+revision, unauthorized lifecycle authority, and cross-project custody reads.
+It is a browser-only dependency path: Python, uv, build123d, and OCP are not
+browser launch or verification prerequisites.
 
-The Playwright golden path exercises launch, seeded project, Manifold WASM preview, CAD Z-min=0/grid status, immutable candidate commit, OPFS reload, and safety truth.
+The Playwright suites exercise the golden path plus the same source-bound
+25-scenario corpus and 1,000-schedule campaign in Chromium. These results are
+candidate-bound browser behavior evidence only. They do not replace the
+separate Python readiness campaign, close broader browser/OS/GPU qualification,
+accept G2, approve review, export, release, or authorize machine actuation.
 
 ## Python exact-adapter verification
 
