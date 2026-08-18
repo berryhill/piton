@@ -14,11 +14,11 @@ Every tracked file at the candidate HEAD is classified under exactly one cutover
 
 | role | surface | files at publication |
 | --- | --- | --- |
-| `primary-writable-authority-browser` | `browser-src/**`, `tests-browser/**`, `index.html` | 26 |
+| `primary-writable-authority-browser` | `browser-src/**`, `tests-browser/**`, `index.html` | 28 |
 | `review-artifacts-viewer` | `src/piton/viewer_assets/**` | 4 |
 | `external-exact-cad-adapter` | `src/**` (minus viewer assets and entry shims), `scripts/**`, `tests/**`, `examples/**` | 148 |
 | `verification-ci` | `.github/**`, toolchain pins, lockfiles, and the browser launcher at the root | 13 |
-| `docs-authority-text` | `README.md`, `AGENTS.md`, `docs/**`, `.otoxan/**`, `flows/**` | 20 |
+| `docs-authority-text` | `README.md`, `AGENTS.md`, `docs/**`, `.otoxan/**`, `flows/**` | 21 |
 | `schemas-templates` | `schemas/**`, `templates/**` | 18 |
 | `evidence` | `evidence/**` | 29 |
 
@@ -42,7 +42,7 @@ The fenced block below is the classification source of truth. `tests/test_cutove
       "authority_profile": "browser-typescript/v1",
       "includes": ["browser-src/**", "tests-browser/**", "index.html"],
       "excludes": [],
-      "files_at_publication": 26,
+      "files_at_publication": 28,
       "statement": "Sole writable authored authority: browser-local TypeScript commands and immutable revision state persisted in SQLite WASM/OPFS. index.html is the Vite root entry of this workbench."
     },
     {
@@ -70,7 +70,7 @@ The fenced block below is the classification source of truth. `tests/test_cutove
       "role": "docs-authority-text",
       "includes": ["README.md", "AGENTS.md", "docs/**", ".otoxan/**", "flows/**"],
       "excludes": [],
-      "files_at_publication": 20,
+      "files_at_publication": 21,
       "statement": "Authority and governance text; docs/mvi-doctrine.md is canonical and wins conflicts."
     },
     {
@@ -102,6 +102,6 @@ The fenced block below is the classification source of truth. `tests/test_cutove
 
 ## Counts at publication
 
-Total tracked files at the candidate HEAD: 258. Per-role counts appear in the summary table and machine-readable roles block above; acceptance tests bind both representations to the current tracked-file classification.
+Total tracked files at the candidate HEAD: 261. Per-role counts appear in the summary table and machine-readable roles block above; acceptance tests bind both representations to the current tracked-file classification.
 
 Companion artifact: `docs/baseline-freeze-8af59d7.md` records the frozen verification command set and results.
