@@ -108,8 +108,28 @@ export type LifecycleRecord =
   | FabricationRelease
   | ReleasedPackageProjection;
 
+const LIFECYCLE_KEYS: Readonly<Record<LifecycleRecord["kind"], readonly string[]>> = {
+  change_proposal: ["kind", "id", "projectId", "baseRevisionId", "command", "createdAt"],
+  proposal_disposition: ["kind", "id", "projectId", "proposalId", "disposition", "reason", "createdAt"],
+  build_attempt: ["kind", "id", "projectId", "revisionId", "recipeDigest", "state", "createdAt"],
+  evidence_closure: ["kind", "id", "projectId", "revisionId", "buildAttemptId", "requirementIds", "artifactDigests", "createdAt"],
+  channel_pointer: ["kind", "projectId", "channel", "revisionId", "version", "updatedAt"],
+  approval_record: ["kind", "id", "projectId", "revisionId", "evidenceClosureId", "decision", "reason", "createdAt"],
+  draft_export: ["kind", "id", "projectId", "revisionId", "evidenceClosureId", "manifestDigest", "releaseState", "createdAt"],
+  fabrication_release: ["kind", "id", "projectId", "revisionId", "approvalRecordId", "draftExportId", "fabricationRelease", "machineActuation", "createdAt"],
+  released_package_projection: ["kind", "id", "projectId", "fabricationReleaseId", "packageDigest", "fabricationRelease", "machineActuation", "createdAt"],
+};
+
+function hasExactKeys(value: object, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const sortedExpected = [...expected].sort();
+  return actual.length === sortedExpected.length && actual.every((key, index) => key === sortedExpected[index]);
+}
+
 export function assertLifecycleRecord(record: LifecycleRecord): void {
   if (!record || typeof record !== "object" || !("kind" in record)) throw new Error("invalid lifecycle record");
+  const expectedKeys = LIFECYCLE_KEYS[record.kind];
+  if (!expectedKeys || !hasExactKeys(record, expectedKeys)) throw new Error("lifecycle record keys are invalid");
   const common = record as LifecycleRecord & { projectId?: string; createdAt?: string; updatedAt?: string };
   if (!common.projectId) throw new Error("lifecycle project id is invalid");
   const timestamp = common.createdAt ?? common.updatedAt;
@@ -126,7 +146,8 @@ export function assertLifecycleRecord(record: LifecycleRecord): void {
   switch (record.kind) {
     case "change_proposal":
       identity(record.id, "proposal"); revision(record.baseRevisionId);
-      if (record.command.type !== "set-leg-length" || !Number.isFinite(record.command.value)
+      if (!record.command || typeof record.command !== "object" || !hasExactKeys(record.command, ["type", "value"])
+        || record.command.type !== "set-leg-length" || !Number.isFinite(record.command.value)
         || record.command.value < 40 || record.command.value > 160) throw new Error("proposal command is invalid");
       break;
     case "proposal_disposition":
@@ -157,6 +178,8 @@ export function assertLifecycleRecord(record: LifecycleRecord): void {
       break;
     case "approval_record":
       identity(record.id, "approval"); revision(record.revisionId); identity(record.evidenceClosureId, "evidence");
+      if (!["rejected", "deferred"].includes(record.decision)) throw new Error("approval decision is invalid");
+      if (!record.reason) throw new Error("approval reason is required");
       break;
     case "draft_export":
       identity(record.id, "export"); revision(record.revisionId); identity(record.evidenceClosureId, "evidence");

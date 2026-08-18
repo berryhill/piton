@@ -36,6 +36,30 @@ export interface BrowserProject {
 
 export type CandidateCommand = Readonly<{ type: "set-leg-length"; value: number }>;
 
+export interface CadCommandRequest {
+  format: "piton-command/v1";
+  projectId: string;
+  expectedCurrentRevisionId: string;
+  idempotencyKey: string;
+  command: Readonly<{
+    type: "set-leg-length";
+    quantity: Readonly<{ value: number; unit: "mm" }>;
+  }>;
+}
+
+export interface CadCommandReceipt {
+  format: "piton-command-receipt/v1";
+  projectId: string;
+  baseRevisionId: string;
+  resultingRevisionId: string;
+  canonicalRequestDigest: string;
+  authorityProfile: "browser-typescript/v1";
+  reviewState: "needs_human_review";
+  fabricationRelease: false;
+  machineActuation: false;
+  releaseState: "unreleased";
+}
+
 export const DEFAULT_PARAMETERS: Readonly<LBracketParameters> = Object.freeze({
   leg_length_mm: 80,
   leg_width_mm: 40,
@@ -146,6 +170,22 @@ export function deriveCandidateFromCommand(base: DesignRevision, command: Candid
 }
 
 export function assertRevisionIntegrity(revision: DesignRevision): void {
+  const revisionKeys = [
+    "id", "parentRevisionId", "createdAt", "authorityProfile", "parameters",
+    "reviewState", "fabricationRelease", "machineActuation", "releaseState",
+  ].sort();
+  const parameterKeys = [
+    "leg_length_mm", "leg_width_mm", "base_length_mm", "base_thickness_mm",
+    "leg_thickness_mm", "hole_diameter_mm",
+  ].sort();
+  if (!revision || typeof revision !== "object" || Array.isArray(revision)
+    || Object.keys(revision).sort().join("\u0000") !== revisionKeys.join("\u0000")) {
+    throw new Error("revision record keys are invalid");
+  }
+  if (!revision.parameters || typeof revision.parameters !== "object" || Array.isArray(revision.parameters)
+    || Object.keys(revision.parameters).sort().join("\u0000") !== parameterKeys.join("\u0000")) {
+    throw new Error("revision parameter keys are invalid");
+  }
   if (revision.authorityProfile !== "browser-typescript/v1"
     || revision.reviewState !== "needs_human_review"
     || revision.fabricationRelease !== false

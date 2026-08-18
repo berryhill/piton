@@ -1,6 +1,6 @@
 import { sqlite3Worker1Promiser, type Worker1Promiser } from "@sqlite.org/sqlite-wasm";
-import type { BrowserProject, CandidateCommand, DesignRevision } from "../domain";
-import { assertProjectIntegrity, deriveCandidateFromCommand, seedProject } from "../domain";
+import type { BrowserProject, CadCommandReceipt, CadCommandRequest, CandidateCommand, DesignRevision } from "../domain";
+import { SAFETY_TRUTH, assertProjectIntegrity, deriveCandidateFromCommand, seedProject } from "../domain";
 import { CURRENT_SCHEMA_VERSION, migrationStatements } from "./schema";
 import type { GeometryAuthorityBinding } from "../geometry/binding";
 import type { BuildAttempt, ChangeProposal, ChannelPointer, LifecycleRecord, ProposalDisposition } from "../lifecycle";
@@ -41,11 +41,13 @@ export interface ProjectRepository {
   load(): Promise<BrowserProject | null>;
   initialize(): Promise<BrowserProject>;
   commitCandidate(expectedCurrentRevisionId: string, command: CandidateCommand): Promise<BrowserProject>;
+  executeCommand(request: CadCommandRequest, requestDigest: string): Promise<CadCommandReceipt>;
   loadBuildStatus(projectId: string): Promise<BuildStatus | null>;
   saveBuildStatus(status: BuildStatus): Promise<void>;
   appendLifecycleRecord(record: CallerLifecycleRecord, expectedCurrentRevisionId: string): Promise<void>;
   moveChannel(pointer: ChannelPointer, expectedVersion: number): Promise<void>;
   loadLifecycleRecords(projectId: string): Promise<LifecycleRecord[]>;
+  importFreshCustody(project: BrowserProject, lifecycleRecords: readonly LifecycleRecord[]): Promise<void>;
   persistenceLabel: string;
 }
 
@@ -53,6 +55,7 @@ export class MemoryProjectRepository implements ProjectRepository {
   private project: BrowserProject | null = null;
   private buildStatus: BuildStatus | null = null;
   private lifecycleRecords: LifecycleRecord[] = [];
+  private commandReceipts = new Map<string, { requestDigest: string; receipt: CadCommandReceipt }>();
   persistenceLabel = "test memory";
 
   async load(): Promise<BrowserProject | null> {
@@ -81,6 +84,21 @@ export class MemoryProjectRepository implements ProjectRepository {
     assertProjectIntegrity(next);
     this.project = structuredClone(next);
     return structuredClone(this.project);
+  }
+
+  async executeCommand(request: CadCommandRequest, requestDigest: string): Promise<CadCommandReceipt> {
+    const stored = this.commandReceipts.get(request.idempotencyKey);
+    if (stored) {
+      if (stored.requestDigest !== requestDigest) throw new Error("idempotency key conflicts with another request");
+      return structuredClone(stored.receipt);
+    }
+    const project = await this.commitCandidate(request.expectedCurrentRevisionId, {
+      type: request.command.type,
+      value: request.command.quantity.value,
+    });
+    const receipt = commandReceipt(request, requestDigest, project.currentRevisionId);
+    this.commandReceipts.set(request.idempotencyKey, { requestDigest, receipt: structuredClone(receipt) });
+    return receipt;
   }
 
   async loadBuildStatus(projectId: string) {
@@ -117,6 +135,26 @@ export class MemoryProjectRepository implements ProjectRepository {
     this.lifecycleRecords.forEach(assertLifecycleRecord);
     return structuredClone(this.lifecycleRecords);
   }
+
+  async importFreshCustody(project: BrowserProject, lifecycleRecords: readonly LifecycleRecord[]): Promise<void> {
+    if (this.project) throw new Error("portable reopen requires empty custody");
+    assertProjectIntegrity(project);
+    lifecycleRecords.forEach(assertLifecycleRecord);
+    this.project = structuredClone(project);
+    this.lifecycleRecords = structuredClone([...lifecycleRecords]);
+  }
+}
+
+function commandReceipt(request: CadCommandRequest, requestDigest: string, resultingRevisionId: string): CadCommandReceipt {
+  return {
+    format: "piton-command-receipt/v1",
+    projectId: request.projectId,
+    baseRevisionId: request.expectedCurrentRevisionId,
+    resultingRevisionId,
+    canonicalRequestDigest: requestDigest,
+    authorityProfile: "browser-typescript/v1",
+    ...SAFETY_TRUTH,
+  };
 }
 
 function assertLifecycleWrite(record: LifecycleRecord, project: BrowserProject, existing: readonly LifecycleRecord[]): void {
@@ -340,6 +378,38 @@ export class SqliteOpfsProjectRepository implements ProjectRepository {
     return authoritative;
   }
 
+  async executeCommand(request: CadCommandRequest, requestDigest: string): Promise<CadCommandReceipt> {
+    await this.exec("BEGIN IMMEDIATE");
+    try {
+      const existing = await this.exec("SELECT request_digest, receipt_json FROM command_receipts WHERE idempotency_key = ?", [request.idempotencyKey]);
+      const stored = (existing.result.resultRows as Row[])[0];
+      if (stored) {
+        if (String(stored.request_digest) !== requestDigest) throw new Error("idempotency key conflicts with another request");
+        await this.exec("COMMIT");
+        return JSON.parse(String(stored.receipt_json)) as CadCommandReceipt;
+      }
+      const project = await this.load();
+      if (!project) throw new Error("project is not initialized");
+      if (project.currentRevisionId !== request.expectedCurrentRevisionId) throw new Error("stale current revision");
+      const base = project.revisions.find((revision) => revision.id === request.expectedCurrentRevisionId);
+      if (!base) throw new Error("current revision pointer is invalid");
+      const candidate = deriveCandidateFromCommand(base, { type: request.command.type, value: request.command.quantity.value });
+      await this.insertRevision(project.id, candidate);
+      await this.exec("UPDATE projects SET current_revision_id = ? WHERE id = ? AND current_revision_id = ?",
+        [candidate.id, project.id, request.expectedCurrentRevisionId]);
+      const changes = await this.exec("SELECT changes() AS changed_rows");
+      if (Number((changes.result.resultRows as Row[])[0]?.changed_rows ?? 0) !== 1) throw new Error("stale current revision");
+      const receipt = commandReceipt(request, requestDigest, candidate.id);
+      await this.exec("INSERT INTO command_receipts (idempotency_key, request_digest, receipt_json) VALUES (?, ?, ?)",
+        [request.idempotencyKey, requestDigest, JSON.stringify(receipt)]);
+      await this.exec("COMMIT");
+      return receipt;
+    } catch (error) {
+      await this.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   private async insertRevision(projectId: string, revision: DesignRevision): Promise<void> {
     await this.exec(
       `INSERT INTO revisions
@@ -468,8 +538,78 @@ export class SqliteOpfsProjectRepository implements ProjectRepository {
       kind: "channel_pointer", projectId: String(row.project_id), channel: String(row.channel) as "workspace" | "candidate" | "review",
       revisionId: String(row.revision_id), version: Number(row.version), updatedAt: String(row.updated_at),
     });
+    for (const row of await rows("approval_records")) records.push({
+      kind: "approval_record", id: String(row.id), projectId: String(row.project_id), revisionId: String(row.revision_id),
+      evidenceClosureId: String(row.evidence_closure_id), decision: String(row.decision) as "rejected" | "deferred",
+      reason: String(row.reason), createdAt: String(row.created_at),
+    });
+    for (const row of await rows("draft_exports")) records.push({
+      kind: "draft_export", id: String(row.id), projectId: String(row.project_id), revisionId: String(row.revision_id),
+      evidenceClosureId: String(row.evidence_closure_id), manifestDigest: String(row.manifest_digest), releaseState: "unreleased",
+      createdAt: String(row.created_at),
+    });
+    for (const row of await rows("fabrication_releases")) records.push({
+      kind: "fabrication_release", id: String(row.id), projectId: String(row.project_id), revisionId: String(row.revision_id),
+      approvalRecordId: String(row.approval_record_id), draftExportId: String(row.draft_export_id),
+      fabricationRelease: false, machineActuation: false, createdAt: String(row.created_at),
+    });
+    for (const row of await rows("released_package_projections")) records.push({
+      kind: "released_package_projection", id: String(row.id), projectId: String(row.project_id),
+      fabricationReleaseId: String(row.fabrication_release_id), packageDigest: String(row.package_digest),
+      fabricationRelease: false, machineActuation: false, createdAt: String(row.created_at),
+    });
     records.forEach(assertLifecycleRecord);
     return records;
+  }
+
+  async importFreshCustody(project: BrowserProject, lifecycleRecords: readonly LifecycleRecord[]): Promise<void> {
+    assertProjectIntegrity(project);
+    lifecycleRecords.forEach(assertLifecycleRecord);
+    await this.exec("BEGIN IMMEDIATE");
+    try {
+      const existing = await this.exec("SELECT id FROM projects LIMIT 1");
+      if ((existing.result.resultRows as Row[])[0]) throw new Error("portable reopen requires empty custody");
+      await this.exec("INSERT INTO projects (id, name, accepted_revision_id, current_revision_id, schema_version) VALUES (?, ?, ?, ?, ?)",
+        [project.id, project.name, project.acceptedRevisionId, project.currentRevisionId, CURRENT_SCHEMA_VERSION]);
+      for (const revision of project.revisions) await this.insertRevision(project.id, revision);
+      for (const record of lifecycleRecords) await this.insertPortableLifecycle(record);
+      await this.exec("COMMIT");
+    } catch (error) {
+      await this.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  private async insertPortableLifecycle(record: LifecycleRecord): Promise<void> {
+    switch (record.kind) {
+      case "change_proposal":
+        await this.exec("INSERT INTO change_proposals (id, project_id, base_revision_id, command_json, created_at) VALUES (?, ?, ?, ?, ?)",
+          [record.id, record.projectId, record.baseRevisionId, JSON.stringify(record.command), record.createdAt]); break;
+      case "proposal_disposition":
+        await this.exec("INSERT INTO proposal_dispositions (id, project_id, proposal_id, disposition, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+          [record.id, record.projectId, record.proposalId, record.disposition, record.reason, record.createdAt]); break;
+      case "build_attempt":
+        await this.exec("INSERT INTO build_attempts (id, project_id, revision_id, recipe_digest, state, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+          [record.id, record.projectId, record.revisionId, record.recipeDigest, record.state, record.createdAt]); break;
+      case "evidence_closure":
+        await this.exec("INSERT INTO evidence_closures (id, project_id, revision_id, build_attempt_id, requirements_json, artifacts_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [record.id, record.projectId, record.revisionId, record.buildAttemptId, JSON.stringify(record.requirementIds), JSON.stringify(record.artifactDigests), record.createdAt]); break;
+      case "channel_pointer":
+        await this.exec("INSERT INTO channel_pointers (project_id, channel, revision_id, version, updated_at) VALUES (?, ?, ?, ?, ?)",
+          [record.projectId, record.channel, record.revisionId, record.version, record.updatedAt]); break;
+      case "approval_record":
+        await this.exec("INSERT INTO approval_records (id, project_id, revision_id, evidence_closure_id, decision, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [record.id, record.projectId, record.revisionId, record.evidenceClosureId, record.decision, record.reason, record.createdAt]); break;
+      case "draft_export":
+        await this.exec("INSERT INTO draft_exports (id, project_id, revision_id, evidence_closure_id, manifest_digest, release_state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [record.id, record.projectId, record.revisionId, record.evidenceClosureId, record.manifestDigest, record.releaseState, record.createdAt]); break;
+      case "fabrication_release":
+        await this.exec("INSERT INTO fabrication_releases (id, project_id, revision_id, approval_record_id, draft_export_id, fabrication_release, machine_actuation, created_at) VALUES (?, ?, ?, ?, ?, 0, 0, ?)",
+          [record.id, record.projectId, record.revisionId, record.approvalRecordId, record.draftExportId, record.createdAt]); break;
+      case "released_package_projection":
+        await this.exec("INSERT INTO released_package_projections (id, project_id, fabrication_release_id, package_digest, fabrication_release, machine_actuation, created_at) VALUES (?, ?, ?, ?, 0, 0, ?)",
+          [record.id, record.projectId, record.fabricationReleaseId, record.packageDigest, record.createdAt]); break;
+    }
   }
 
   async readMigrationEvidence(): Promise<SqliteMigrationEvidence> {

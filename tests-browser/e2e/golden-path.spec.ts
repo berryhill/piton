@@ -89,15 +89,16 @@ test("SQLite WASM reports migrated schema and direct durable readback", async ({
   });
 
   expect(evidence).toEqual({
-    sqliteUserVersion: 3,
-    projectSchemaVersion: 3,
+    sqliteUserVersion: 4,
+    projectSchemaVersion: 4,
     projectId: "piton-seeded-l-bracket",
     revisionCount: expect.any(Number),
     currentRevisionReadback: expect.stringMatching(/^rev-[0-9a-f]{64}$/),
     tables: [
       "approval_records", "build_attempts", "build_status", "change_proposals",
-      "channel_pointers", "draft_exports", "evidence_closures", "fabrication_releases",
-      "projects", "proposal_dispositions", "released_package_projections", "revisions",
+      "channel_pointers", "command_receipts", "draft_exports", "evidence_closures",
+      "fabrication_releases", "projects", "proposal_dispositions",
+      "released_package_projections", "revisions",
     ],
   });
   expect(evidence.revisionCount).toBeGreaterThanOrEqual(1);
@@ -164,8 +165,8 @@ test("executes a version-2 OPFS migration and durably reopens lifecycle custody"
     };
   });
 
-  expect(evidence.version).toBe(3);
-  expect(evidence.project.schema_version).toBe(3);
+  expect(evidence.version).toBe(4);
+  expect(evidence.project.schema_version).toBe(4);
   expect(evidence.project.accepted_revision_id).toBe(evidence.revision.id);
   expect(evidence.project.current_revision_id).toBe(evidence.revision.id);
   expect(evidence.revision.authority_profile).toBe("browser-typescript/v1");

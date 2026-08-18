@@ -78,7 +78,14 @@ export default function App({ application, geometryDisabled }: Props) {
   async function commit() {
     if (!project || !changed) return;
     try {
-      const authoritative = await application.commitCandidate(project.currentRevisionId, { type: "set-leg-length", value });
+      await application.executeCommand({
+        format: "piton-command/v1",
+        projectId: project.id,
+        expectedCurrentRevisionId: project.currentRevisionId,
+        idempotencyKey: `ui:${project.currentRevisionId}:${value}`,
+        command: { type: "set-leg-length", quantity: { value, unit: "mm" } },
+      });
+      const authoritative = await application.loadProject();
       setProject(authoritative);
       const authoritativeCurrent = authoritative.revisions.find((revision) => revision.id === authoritative.currentRevisionId)!;
       setValue(authoritativeCurrent.parameters.leg_length_mm);
@@ -91,6 +98,22 @@ export default function App({ application, geometryDisabled }: Props) {
         setValue(authoritativeCurrent.parameters.leg_length_mm);
       } catch { /* Preserve the original commit rejection when custody reload also fails. */ }
       setMessage(`Commit rejected: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
+  }
+
+  async function exportCustody() {
+    try {
+      const packet = await application.exportPortableCustody();
+      const blob = new Blob([JSON.stringify(packet)], { type: "application/vnd.piton.portable-custody+json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${project?.id ?? "piton-project"}.piton-custody.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setMessage("Portable custody exported · review-only, unreleased");
+    } catch (error) {
+      setMessage(`Portable custody export failed: ${error instanceof Error ? error.message : "unknown error"}`);
     }
   }
 
@@ -171,7 +194,10 @@ export default function App({ application, geometryDisabled }: Props) {
       <aside className="panel revision"><h2>Revision custody</h2><div className="state-card"><span>Accepted immutable revision</span><code>{accepted.id}</code><small>Retained unchanged</small></div>
         <div className="state-card"><span>Current revision</span><code>{current.id}</code></div>
         {changed && previewParameters ? <div className="diff"><b>Parameter diff</b><span>{current.parameters.leg_length_mm} mm → {value} mm</span><strong>Preview only · not committed</strong></div> : <p className="muted">Change the selected parameter to create a preview.</p>}
-        <button className="commit" disabled={!changed} onClick={() => void commit()}>Commit candidate</button><p className="status-message">{message}</p>
+        <button className="commit" disabled={!changed} onClick={() => void commit()}>Commit candidate</button>
+        <button onClick={() => void exportCustody()}>Export portable custody</button>
+        <small className="identity-note">Canonical authored records only · not DraftExport, geometry export, approval, or release.</small>
+        <p className="status-message">{message}</p>
         {durableBuildStatus ? <div className="state-card durable-status">
           <span>Durable preview status · {durableGeometryStatusLabel(durableBuildStatus.binding, current.id)}</span>
           <b>{durableBuildStatus.state}</b><small>{durableBuildStatus.message}</small>

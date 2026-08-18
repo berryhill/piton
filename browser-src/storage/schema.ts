@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 export const LIFECYCLE_TABLES = Object.freeze([
   "change_proposals",
@@ -20,6 +20,12 @@ const BUILD_STATUS_TABLE = `CREATE TABLE IF NOT EXISTS build_status (
       preview_digest TEXT NOT NULL,
       state TEXT NOT NULL CHECK (state IN ('idle', 'previewing', 'ready', 'failed')),
       message TEXT NOT NULL
+    ) STRICT`;
+
+const COMMAND_RECEIPTS_TABLE = `CREATE TABLE command_receipts (
+      idempotency_key TEXT PRIMARY KEY,
+      request_digest TEXT NOT NULL,
+      receipt_json TEXT NOT NULL
     ) STRICT`;
 
 const LIFECYCLE_SCHEMA = [
@@ -144,8 +150,14 @@ export function migrationStatements(fromVersion: number): string[] {
     );
   }
   if (fromVersion === CURRENT_SCHEMA_VERSION) return [];
+  if (fromVersion === 3) return [
+    COMMAND_RECEIPTS_TABLE,
+    `UPDATE projects SET schema_version = ${CURRENT_SCHEMA_VERSION}`,
+    `PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`,
+  ];
   if (fromVersion === 2) return [
     ...LIFECYCLE_SCHEMA,
+    COMMAND_RECEIPTS_TABLE,
     `UPDATE projects SET schema_version = ${CURRENT_SCHEMA_VERSION}`,
     `PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`,
   ];
@@ -154,12 +166,14 @@ export function migrationStatements(fromVersion: number): string[] {
     BUILD_STATUS_TABLE,
     "PRAGMA user_version = 2",
     ...LIFECYCLE_SCHEMA,
+    COMMAND_RECEIPTS_TABLE,
     `UPDATE projects SET schema_version = ${CURRENT_SCHEMA_VERSION}`,
     `PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`,
   ];
   return [
     ...CORE_SCHEMA,
     ...LIFECYCLE_SCHEMA,
+    COMMAND_RECEIPTS_TABLE,
     `PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`,
   ];
 }
