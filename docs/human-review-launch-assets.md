@@ -2,7 +2,7 @@
 
 These assets prepare evidence for a person; they do not approve, export for fabrication, release, promote a channel, or actuate a machine. Every generated packet must retain `review_state=needs_human_review`, `fabrication_release=false`, and `machine_actuation=false`.
 
-The primary runnable reviewer path is the browser workbench below. The later Python procedures cover the optional external exact-CAD/reference adapter and lifecycle-framework evidence; they supplement the browser MVI and are not its writable authored authority.
+The primary runnable reviewer path is the browser workbench below. The later Python procedures cover the pre-cutover Python/build123d/OCP evidence lane retained for staged retirement and historical comparison; they do not define, supplement, or qualify the browser product and hold no writable authored authority.
 
 ## Browser workbench review
 
@@ -34,7 +34,7 @@ The primary runnable reviewer path is the browser workbench below. The later Pyt
 
    `tests-browser/e2e/golden-path.spec.ts` separately opens the real SQLite WASM OPFS database and directly reads `PRAGMA user_version`, the non-internal table inventory, the project row's schema version, revision count, and current-revision match. It also seeds a separate real OPFS database at version 2, executes the product migration to version 4, verifies unchanged project/revision authority and safety fields, writes one revision-bound proposal row, closes, reopens, and proves durable lifecycle readback. `tests-browser/storage.test.ts` verifies ordered v1-to-v2, v2-to-v4, and v3-to-v4 plans, atomic rollback on an injected migration failure, and fail-closed rejection of a newer unsupported schema. The browser campaign is candidate-bound behavior evidence; it is not the separate Python `ReadinessCampaign`, does not by itself close broader Stage 1/G2 qualification, and does not approve, export, release, or actuate. No browser campaign receipt belongs in the exact-artifact evidence templates unless a later reviewed schema explicitly adds that distinct claim scope.
 
-The remaining procedures use the optional external exact-CAD/reference adapter and are not browser launch or `verify:mvi` prerequisites.
+The remaining procedures exercise the pre-cutover Python/build123d/OCP evidence lane and are not browser launch or `verify:mvi` prerequisites.
 
 ## Review-only project receipt
 

@@ -10,7 +10,7 @@ This model covers the current local-first Stage 1 scaffold. It is a review artif
 
 ## Scope and security objectives
 
-The governed scope is: the runnable browser-local TypeScript workbench and its sole writable authored-revision authority; SQLite WASM/OPFS custody; the Manifold WASM geometry worker; the optional external Python exact-CAD/reference and lifecycle-framework adapter; immutable project inputs; npm/PyPI/CI build dependencies; review packets; schemas and templates; and the operator and human-review boundary.
+The governed current-product scope is: the runnable browser-local TypeScript workbench and its sole writable authored-revision authority; SQLite WASM/OPFS custody; the Manifold WASM geometry worker; immutable project inputs; npm/CI build dependencies; review packets; schemas and templates; and the operator and human-review boundary. The tracked pre-cutover Python/build123d/OCP evidence lane remains in repository security scope only for staged retirement and historical verification; it is not a current product, backend, adapter, verification authority, or writable authority.
 
 Security objectives:
 
@@ -26,7 +26,7 @@ Out of scope for this version: deployed multi-tenant services, arbitrary third-p
 
 ## Assets
 
-- Authored intent in immutable browser-local TypeScript `DesignRevision` records; optional pinned Python source bytes belong to the external exact-CAD/reference adapter.
+- Authored intent exists only in immutable browser-local TypeScript `DesignRevision` records. Pinned Python source bytes belong to the pre-cutover Python/build123d/OCP evidence lane and carry no current product authority.
 - Immutable project inputs: project identity, accepted base revision, source manifest, parameter values, units, recipes, toolchain locks, and digests.
 - Local custody: SQLite records, CAS/artifact bytes, attempt-scoped staging, coordinator generation/fence/lease state, channel pointers, and last-good references.
 - Exact and derivative artifacts: B-rep, STEP, inspection receipt, review GLB, artifact-local selection map, optional 3MF/STL, and their digests.

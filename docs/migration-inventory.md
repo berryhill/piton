@@ -16,9 +16,9 @@ Every tracked file at the candidate HEAD is classified under exactly one cutover
 | --- | --- | --- |
 | `primary-writable-authority-browser` | `browser-src/**`, `tests-browser/**`, `index.html` | 31 |
 | `review-artifacts-viewer` | `src/piton/viewer_assets/**` | 4 |
-| `external-exact-cad-adapter` | `src/**` (minus viewer assets and entry shims), `scripts/**`, `tests/**`, `examples/**` | 148 |
-| `verification-ci` | `.github/**`, toolchain pins, lockfiles, and the browser launcher at the root | 13 |
-| `docs-authority-text` | `README.md`, `AGENTS.md`, `docs/**`, `.otoxan/**`, `flows/**` | 21 |
+| `pre-cutover-python-legacy` | `src/**` (minus viewer assets and entry shims), `scripts/**`, `tests/**`, `examples/**` | 148 |
+| `verification-ci` | `.github/**`, `tools/**`, toolchain pins, lockfiles, and the browser launcher at the root | 14 |
+| `docs-authority-text` | `README.md`, `AGENTS.md`, `docs/**`, `.otoxan/**`, `flows/**` | 23 |
 | `schemas-templates` | `schemas/**`, `templates/**` | 18 |
 | `evidence` | `evidence/**` | 29 |
 
@@ -53,24 +53,24 @@ The fenced block below is the classification source of truth. `tests/test_cutove
       "statement": "Static review-viewer assets; review-only."
     },
     {
-      "role": "external-exact-cad-adapter",
+      "role": "pre-cutover-python-legacy",
       "includes": ["src/**", "scripts/**", "tests/**", "examples/**"],
       "excludes": ["src/piton/viewer_assets/**"],
       "files_at_publication": 148,
-      "statement": "Optional pinned external exact-CAD/reference and lifecycle adapter (Python/build123d/OCP), its scripts, its tests, and the minimal example fixture. Read-only relative to browser-authored revisions; adapter-internal schema consts such as piton-project-v1 authority.writable=source-native-python describe the adapter's own project format and are not product authority."
+      "statement": "Pre-cutover Python/build123d/OCP legacy, its scripts, tests, and minimal example fixture, retained only for staged retirement and historical comparison. It is not a current product, backend, adapter, verification authority, or writable authority; legacy schema consts such as piton-project-v1 authority.writable=source-native-python describe only the retired project format."
     },
     {
       "role": "verification-ci",
-      "includes": [".github/**", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.json", "vite.config.ts", "playwright.config.ts", "launch-browser-mvi.sh", "pyproject.toml", "uv.lock", ".python-version", ".gitignore"],
+      "includes": [".github/**", "tools/**", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.json", "vite.config.ts", "playwright.config.ts", "launch-browser-mvi.sh", "pyproject.toml", "uv.lock", ".python-version", ".gitignore"],
       "excludes": [],
-      "files_at_publication": 13,
+      "files_at_publication": 14,
       "statement": "Toolchain pins, lockfiles, CI wiring, and the local browser-only launcher; no authored-revision authority."
     },
     {
       "role": "docs-authority-text",
       "includes": ["README.md", "AGENTS.md", "docs/**", ".otoxan/**", "flows/**"],
       "excludes": [],
-      "files_at_publication": 21,
+      "files_at_publication": 23,
       "statement": "Authority and governance text; docs/mvi-doctrine.md is canonical and wins conflicts."
     },
     {
@@ -94,14 +94,14 @@ The fenced block below is the classification source of truth. `tests/test_cutove
 ## Special classifications and corrections
 
 - **Direct browser entry and launcher.** `index.html` loads `browser-src/main.tsx` directly. The obsolete `src/main.tsx` and `src/App.tsx` forwarding shims were removed, so no alternate browser entry remains. `launch-browser-mvi.sh` is browser-only operator/verification wiring and has no authored-revision authority.
-- **Review viewer assets (`src/piton/viewer_assets/**`).** Static review-only viewer assets; given their own role so the adapter role stays code/tests/fixtures.
-- **Adapter-internal schema consts.** `schemas/piton-project-v1.schema.json` pins `authority.writable` to the const `source-native-python`, and the matching emission/validation sites live in `src/piton/project_format.py`, `src/piton/realization.py`, `src/piton/qualification.py`, `src/piton/feasibility.py`, `src/piton/mesh_derivatives.py`, `examples/minimal-project/piton.project.json`, and `scripts/install_verify.py`. These describe the adapter's own project format, are schema-const-pinned (qualification rejects reworded values), and are not product-authority claims. Rewording them would break the adapter round-trip; they stay classified under `external-exact-cad-adapter`.
-- **Verification scripts.** `scripts/verify_repo.py`, `scripts/doctor.py`, and `scripts/install_verify.py` are adapter-language repository verification tooling. Per the task contract they classify under `external-exact-cad-adapter`; they gate CI but hold no authored-revision authority.
+- **Review viewer assets (`src/piton/viewer_assets/**`).** Static review-only viewer assets; given their own role so the pre-cutover legacy role stays code/tests/fixtures.
+- **Legacy schema consts.** `schemas/piton-project-v1.schema.json` pins `authority.writable` to the const `source-native-python`, and the matching emission/validation sites live in `src/piton/project_format.py`, `src/piton/realization.py`, `src/piton/qualification.py`, `src/piton/feasibility.py`, `src/piton/mesh_derivatives.py`, `examples/minimal-project/piton.project.json`, and `scripts/install_verify.py`. These describe only the pre-cutover project format, are schema-const-pinned (qualification rejects reworded values), and are not current product-authority claims. Rewording them would break historical round-trip checks; they stay classified under `pre-cutover-python-legacy` pending their downstream retirement task.
+- **Verification scripts.** `scripts/verify_repo.py`, `scripts/doctor.py`, and `scripts/install_verify.py` are pre-cutover repository verification tooling. They classify under `pre-cutover-python-legacy`, do not qualify the browser product, and hold no authored-revision authority. The current fixed-tree historical-evidence verifier under `tools/**` classifies as verification wiring and likewise holds no authored-revision authority.
 - **`.github/CODEOWNERS`.** Intentionally unconfigured; grants no authority.
 - **`evidence/**`.** Immutable Stage 0 research fixtures plus the convention README; per `evidence/README.md`, generated evidence stays untracked unless a reviewed task explicitly adds an immutable fixture.
 
 ## Counts at publication
 
-Total tracked files at the candidate HEAD: 264. Per-role counts appear in the summary table and machine-readable roles block above; acceptance tests bind both representations to the current tracked-file classification.
+Total tracked files at the candidate HEAD: 267. Per-role counts appear in the summary table and machine-readable roles block above; acceptance tests bind both representations to the current tracked-file classification.
 
 Companion artifact: `docs/baseline-freeze-8af59d7.md` records the frozen verification command set and results.
