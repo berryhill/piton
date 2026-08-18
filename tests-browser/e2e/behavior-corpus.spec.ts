@@ -4,11 +4,19 @@ import { expect, test } from "@playwright/test";
 const productSource = [
   "../support/browserBehaviorCorpus.ts",
   "../../browser-src/application.ts",
+  "../../browser-src/agentAdapter.ts",
   "../../browser-src/domain.ts",
+  "../../browser-src/lifecycle.ts",
   "../../browser-src/storage/repository.ts",
+  "../../browser-src/storage/schema.ts",
   "../../browser-src/portable.ts",
+  "../../browser-src/geometry/binding.ts",
+  "../../browser-src/geometry/bracket.ts",
   "../../browser-src/geometry/gate.ts",
+  "../../browser-src/geometry/geometry.worker.ts",
   "../../browser-src/geometry/protocol.ts",
+  "../../browser-src/geometry/view.ts",
+  "../../browser-src/geometry/workerClient.ts",
   "../../package.json",
   "../../pnpm-lock.yaml",
   "../../tsconfig.json",
@@ -16,7 +24,7 @@ const productSource = [
   "../../playwright.config.ts",
 ].map((path) => readFileSync(new URL(path, import.meta.url), "utf8")).join("\n--piton-source-boundary--\n");
 
-test("executes the closed 25-scenario corpus and 1,000-run campaign in Chromium", async ({ page }) => {
+test("executes the closed 25-scenario corpus and 1,000-replay campaign in Chromium", async ({ page }) => {
   await page.goto("/");
   const evidence = await page.evaluate(async (sourceBinding) => {
     const moduleUrl = "/tests-browser/support/browserBehaviorCorpus.ts";
@@ -25,7 +33,7 @@ test("executes the closed 25-scenario corpus and 1,000-run campaign in Chromium"
       FAILURE_CLASSES: readonly string[];
       runBrowserBehaviorCorpus(): Promise<{ scenarioId: string; passed: boolean; rootSafetyTruth: Record<string, unknown> }[]>;
       runBrowserFailureCampaign(source: string): Promise<{
-        outcomes: { scheduleId: string; failureClass: string }[];
+        outcomes: { replayId: string; scenarioId: string; failureClass: string }[];
         summary: Record<string, number>;
       }>;
       verifyBrowserFailureCampaign(receipt: unknown, source: string): unknown;
@@ -43,7 +51,8 @@ test("executes the closed 25-scenario corpus and 1,000-run campaign in Chromium"
         && rootSafetyTruth.machineActuation === false
         && rootSafetyTruth.releaseState === "unreleased"),
       outcomeCount: receipt.outcomes.length,
-      scheduleCount: new Set(receipt.outcomes.map(({ scheduleId }) => scheduleId)).size,
+      replayCount: new Set(receipt.outcomes.map(({ replayId }) => replayId)).size,
+      exercisedScenarioCount: new Set(receipt.outcomes.map(({ scenarioId }) => scenarioId)).size,
       failureClasses: Array.from(new Set(receipt.outcomes.map((outcome) => outcome.failureClass))).sort(),
       declaredFailureClasses: [...campaign.FAILURE_CLASSES].sort(),
       summary: receipt.summary,
@@ -55,7 +64,8 @@ test("executes the closed 25-scenario corpus and 1,000-run campaign in Chromium"
   expect(evidence.allScenariosPassed).toBe(true);
   expect(evidence.allScenariosUnreleased).toBe(true);
   expect(evidence.outcomeCount).toBe(1_000);
-  expect(evidence.scheduleCount).toBe(1_000);
+  expect(evidence.replayCount).toBe(1_000);
+  expect(evidence.exercisedScenarioCount).toBe(evidence.declaredFailureClasses.length);
   expect(evidence.failureClasses).toEqual(evidence.declaredFailureClasses);
   expect(evidence.summary).toEqual({
     total: 1_000,

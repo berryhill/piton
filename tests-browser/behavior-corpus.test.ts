@@ -12,11 +12,19 @@ import {
 const productSource = [
   "./support/browserBehaviorCorpus.ts",
   "../browser-src/application.ts",
+  "../browser-src/agentAdapter.ts",
   "../browser-src/domain.ts",
+  "../browser-src/lifecycle.ts",
   "../browser-src/storage/repository.ts",
+  "../browser-src/storage/schema.ts",
   "../browser-src/portable.ts",
+  "../browser-src/geometry/binding.ts",
+  "../browser-src/geometry/bracket.ts",
   "../browser-src/geometry/gate.ts",
+  "../browser-src/geometry/geometry.worker.ts",
   "../browser-src/geometry/protocol.ts",
+  "../browser-src/geometry/view.ts",
+  "../browser-src/geometry/workerClient.ts",
   "../package.json",
   "../pnpm-lock.yaml",
   "../tsconfig.json",
@@ -51,7 +59,7 @@ describe("closed browser behavior corpus", () => {
     }
   });
 
-  it("executes and verifies exactly 1,000 deterministic browser-bound failure schedules", async () => {
+  it("executes and verifies exactly 1,000 deterministic browser-bound failure-class replays", async () => {
     const first = await runBrowserFailureCampaign(productSource);
     const second = await runBrowserFailureCampaign(productSource);
 
@@ -68,7 +76,8 @@ describe("closed browser behavior corpus", () => {
       unauthorizedLifecycleAuthority: 0,
       crossProjectCustodyRead: 0,
     });
-    expect(new Set(first.outcomes.map((outcome) => outcome.scheduleId)).size).toBe(1_000);
+    expect(new Set(first.outcomes.map((outcome) => outcome.replayId)).size).toBe(1_000);
+    expect(new Set(first.outcomes.map((outcome) => outcome.scenarioId)).size).toBe(FAILURE_CLASSES.length);
     expect(new Set(first.outcomes.map((outcome) => outcome.failureClass))).toEqual(new Set(FAILURE_CLASSES));
     expect(verifyBrowserFailureCampaign(first, productSource)).toBe(first);
   });

@@ -58,7 +58,9 @@ pnpm verify:mvi
 The gate runs TypeScript checking, unit/component tests, the production build,
 and Playwright in sequence and propagates any failure. The browser test surface
 includes a closed, ordered 25-scenario behavior corpus and a deterministic
-1,000-schedule failure/concurrency campaign. The campaign rejects incomplete,
+1,000-replay failure-class campaign. Each replay has a unique receipt identity,
+while the exercised behavior is the 15 predeclared failure-class scenarios; it
+does not claim 1,000 distinct operation schedules. The campaign rejects incomplete,
 reordered, substituted, forged, or source-stale evidence and requires zero
 false success, false release, stale-head replacement, duplicate authored
 revision, unauthorized lifecycle authority, and cross-project custody reads.
@@ -66,7 +68,7 @@ It is a browser-only dependency path: Python, uv, build123d, and OCP are not
 browser launch or verification prerequisites.
 
 The Playwright suites exercise the golden path plus the same source-bound
-25-scenario corpus and 1,000-schedule campaign in Chromium. These results are
+25-scenario corpus and 1,000-replay campaign in Chromium. These results are
 candidate-bound browser behavior evidence only. They do not replace the
 separate Python readiness campaign, close broader browser/OS/GPU qualification,
 accept G2, approve review, export, release, or authorize machine actuation.
