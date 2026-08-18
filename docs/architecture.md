@@ -17,8 +17,9 @@ with `docs/mvi-doctrine.md`, the doctrine wins.
   pointer and an immutable accepted base.
 - Interactive realization: pinned Manifold WASM worker mesh scoped to one request
   and revision. It is review geometry; stale/failed results cannot replace last-good.
-- Optional external exact realization: pinned Python/build123d/OCP worker result
-  scoped to revision and environment. It is an adapter, not writable product authority.
+- Pre-cutover Python/build123d/OCP material remains tracked only for staged
+  downstream retirement and historical comparison. It is not a current product,
+  backend, adapter, verification authority, or writable authority.
 - Review representation: revision/build-scoped GLB plus artifact-local selection map (`claim_scope=review-only`).
 - Exchange: STEP derived from a successful exact realization (must be receiver-qualified under a named receiver/version/profile; emit only does not pass).
 - Optional additive derivatives: 3MF/STL, always labeled derivative and unreleased.
@@ -29,10 +30,19 @@ with `docs/mvi-doctrine.md`, the doctrine wins.
 
 ## Stage 1 wedge
 
-One consequential single Part, one bounded partner-driven parameter
-mutation, one writable browser-local TypeScript authority, one optional pinned precision
-worker, three to five predeclared checks selected from observed reviewer
-decisions.
+Historical Stage 0 material is non-product evidence pinned to protected-base
+commit `2e865a8c837dc96f883e2cb39f73311e60629f18`. The verifier at
+`tools/verify-historical-evidence.mjs` derives the authoritative path set and
+bytes from that fixed Git tree, then checks both current bytes and
+`docs/historical-evidence-manifest.json`; editable manifest values cannot reseal
+changed evidence.
+
+One consequential single Part, one bounded partner-driven parameter mutation,
+one writable browser-local TypeScript authority, one pinned Manifold WASM review
+worker, and three to five predeclared browser checks selected from observed
+reviewer decisions. Exact B-rep, STEP, exact review packets, engineering approval,
+manufacturing-package export, fabrication release, and machine actuation are
+unavailable in this browser MVI.
 
 ### Bounded source-native mutation boundary
 

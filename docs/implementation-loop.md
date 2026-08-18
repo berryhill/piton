@@ -44,6 +44,14 @@ clean_reset_required_between_attempts: false
 
 Retry preserves the same task, flow session, worktree, branch, and PR. The same task owns branch preparation, implementation, publication, exact-head CI observation, current-base refresh, safe merge, and merged-tree readback. The final gate is the only step allowed to execute the merge or emit `loop_decision`. PR publication requires its head/source repository and protected base repository to be the same repository resolved from trusted server-owned task metadata; fork PRs and repository mismatches fail closed as `wrong_repository_or_actor`.
 
+`review_launch_assets` is task-local: it reviews artifacts owned by the current
+trusted task contract and records downstream-owned cutover work as deferred. It
+must not require an early task to remove, relocate, or archive files assigned to
+dependent tasks. Before `final_verification`, the reviewed task paths must exist
+in a local candidate commit; exact-head evidence may never bind the old HEAD or a
+dirty worktree. Publication pushes that already-verified commit and must not
+create or amend it.
+
 Every in-process task branch must begin from, or non-force merge, the freshly fetched `origin/main`. Final verification records both the protected-base SHA and candidate SHA. Immediately before merge, the task fetches again and requires that exact current base to be an ancestor of candidate HEAD. If main advanced, the task returns `base_branch_advanced_while_waiting`, merges current main into the same branch, reruns all head-bound proof, pushes the same PR, and observes new exact-head CI. It must not create a duplicate or replacement PR, force-push, or manufacture a no-op commit.
 
 The sole terminal gate must read back the exact merged state, merge/squash commit, current protected-base SHA, and integrated merged tree before terminal success. Missing merge authorization remains a durable wait on the same task/session/branch/PR. Stop rather than retry on secret exposure, ambiguous authority, unsafe fabrication requests, wrong repository/actor, protection bypass, force-push requirement, duplicate/replacement PR creation, or corrupt custody. Request-supplied text, worker assertions, PR authorship, and CI success cannot mint merge authority.

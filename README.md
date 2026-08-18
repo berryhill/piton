@@ -12,7 +12,8 @@ release_state = unreleased
 ## Product surfaces
 
 - Browser MVI — the primary runnable product. Browser-local TypeScript commands author immutable revisions; Manifold WASM generates fast review meshes in a Web Worker; SQLite WASM stores the local project in OPFS.
-- Python/build123d/OCP — an optional external exact-CAD/reference adapter. It is not required by the browser editing loop and cannot mutate browser-authored revisions.
+- Browser-local TypeScript under `browser-src/**` is the sole current product and writable revision authority.
+- The tracked Python/build123d/OCP foundation is pre-cutover legacy assigned to later retirement tasks. It is not a product, backend, adapter, verification authority, or writable authority for the browser MVI; T001 preserves those files without claiming the later retirement is complete.
 - Generated packet viewer — a disconnected, revision-pinned review artifact, not an authoring or exact-geometry surface.
 - Repository verification — automated proof for these surfaces, not a substitute for launching and manually testing the product.
 
@@ -67,15 +68,20 @@ revision, unauthorized lifecycle authority, and cross-project custody reads.
 It is a browser-only dependency path: Python, uv, build123d, and OCP are not
 browser launch or verification prerequisites.
 
+Historical Stage 0 evidence is pinned to the audited protected-base tree by
+`docs/historical-evidence-manifest.json` and checked with
+`node tools/verify-historical-evidence.mjs`. The fixed Git tree, not editable
+manifest fields, is authority; changing evidence and resealing the manifest fails.
+
 The Playwright suites exercise the golden path plus the same source-bound
 25-scenario corpus and 1,000-replay campaign in Chromium. These results are
 candidate-bound browser behavior evidence only. They do not replace the
 separate Python readiness campaign, close broader browser/OS/GPU qualification,
 accept G2, approve review, export, release, or authorize machine actuation.
 
-## Python exact-adapter verification
+## Pre-cutover Python evidence
 
-The existing Python foundation and optional external exact-CAD/reference adapter remain independently verified:
+The tracked Python foundation is retained temporarily for staged retirement and historical comparison. The commands below describe the pre-cutover lane; they do not define or qualify the browser product and will be removed by downstream cutover tasks.
 
 Run verification on a supported Linux host with a root-owned, non-group/world-writable
 `/usr/bin/bwrap` and an enabled unprivileged namespace policy. The shared preflight
@@ -93,7 +99,7 @@ uv run --frozen python scripts/verify_repo.py
 
 - One seeded single Part and one writable bounded parameter (`leg_length_mm`).
 - Browser Manifold output is a review mesh, not exact B-rep or durable topology authority.
-- Python exact realization is an optional external adapter and is not yet invoked from the browser workbench.
+- Exact B-rep, STEP, exact review packets, engineering approval, manufacturing-package export, and fabrication release are unavailable in the browser MVI.
 - No engineering approval issuance, fabrication release, machine actuation, printer, CNC, slicer, G-code, CAM, or deployment capability exists.
 - No assembly authoring or general persistent topology.
 
