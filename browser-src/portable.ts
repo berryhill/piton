@@ -5,6 +5,10 @@ import { assertLifecycleRecord } from "./lifecycle";
 
 export const PORTABLE_FORMAT = "piton-portable-custody/v1" as const;
 export const CANONICALIZATION = "piton-canonical-json/v1" as const;
+const PORTABLE_CLAIM_SCOPE_EXCLUSIONS = [
+  "approval", "build/display cache", "exact B-rep", "fabrication release", "geometry derivatives",
+  "machine actuation", "raw SQLite/OPFS", "review acceptance", "secrets", "viewer state",
+] as const;
 
 export interface PortableRecord {
   path: string;
@@ -77,6 +81,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function exportPortableCustody(project: BrowserProject, lifecycleRecords: readonly LifecycleRecord[]): PortableCustodyPacket {
   assertProjectIntegrity(project);
   lifecycleRecords.forEach(assertLifecycleRecord);
+  const portableLifecycleRecords = lifecycleRecords.filter((record) => record.kind !== "proposal_disposition"
+    || record.disposition === "changes_requested");
   const records: PortableRecord[] = [{
     path: "project.json",
     mediaType: "application/json",
@@ -86,7 +92,7 @@ export function exportPortableCustody(project: BrowserProject, lifecycleRecords:
       acceptedRevisionId: project.acceptedRevisionId,
       currentRevisionId: project.currentRevisionId,
       revisionIds: project.revisions.map((revision) => revision.id),
-      lifecyclePaths: lifecycleRecords
+      lifecyclePaths: portableLifecycleRecords
         .map((record) => `lifecycle/${record.kind}/${lifecycleIdentity(record)}.json`)
         .sort(),
     }),
@@ -94,7 +100,7 @@ export function exportPortableCustody(project: BrowserProject, lifecycleRecords:
   for (const revision of project.revisions) {
     records.push({ path: `revisions/${revision.id}.json`, mediaType: "application/json", content: canonicalJson(revision) });
   }
-  for (const record of lifecycleRecords) {
+  for (const record of portableLifecycleRecords) {
     records.push({
       path: `lifecycle/${record.kind}/${lifecycleIdentity(record)}.json`,
       mediaType: "application/json",
@@ -108,10 +114,7 @@ export function exportPortableCustody(project: BrowserProject, lifecycleRecords:
     projectId: project.id,
     authorityProfile: "browser-typescript/v1",
     rootSafetyTruth: SAFETY_TRUTH,
-    claimScopeExclusions: [
-      "approval", "build/display cache", "exact B-rep", "fabrication release", "geometry derivatives",
-      "machine actuation", "raw SQLite/OPFS", "review acceptance", "secrets", "viewer state",
-    ],
+    claimScopeExclusions: [...PORTABLE_CLAIM_SCOPE_EXCLUSIONS],
     files: records.map((record) => ({
       path: record.path,
       mediaType: record.mediaType,
@@ -138,6 +141,9 @@ export function parsePortableCustody(packet: unknown): { project: BrowserProject
     || canonicalJson(manifestValue.rootSafetyTruth) !== canonicalJson(SAFETY_TRUTH)
     || !Array.isArray(manifestValue.files)) {
     throw new Error("portable manifest authority or safety truth is invalid");
+  }
+  if (canonicalJson(manifestValue.claimScopeExclusions) !== canonicalJson(PORTABLE_CLAIM_SCOPE_EXCLUSIONS)) {
+    throw new Error("portable manifest claim scope is invalid");
   }
 
   const records = packet.records as unknown[];
@@ -193,6 +199,9 @@ export function parsePortableCustody(packet: unknown): { project: BrowserProject
     const record = byPath.get(path) as LifecycleRecord | undefined;
     if (!record) throw new Error("missing lifecycle record");
     assertLifecycleRecord(record);
+    if (record.kind === "proposal_disposition" && record.disposition !== "changes_requested") {
+      throw new Error("portable proposal acceptance is not admissible");
+    }
     if (record.projectId !== project.id || path !== `lifecycle/${record.kind}/${lifecycleIdentity(record)}.json`) {
       throw new Error("portable lifecycle identity mismatch");
     }

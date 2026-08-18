@@ -221,6 +221,26 @@ def test_every_tracked_file_has_exactly_one_role() -> None:
     assert not dual_classified, f"dual-classified tracked files: {dual_classified}"
 
 
+def test_migration_inventory_publication_counts_match_current_tree() -> None:
+    text = INVENTORY_DOC.read_text(encoding="utf-8")
+    block = _load_roles_block()
+    tracked = _tracked_files()
+
+    assert "current candidate HEAD" in block["candidate_head_note"]
+    assert "first adds this inventory" not in block["candidate_head_note"]
+    for role in block["roles"]:
+        actual = sum(_role_matches(path, role) for path in tracked)
+        assert role["files_at_publication"] == actual, (
+            f"{role['role']} publication count must match the current tracked tree"
+        )
+        summary_row = rf"\| `{re.escape(role['role'])}` \| [^|\n]+ \| {actual} \|"
+        assert re.search(summary_row, text), (
+            f"{role['role']} summary count must match the machine-readable role block"
+        )
+
+    assert f"Total tracked files at the candidate HEAD: {len(tracked)}" in text
+
+
 def test_writable_authority_role_is_exactly_the_browser_workbench() -> None:
     roles = _load_roles_block()["roles"]
     writable_roles = [role for role in roles if "writable" in role["role"]]
@@ -244,12 +264,13 @@ def test_migration_inventory_pins_safety_truths() -> None:
         assert f"`{truth}`" in text, f"migration inventory must state the safety truth {truth!r}"
 
 
-def test_migration_inventory_records_the_entry_shim_correction() -> None:
+def test_migration_inventory_records_direct_entry_and_removed_shims() -> None:
     text = INVENTORY_DOC.read_text(encoding="utf-8")
     assert "src/main.tsx" in text and "src/App.tsx" in text
-    assert "browser-entry-chain" in text, (
-        "the entry shims must be classified as browser entry-chain, not adapter code or empty vestige"
-    )
+    assert "obsolete" in text and "forwarding shims were removed" in text
+    assert '"role": "browser-entry-chain"' not in text
+    assert not (REPO_ROOT / "src" / "main.tsx").exists()
+    assert not (REPO_ROOT / "src" / "App.tsx").exists()
 
 
 # ---------------------------------------------------------------------------

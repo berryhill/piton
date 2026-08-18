@@ -23,15 +23,10 @@ jobs:
           cache: pnpm
       - name: Install exact browser dependencies
         run: pnpm install --frozen-lockfile
-      - name: TypeScript checks and unit/component tests
-        run: |
-          pnpm typecheck
-          pnpm test
-          pnpm build
       - name: Install pinned Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
-      - name: Browser-local golden path
-        run: pnpm test:e2e
+      - name: Canonical browser MVI verification
+        run: pnpm verify:mvi
 
   verify:
     # Ubuntu 24.04's runner-wide AppArmor policy rejects unprivileged user

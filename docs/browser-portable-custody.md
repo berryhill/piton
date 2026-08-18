@@ -21,6 +21,11 @@ excludes raw SQLite/OPFS bytes, preview/review geometry, caches, viewer state,
 credentials, exact geometry, approval, release, and actuation claims. It is not a
 lifecycle `DraftExport` or a STEP/STL/3MF/GLB export.
 
+Accepted-for-build and accepted-for-review proposal dispositions are also excluded.
+Portable admission cannot replay the historical compare-and-swap context that made
+such a disposition valid in its source custody, so reopen accepts only
+`changes_requested` dispositions. A portable packet cannot mint stale acceptance.
+
 `CadApplication.reopenPortableCustody` validates the complete packet before asking
 the repository to publish it. Unknown versions, non-canonical JSON, unsafe or
 duplicate paths, inventory/digest/length mismatch, invalid revision identities,

@@ -121,6 +121,49 @@ describe("CadApplication browser authority boundary", () => {
     expect(() => parsePortableCustody(unknown)).toThrow();
   });
 
+  it("requires the exact fixed portable claim-scope exclusions", async () => {
+    const project = await new MemoryProjectRepository().initialize();
+    const packet = exportPortableCustody(project, []);
+    const manifest = JSON.parse(packet.manifest);
+    manifest.claimScopeExclusions = manifest.claimScopeExclusions.filter((claim: string) => claim !== "approval");
+    packet.manifest = canonicalJson(manifest);
+
+    expect(() => parsePortableCustody(packet)).toThrow("portable manifest claim scope is invalid");
+  });
+
+  it("omits and rejects acceptance-shaped proposal dispositions at the portable boundary", async () => {
+    const project = await new MemoryProjectRepository().initialize();
+    const hash = (character: string) => character.repeat(64);
+    const proposalId = `proposal-${hash("a")}`;
+    const dispositionId = `disposition-${hash("b")}`;
+    const records: LifecycleRecord[] = [
+      {
+        kind: "change_proposal", id: proposalId, projectId: project.id,
+        baseRevisionId: project.currentRevisionId, command: { type: "set-leg-length", value: 104 },
+        createdAt: "2026-08-13T00:00:01.000Z",
+      },
+      {
+        kind: "proposal_disposition", id: dispositionId, projectId: project.id, proposalId,
+        disposition: "accepted_for_review", reason: "historical local acceptance",
+        createdAt: "2026-08-13T00:00:02.000Z",
+      },
+    ];
+    const projected = exportPortableCustody(project, records);
+    expect(projected.records.some((record) => record.path.includes(dispositionId))).toBe(false);
+
+    const requestedDisposition: LifecycleRecord = {
+      kind: "proposal_disposition", id: dispositionId, projectId: project.id, proposalId,
+      disposition: "changes_requested", reason: "portable rejection receipt",
+      createdAt: "2026-08-13T00:00:02.000Z",
+    };
+    const portable = exportPortableCustody(project, [records[0], requestedDisposition]);
+    const path = `lifecycle/proposal_disposition/${dispositionId}.json`;
+    const disposition = JSON.parse(portable.records.find((record) => record.path === path)!.content);
+    disposition.disposition = "accepted_for_build";
+    resealPortableRecord(portable, path, disposition);
+    expect(() => parsePortableCustody(portable)).toThrow("portable proposal acceptance is not admissible");
+  });
+
   it("rejects authority-shaped revision extras from resealed portable JSON", async () => {
     const project = await new MemoryProjectRepository().initialize();
     const packet = exportPortableCustody(project, []);
