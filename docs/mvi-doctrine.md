@@ -34,12 +34,6 @@ There are two distinct meanings, deliberately disambiguated:
 
 These are not interchangeable. Stage 1 is not implemented by R14 bytes.
 
-Historical Stage 0 evidence is not current product authority. Its exact path set,
-Git blob IDs, and SHA-256 values are bound to audited commit
-`2e865a8c837dc96f883e2cb39f73311e60629f18` by
-`docs/historical-evidence-manifest.json`; `tools/verify-historical-evidence.mjs`
-derives truth from that fixed Git tree so evidence cannot be changed and resealed.
-
 ## Truth boundary (controlling invariants)
 
 ```text
@@ -56,11 +50,9 @@ Every other property below assumes this invariant.
 
 - One writable authority per revision. The runnable browser MVI authors
   immutable `DesignRevision` records through browser-local TypeScript commands
-  using `browser-typescript/v1`. Tracked Python/build123d material is pre-cutover
-  legacy assigned to downstream retirement tasks; it is not a current product,
-  backend, adapter, verification authority, or writable authority. A worker
-  realization never becomes a second writable copy and cannot mutate the
-  browser-authored revision.
+  using `browser-typescript/v1`. The repository has no external exact-CAD
+  adapter. A review-mesh realization never becomes a second writable copy and
+  cannot mutate the browser-authored revision.
 - Semantic Part/feature/parameter/requirement records are read-only
   query/navigation/evidence overlays. Generated text is never a second
   writable copy.
@@ -465,9 +457,8 @@ A Stage 1 design/code review must answer yes to every applicable item.
 **Authority**
 
 - One writable authority per revision
-- Browser-local TypeScript command/revision authority is the sole current product
-  authority; tracked Python/build123d material is pre-cutover legacy pending
-  downstream retirement
+- Browser-local TypeScript command/revision authority; no external exact-CAD
+  adapter is included in the repository
 - Semantic/source projections read-only
 - Migration creates new revision and receipt
 

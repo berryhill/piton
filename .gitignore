@@ -1,8 +1,3 @@
-__pycache__/
-*.pyc
-*.egg-info/
-.env
-.env.*
 node_modules/
 dist/
 build/
@@ -10,3 +5,5 @@ build/
 test-results/
 playwright-report/
 .otoxan/evidence/
+.env
+.env.*

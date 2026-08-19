@@ -1,5 +1,0 @@
-Piton review viewer dependency notice
-
-Runtime third-party frontend dependencies: none.
-The viewer uses browser-standard Canvas 2D, DOM, TextDecoder, DataView, and typed arrays.
-No CDN, telemetry, remote font, network service, or dynamically executed authored source is required.

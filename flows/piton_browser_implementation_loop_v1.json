@@ -160,7 +160,7 @@
     "repository_contract_status": "active",
     "review_state": "needs_human_review",
     "runtime_template_status": "active",
-    "source_publication_status": "planned_in_piton-browser-only-python-retirement-2026-08-18:T001",
+    "source_publication_status": "published_by_piton-browser-only-python-retirement-2026-08-18:T001",
     "source_repository": "berryhill/piton",
     "template_sha256": "8381827113eccb7a0d4c33465dc1cea65008fd01926c8a78e475355beaaccf71"
   },
