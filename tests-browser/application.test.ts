@@ -4,24 +4,9 @@ import { CadApplication } from "../browser-src/application";
 import { deriveGeometryBinding } from "../browser-src/geometry/binding";
 import { MemoryProjectRepository } from "../browser-src/storage/repository";
 import { AgentCadAdapter } from "../browser-src/agentAdapter";
-import { canonicalJson, exportPortableCustody, parsePortableCustody } from "../browser-src/portable";
-import { sha256Hex } from "../browser-src/domain";
-import type { LifecycleRecord } from "../browser-src/lifecycle";
 
 function source(path: string): string {
   return readFileSync(new URL(path, import.meta.url), "utf8");
-}
-
-function resealPortableRecord(packet: ReturnType<typeof exportPortableCustody>, path: string, value: unknown): void {
-  const record = packet.records.find((candidate) => candidate.path === path)!;
-  record.content = canonicalJson(value);
-  const manifest = JSON.parse(packet.manifest) as {
-    files: Array<{ path: string; byteLength: number; digest: string }>;
-  };
-  const file = manifest.files.find((candidate) => candidate.path === path)!;
-  file.byteLength = new TextEncoder().encode(record.content).byteLength;
-  file.digest = `sha256-${sha256Hex(record.content)}`;
-  packet.manifest = canonicalJson(manifest);
 }
 
 describe("CadApplication browser authority boundary", () => {
@@ -82,134 +67,6 @@ describe("CadApplication browser authority boundary", () => {
     expect((await application.loadProject()).revisions).toHaveLength(2);
   });
 
-  it("exports canonical custody and reopens it without clobbering existing custody", async () => {
-    const sourceRepository = new MemoryProjectRepository();
-    const source = new CadApplication(sourceRepository);
-    const opened = await source.open();
-    await source.executeCommand({
-      format: "piton-command/v1", projectId: opened.project.id,
-      expectedCurrentRevisionId: opened.project.currentRevisionId, idempotencyKey: "portable-commit-0001",
-      command: { type: "set-leg-length", quantity: { value: 101, unit: "mm" } },
-    });
-    const first = await source.exportPortableCustody();
-    const second = await source.exportPortableCustody();
-    expect(second).toEqual(first);
-    expect(first.records.some((record) => /mesh|preview|camera|sqlite/i.test(record.path))).toBe(false);
-    expect(parsePortableCustody(first).project.revisions).toHaveLength(2);
-
-    const targetRepository = new MemoryProjectRepository();
-    const target = new CadApplication(targetRepository);
-    await target.reopenPortableCustody(first);
-    expect(await target.exportPortableCustody()).toEqual(first);
-    await expect(target.reopenPortableCustody(first)).rejects.toThrow("portable reopen requires empty custody");
-
-    const tampered = structuredClone(first);
-    tampered.records[0].content += " ";
-    const failedTargetRepository = new MemoryProjectRepository();
-    await expect(new CadApplication(failedTargetRepository).reopenPortableCustody(tampered)).rejects.toThrow();
-    expect(await failedTargetRepository.load()).toBeNull();
-  });
-
-  it("rejects non-canonical portable records and unsafe or unsupported inventory", async () => {
-    const project = await new MemoryProjectRepository().initialize();
-    const packet = exportPortableCustody(project, []);
-    const unsafe = structuredClone(packet);
-    unsafe.records[0].path = "../project.json";
-    expect(() => parsePortableCustody(unsafe)).toThrow("unsafe portable path");
-    const unknown = structuredClone(packet);
-    unknown.manifest = unknown.manifest.replace('"canonicalization":"piton-canonical-json/v1"', '"canonicalization":"future/v2"');
-    expect(() => parsePortableCustody(unknown)).toThrow();
-  });
-
-  it("requires the exact fixed portable claim-scope exclusions", async () => {
-    const project = await new MemoryProjectRepository().initialize();
-    const packet = exportPortableCustody(project, []);
-    const manifest = JSON.parse(packet.manifest);
-    manifest.claimScopeExclusions = manifest.claimScopeExclusions.filter((claim: string) => claim !== "approval");
-    packet.manifest = canonicalJson(manifest);
-
-    expect(() => parsePortableCustody(packet)).toThrow("portable manifest claim scope is invalid");
-  });
-
-  it("omits and rejects acceptance-shaped proposal dispositions at the portable boundary", async () => {
-    const project = await new MemoryProjectRepository().initialize();
-    const hash = (character: string) => character.repeat(64);
-    const proposalId = `proposal-${hash("a")}`;
-    const dispositionId = `disposition-${hash("b")}`;
-    const records: LifecycleRecord[] = [
-      {
-        kind: "change_proposal", id: proposalId, projectId: project.id,
-        baseRevisionId: project.currentRevisionId, command: { type: "set-leg-length", value: 104 },
-        createdAt: "2026-08-13T00:00:01.000Z",
-      },
-      {
-        kind: "proposal_disposition", id: dispositionId, projectId: project.id, proposalId,
-        disposition: "accepted_for_review", reason: "historical local acceptance",
-        createdAt: "2026-08-13T00:00:02.000Z",
-      },
-    ];
-    const projected = exportPortableCustody(project, records);
-    expect(projected.records.some((record) => record.path.includes(dispositionId))).toBe(false);
-
-    const requestedDisposition: LifecycleRecord = {
-      kind: "proposal_disposition", id: dispositionId, projectId: project.id, proposalId,
-      disposition: "changes_requested", reason: "portable rejection receipt",
-      createdAt: "2026-08-13T00:00:02.000Z",
-    };
-    const portable = exportPortableCustody(project, [records[0], requestedDisposition]);
-    const path = `lifecycle/proposal_disposition/${dispositionId}.json`;
-    const disposition = JSON.parse(portable.records.find((record) => record.path === path)!.content);
-    disposition.disposition = "accepted_for_build";
-    resealPortableRecord(portable, path, disposition);
-    expect(() => parsePortableCustody(portable)).toThrow("portable proposal acceptance is not admissible");
-  });
-
-  it("rejects authority-shaped revision extras from resealed portable JSON", async () => {
-    const project = await new MemoryProjectRepository().initialize();
-    const packet = exportPortableCustody(project, []);
-    const revisionPath = `revisions/${project.currentRevisionId}.json`;
-    const revision = JSON.parse(packet.records.find((record) => record.path === revisionPath)!.content);
-    revision.engineeringApproved = true;
-    resealPortableRecord(packet, revisionPath, revision);
-
-    expect(() => parsePortableCustody(packet)).toThrow("revision record keys are invalid");
-  });
-
-  it("rejects approval-like decisions and lifecycle extras from resealed portable JSON", async () => {
-    const project = await new MemoryProjectRepository().initialize();
-    const hash = (character: string) => character.repeat(64);
-    const revisionId = project.currentRevisionId;
-    const records: LifecycleRecord[] = [
-      {
-        kind: "build_attempt", id: `attempt-${hash("a")}`, projectId: project.id, revisionId,
-        recipeDigest: hash("b"), state: "succeeded", createdAt: "2026-08-13T00:00:01.000Z",
-      },
-      {
-        kind: "evidence_closure", id: `evidence-${hash("c")}`, projectId: project.id, revisionId,
-        buildAttemptId: `attempt-${hash("a")}`, requirementIds: ["dimensional-check"],
-        artifactDigests: [hash("d")], createdAt: "2026-08-13T00:00:02.000Z",
-      },
-      {
-        kind: "approval_record", id: `approval-${hash("e")}`, projectId: project.id, revisionId,
-        evidenceClosureId: `evidence-${hash("c")}`, decision: "deferred", reason: "human review pending",
-        createdAt: "2026-08-13T00:00:03.000Z",
-      },
-    ];
-    const approvalPath = `lifecycle/approval_record/approval-${hash("e")}.json`;
-
-    const approved = exportPortableCustody(project, records);
-    const approvedRecord = JSON.parse(approved.records.find((record) => record.path === approvalPath)!.content);
-    approvedRecord.decision = "approved";
-    resealPortableRecord(approved, approvalPath, approvedRecord);
-    expect(() => parsePortableCustody(approved)).toThrow("approval decision is invalid");
-
-    const extra = exportPortableCustody(project, records);
-    const extraRecord = JSON.parse(extra.records.find((record) => record.path === approvalPath)!.content);
-    extraRecord.fabricationRelease = true;
-    resealPortableRecord(extra, approvalPath, extraRecord);
-    expect(() => parsePortableCustody(extra)).toThrow("lifecycle record keys are invalid");
-  });
-
   it("owns initialization, candidate commits, reload, and durable preview status", async () => {
     const repository = new MemoryProjectRepository();
     const initialize = vi.spyOn(repository, "initialize");
@@ -252,5 +109,14 @@ describe("CadApplication browser authority boundary", () => {
       expect(browserAdapter).not.toMatch(/\.initialize\(|\.saveBuildStatus\(|repository\.commitCandidate\(/);
     }
     expect(appSource).toContain("CadApplication");
+  });
+
+  it("does not expose a portable-custody boundary from the application service", () => {
+    const appSource = source("../browser-src/application.ts");
+    const appFile = source("../browser-src/App.tsx");
+
+    expect(appSource).not.toMatch(/PortableCustodyPacket|exportPortableCustody|reopenPortableCustody|parsePortableCustody/);
+    expect(appSource).not.toMatch(/import .* from "\.\/portable"/);
+    expect(appFile).not.toMatch(/exportPortableCustody|exportCustody|reopenPortableCustody|portable-custody\+json|piton-custody\.json|Portable custody exported/);
   });
 });

@@ -101,22 +101,6 @@ export default function App({ application, geometryDisabled }: Props) {
     }
   }
 
-  async function exportCustody() {
-    try {
-      const packet = await application.exportPortableCustody();
-      const blob = new Blob([JSON.stringify(packet)], { type: "application/vnd.piton.portable-custody+json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${project?.id ?? "piton-project"}.piton-custody.json`;
-      link.click();
-      URL.revokeObjectURL(url);
-      setMessage("Portable custody exported · review-only, unreleased");
-    } catch (error) {
-      setMessage(`Portable custody export failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    }
-  }
-
   if (!project || !current || !accepted) return <main className="loading"><h1>Piton</h1><p>{message}</p></main>;
   return <main>
     <header><div><span className="eyebrow">BROWSER-LOCAL MECHANICAL CAD MVI</span><h1>Piton Workbench</h1></div><div className="truth-badge">REVIEW ONLY · UNRELEASED</div></header>
@@ -195,7 +179,6 @@ export default function App({ application, geometryDisabled }: Props) {
         <div className="state-card"><span>Current revision</span><code>{current.id}</code></div>
         {changed && previewParameters ? <div className="diff"><b>Parameter diff</b><span>{current.parameters.leg_length_mm} mm → {value} mm</span><strong>Preview only · not committed</strong></div> : <p className="muted">Change the selected parameter to create a preview.</p>}
         <button className="commit" disabled={!changed} onClick={() => void commit()}>Commit candidate</button>
-        <button onClick={() => void exportCustody()}>Export portable custody</button>
         <small className="identity-note">Canonical authored records only · not DraftExport, geometry export, approval, or release.</small>
         <p className="status-message">{message}</p>
         {durableBuildStatus ? <div className="state-card durable-status">

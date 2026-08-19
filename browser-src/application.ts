@@ -1,8 +1,6 @@
 import type { BrowserProject, CadCommandReceipt, CadCommandRequest, CandidateCommand } from "./domain";
 import { sha256Hex } from "./domain";
 import type { BuildStatus, ProjectRepository } from "./storage/repository";
-import type { PortableCustodyPacket } from "./portable";
-import { canonicalJson, exportPortableCustody, parsePortableCustody } from "./portable";
 
 export type { BuildStatus } from "./storage/repository";
 
@@ -68,17 +66,6 @@ export class CadApplication {
     }
   }
 
-  async exportPortableCustody(): Promise<PortableCustodyPacket> {
-    const project = await this.loadProject();
-    return exportPortableCustody(project, await this.repository.loadLifecycleRecords(project.id));
-  }
-
-  async reopenPortableCustody(packet: unknown): Promise<BrowserProject> {
-    const parsed = parsePortableCustody(packet);
-    await this.repository.importFreshCustody(parsed.project, parsed.lifecycleRecords);
-    return this.loadProject();
-  }
-
   async recordBuildStatus(status: BuildStatus): Promise<BuildStatus> {
     await this.repository.saveBuildStatus(status);
     return status;
@@ -108,4 +95,30 @@ function hasExactKeys(value: Record<string, unknown>, expected: readonly string[
   const actual = Object.keys(value).sort();
   const wanted = [...expected].sort();
   return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
+}
+
+// Local canonical JSON used only to compute content-addressed command digests
+// inside the browser authority boundary. It is not a portable custody format.
+function canonicalJson(value: unknown): string {
+  return `${JSON.stringify(canonicalValue(value))}\n`;
+}
+
+function canonicalValue(value: unknown): unknown {
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new Error("canonical JSON rejects non-finite numbers");
+    return value;
+  }
+  if (typeof value === "string") return value.normalize("NFC");
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const output: Record<string, unknown> = {};
+    for (const key of Object.keys(record).sort()) {
+      if (record[key] === undefined) throw new Error("canonical JSON rejects undefined values");
+      output[key.normalize("NFC")] = canonicalValue(record[key]);
+    }
+    return output;
+  }
+  throw new Error("canonical JSON value is unsupported");
 }

@@ -22,7 +22,7 @@ The command runs type checking, unit/component tests, the production build, and 
 
 ## Recovery
 
-Browser custody is local to the browser profile and origin. Follow [`browser-portable-custody.md`](browser-portable-custody.md) for the implemented portable custody boundary. Accepted revision history is immutable; recovery is restore-forward, never mutation of accepted history. Failed or stale candidates cannot replace accepted or last-good state.
+Browser custody is local to the browser profile and origin. The browser-local SQLite WASM OPFS durable store is the only recovery surface implemented in Stage 1: the workbench reopens the existing SQLite project on `application.open()` and never exports or imports a portable custody packet. No portable-custody export, URL upload, file upload, paste, or CLI rehydrate is implemented in the browser authority boundary, and the corresponding `CadApplication.exportPortableCustody` / `reopenPortableCustody` / `repository.importFreshCustody` methods are not present. Accepted revision history is immutable; recovery is restore-forward, never mutation of accepted history. Failed or stale candidates cannot replace accepted or last-good state.
 
 ## Root truth
 
