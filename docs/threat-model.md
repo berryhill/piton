@@ -24,6 +24,7 @@ The governed surface is the browser-local TypeScript workbench, SQLite WASM OPFS
 | Dependency or CI action changes unexpectedly | Exact package versions, frozen pnpm lock, commit-pinned actions, read-only CI permission | Third-party packages and runners remain external |
 | Automation implies approval or release | Root truth fixed false/unreleased; no issuance or machine path | Social claims outside product controls remain possible |
 | Secret enters source or output | Secret literals forbidden; no runtime credential requirement | Repository review remains necessary |
+| Untrusted portable custody packet smuggles unsafe revision content | Closed envelope keys, `format === piton-custody/v1`, `schema_version === CURRENT_SCHEMA_VERSION`, per-revision `id === rev-{sha256(canonical body)}`, every revision must satisfy SAFETY_TRUTH, parent chain integrity, fingerprint equality with the expected value, visible named error on rejection, OPFS untouched on failure | A user can still choose to paste a tampered packet; visible rejection is the only safeguard |
 
 ## Verification
 

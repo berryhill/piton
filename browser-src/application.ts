@@ -1,5 +1,5 @@
-import type { BrowserProject, CadCommandReceipt, CadCommandRequest, CandidateCommand } from "./domain";
-import { sha256Hex } from "./domain";
+import type { BrowserProject, CadCommandReceipt, CadCommandRequest, CandidateCommand, PortableCustodyEnvelope } from "./domain";
+import { assertPortableCustodyPacket, sha256Hex } from "./domain";
 import type { BuildStatus, ProjectRepository } from "./storage/repository";
 
 export type { BuildStatus } from "./storage/repository";
@@ -69,6 +69,35 @@ export class CadApplication {
   async recordBuildStatus(status: BuildStatus): Promise<BuildStatus> {
     await this.repository.saveBuildStatus(status);
     return status;
+  }
+
+  async exportPortableCustody(): Promise<PortableCustodyEnvelope> {
+    const packet = await this.repository.exportPortableCustody();
+    const fingerprint = await this.repository.portableCustodyFingerprint(packet);
+    return { ...packet, fingerprint };
+  }
+
+  async reopenPortableCustody(input: unknown, expectedFingerprint: string): Promise<CadApplicationSnapshot> {
+    if (typeof expectedFingerprint !== "string" || !expectedFingerprint) {
+      throw new Error("portable custody expected fingerprint is required");
+    }
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new Error("portable custody envelope is not an object");
+    }
+    const envelope = input as Record<string, unknown>;
+    if (typeof envelope.fingerprint !== "string" || envelope.fingerprint !== expectedFingerprint) {
+      throw new Error("portable custody fingerprint mismatch");
+    }
+    const { fingerprint: _fingerprint, ...packet } = envelope;
+    assertPortableCustodyPacket(packet);
+    const project = await this.repository.importFreshCustody(packet, expectedFingerprint);
+    return {
+      project,
+      buildStatus: packet.build_status === null || packet.build_status === undefined
+        ? null
+        : (packet.build_status as BuildStatus),
+      persistenceLabel: this.repository.persistenceLabel,
+    };
   }
 }
 

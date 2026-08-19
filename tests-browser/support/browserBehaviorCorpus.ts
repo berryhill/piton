@@ -34,7 +34,7 @@ export type FailureClass = typeof FAILURE_CLASSES[number];
 type Scenario = Readonly<{
   format: typeof CORPUS_FORMAT;
   id: string;
-  boundary: "application" | "revision" | "opfs" | "worker" | "viewer" | "lifecycle" | "safety";
+  boundary: "application" | "revision" | "opfs" | "worker" | "viewer" | "lifecycle" | "safety" | "portable";
   behavior: string;
 }>;
 
@@ -62,6 +62,11 @@ export const BROWSER_BEHAVIOR_CORPUS: readonly Scenario[] = Object.freeze([
   scenario("BCS-18-artifact-local-review-identity", "viewer", "bind result to the complete current request"),
   scenario("BCS-19-no-browser-release-authority", "lifecycle", "reject caller-minted build success"),
   scenario("BCS-20-root-safety-truth", "safety", "retain unreleased human-review truth"),
+  scenario("BCS-21-export-custody-packet", "portable", "export a closed portable custody envelope"),
+  scenario("BCS-22-reopen-custody-packet", "portable", "reopen workbench from a portable custody envelope"),
+  scenario("BCS-23-reject-custody-safety-violation", "portable", "reject portable custody that violates safety truth"),
+  scenario("BCS-24-reject-custody-revision-digest-mismatch", "portable", "reject portable custody whose revision digest does not match its body"),
+  scenario("BCS-25-disconnected-portable-workflow", "portable", "export and reopen portable custody without network calls"),
 ]);
 
 const SCENARIO_KEYS = ["format", "id", "boundary", "behavior"].sort().join("\u0000");
@@ -69,7 +74,7 @@ const EXPECTED_SCENARIO_IDS = BROWSER_BEHAVIOR_CORPUS.map(({ id }) => id);
 const BOUNDARIES = new Set(BROWSER_BEHAVIOR_CORPUS.map(({ boundary }) => boundary));
 
 export function assertClosedBrowserBehaviorCorpus(input: readonly unknown[]): readonly Scenario[] {
-  if (!Array.isArray(input) || input.length !== 20) throw new Error("browser corpus must contain exactly 20 scenarios");
+  if (!Array.isArray(input) || input.length !== 25) throw new Error("browser corpus must contain exactly 25 scenarios");
   for (const item of input) {
     if (!item || typeof item !== "object" || Array.isArray(item)
       || Object.keys(item).sort().join("\u0000") !== SCENARIO_KEYS) throw new Error("browser corpus scenario is malformed");
@@ -211,6 +216,58 @@ async function executeScenario(index: number): Promise<void> {
       if ((await repository.loadLifecycleRecords(opened.project.id)).length !== 0) throw new Error("caller minted lifecycle authority");
       break;
     case 20: if (opened.project.revisions.some((revision) => revision.reviewState !== SAFETY_TRUTH.reviewState || revision.fabricationRelease || revision.machineActuation || revision.releaseState !== SAFETY_TRUTH.releaseState)) throw new Error("root truth changed"); break;
+    case 21: {
+      const envelope = await application.exportPortableCustody();
+      const required = ["build_status", "environment_digest", "exported_at", "fingerprint", "format", "lifecycle_projection", "project", "revisions", "schema_version"];
+      if (Object.keys(envelope).sort().join(" ") !== [...required].sort().join(" ")) throw new Error("exported portable custody envelope is missing closed keys");
+      if (envelope.format !== "piton-custody/v1") throw new Error("exported portable custody format mismatch");
+      if (!/^sha256-[0-9a-f]{64}$/.test(envelope.fingerprint)) throw new Error("exported portable custody fingerprint is not a sha256 digest");
+      break;
+    }
+    case 22: {
+      const envelope = await application.exportPortableCustody();
+      const restored = await application.reopenPortableCustody(envelope, envelope.fingerprint);
+      if (restored.project.currentRevisionId !== opened.project.currentRevisionId) throw new Error("reopen did not restore current revision");
+      break;
+    }
+    case 23: {
+      const envelope = await application.exportPortableCustody();
+      const tampered = JSON.parse(JSON.stringify(envelope));
+      tampered.revisions[0].fabricationRelease = true;
+      tampered.fingerprint = envelope.fingerprint;
+      await expectRejected(() => application.reopenPortableCustody(tampered, envelope.fingerprint), "revision safety or authority truth is invalid");
+      const stillOriginal = await application.loadProject();
+      if (stillOriginal.currentRevisionId !== opened.project.currentRevisionId) throw new Error("rejected portable custody partially mutated custody");
+      break;
+    }
+    case 24: {
+      const envelope = await application.exportPortableCustody();
+      const tampered = JSON.parse(JSON.stringify(envelope));
+      tampered.revisions[0].parameters.leg_length_mm = (envelope.revisions[0].parameters.leg_length_mm as number) + 1;
+      tampered.fingerprint = envelope.fingerprint;
+      await expectRejected(() => application.reopenPortableCustody(tampered, envelope.fingerprint), "revision digest does not match its body");
+      break;
+    }
+    case 25: {
+      const envelope = await application.exportPortableCustody();
+      const networkCalls: string[] = [];
+      const originalFetch = globalThis.fetch;
+      const originalXhr = (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest;
+      globalThis.fetch = ((input: RequestInfo | URL) => {
+        networkCalls.push(String(input));
+        return Promise.reject(new Error("network disabled for portable custody test"));
+      }) as typeof fetch;
+      (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest = function PitonTestXhr() { networkCalls.push("xhr"); throw new Error("network disabled"); } as unknown as XMLHttpRequest;
+      try {
+        const restored = await application.reopenPortableCustody(envelope, envelope.fingerprint);
+        if (!restored.project || restored.project.currentRevisionId !== opened.project.currentRevisionId) throw new Error("reopen failed under disconnected conditions");
+      } finally {
+        globalThis.fetch = originalFetch;
+        (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest = originalXhr;
+      }
+      if (networkCalls.length !== 0) throw new Error(`portable custody emitted network calls: ${networkCalls.join(", ")}`);
+      break;
+    }
     default: throw new Error("unknown browser corpus scenario");
   }
 }

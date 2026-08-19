@@ -78,6 +78,52 @@ test("seeded edit preview commit and OPFS reload remain unreleased", async ({ pa
   await expect(page.locator(".viewport-status")).toContainText("CAD Z-min 0 on grid");
 });
 
+test("round-trips portable custody through export, drop, paste, and reload in Chromium", async ({ page, context }) => {
+  await page.goto("/");
+  await expect(page.getByText("Accepted immutable revision")).toBeVisible();
+  const acceptedId = await page.locator(".state-card code").first().textContent();
+  const input = page.getByLabel("Leg length (mm)");
+  const newValue = 132;
+  await input.fill(String(newValue));
+  await expect(page.getByText("80 mm → 132 mm")).toBeVisible();
+  await page.getByRole("button", { name: "Commit candidate" }).click();
+  await expect(page.getByText("Candidate committed locally")).toBeVisible();
+  const committedValue = await input.inputValue();
+  expect(committedValue).toBe(String(newValue));
+
+  const exportedEnvelope = await page.evaluate(async () => {
+    const module = await import("../../browser-src/application");
+    const { openProjectRepository } = await import("../../browser-src/storage/repository");
+    const repository = await openProjectRepository();
+    const application = new module.CadApplication(repository);
+    await application.open();
+    return application.exportPortableCustody();
+  });
+  expect(exportedEnvelope.format).toBe("piton-custody/v1");
+  expect(exportedEnvelope.fingerprint).toMatch(/^sha256-[0-9a-f]{64}$/);
+  expect(exportedEnvelope.project.current_revision_id).toMatch(/^rev-[0-9a-f]{64}$/);
+
+  await context.clearCookies();
+  await page.goto("/");
+  await expect(page.getByText("Reopened from SQLite WASM · OPFS")).toBeVisible();
+  await expect(page.getByLabel("Leg length (mm)")).toHaveValue(String(newValue));
+
+  await page.getByTestId("portable-custody-import-clipboard").evaluate(async (button: HTMLButtonElement, text: string) => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { readText: () => Promise.resolve(text) },
+    });
+    button.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }, JSON.stringify(exportedEnvelope));
+  await expect(page.getByText(/Reopened from portable custody/)).toBeVisible();
+  await expect(page.getByLabel("Leg length (mm)")).toHaveValue(String(newValue));
+  await expect(page.locator(".state-card code").first()).toHaveText(acceptedId!);
+  await expect(page.getByTestId("fabrication-release")).toHaveText("false");
+  await expect(page.getByTestId("machine-actuation")).toHaveText("false");
+  await expect(page.locator(".viewport-status")).toContainText("CAD Z-min 0 on grid");
+});
+
 test("SQLite WASM reports migrated schema and direct durable readback", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();

@@ -1,6 +1,6 @@
 import { sqlite3Worker1Promiser, type Worker1Promiser } from "@sqlite.org/sqlite-wasm";
-import type { BrowserProject, CadCommandReceipt, CadCommandRequest, CandidateCommand, DesignRevision } from "../domain";
-import { SAFETY_TRUTH, assertProjectIntegrity, deriveCandidateFromCommand, seedProject } from "../domain";
+import type { BrowserProject, CadCommandReceipt, CadCommandRequest, CandidateCommand, DesignRevision, PortableCustodyEnvelope, PortableCustodyPacket } from "../domain";
+import { SAFETY_TRUTH, assertPortableCustodyPacket, assertProjectIntegrity, canonicalPortableCustodyJson, deriveCandidateFromCommand, seedProject, sha256Hex } from "../domain";
 import { CURRENT_SCHEMA_VERSION, migrationStatements } from "./schema";
 import type { GeometryAuthorityBinding } from "../geometry/binding";
 import type { BuildAttempt, ChangeProposal, ChannelPointer, LifecycleRecord, ProposalDisposition } from "../lifecycle";
@@ -47,6 +47,9 @@ export interface ProjectRepository {
   appendLifecycleRecord(record: CallerLifecycleRecord, expectedCurrentRevisionId: string): Promise<void>;
   moveChannel(pointer: ChannelPointer, expectedVersion: number): Promise<void>;
   loadLifecycleRecords(projectId: string): Promise<LifecycleRecord[]>;
+  exportPortableCustody(): Promise<PortableCustodyPacket>;
+  importFreshCustody(packet: PortableCustodyPacket, expectedFingerprint: string): Promise<BrowserProject>;
+  portableCustodyFingerprint(packet: PortableCustodyPacket): Promise<string>;
   persistenceLabel: string;
 }
 
@@ -134,6 +137,30 @@ export class MemoryProjectRepository implements ProjectRepository {
     this.lifecycleRecords.forEach(assertLifecycleRecord);
     return structuredClone(this.lifecycleRecords);
   }
+
+  async exportPortableCustody(): Promise<PortableCustodyPacket> {
+    if (!this.project) throw new Error("project is not initialized");
+    return buildPortableCustodyPacket(this.project, this.buildStatus, this.lifecycleRecords);
+  }
+
+  async importFreshCustody(packet: PortableCustodyPacket, expectedFingerprint: string): Promise<BrowserProject> {
+    assertPortableCustodyPacket(packet);
+    const fingerprint = await this.portableCustodyFingerprint(packet);
+    if (fingerprint !== expectedFingerprint) throw new Error("portable custody fingerprint mismatch");
+    this.project = structuredClone(packetToBrowserProject(packet));
+    this.buildStatus = packet.build_status === null || packet.build_status === undefined
+      ? null
+      : structuredClone(packet.build_status as BuildStatus);
+    this.lifecycleRecords = packet.lifecycle_projection.map((record) => {
+      assertLifecycleRecord(record as LifecycleRecord);
+      return structuredClone(record as LifecycleRecord);
+    });
+    return structuredClone(this.project);
+  }
+
+  async portableCustodyFingerprint(packet: PortableCustodyPacket): Promise<string> {
+    return `sha256-${sha256Hex(canonicalPortableCustodyJson(packet))}`;
+  }
 }
 
 function commandReceipt(request: CadCommandRequest, requestDigest: string, resultingRevisionId: string): CadCommandReceipt {
@@ -145,6 +172,71 @@ function commandReceipt(request: CadCommandRequest, requestDigest: string, resul
     canonicalRequestDigest: requestDigest,
     authorityProfile: "browser-typescript/v1",
     ...SAFETY_TRUTH,
+  };
+}
+
+function derivePortableCustodyEnvironmentDigest(): string {
+  const canonical = JSON.stringify({
+    authorityProfile: "browser-typescript/v1",
+    portableCustodyFormat: "piton-custody/v1",
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    parameterKeys: [
+      "base_length_mm", "base_thickness_mm", "hole_diameter_mm",
+      "leg_length_mm", "leg_thickness_mm", "leg_width_mm",
+    ],
+  });
+  return `sha256-${sha256Hex(canonical)}`;
+}
+
+function buildPortableCustodyPacket(
+  project: BrowserProject,
+  buildStatus: BuildStatus | null,
+  lifecycle: readonly LifecycleRecord[],
+): PortableCustodyPacket {
+  return {
+    format: "piton-custody/v1",
+    schema_version: CURRENT_SCHEMA_VERSION,
+    project: {
+      id: project.id,
+      name: project.name,
+      accepted_revision_id: project.acceptedRevisionId,
+      current_revision_id: project.currentRevisionId,
+    },
+    revisions: project.revisions.map((revision) => ({
+      id: revision.id,
+      parentRevisionId: revision.parentRevisionId,
+      createdAt: revision.createdAt,
+      authorityProfile: revision.authorityProfile,
+      parameters: { ...revision.parameters },
+      reviewState: revision.reviewState,
+      fabricationRelease: revision.fabricationRelease,
+      machineActuation: revision.machineActuation,
+      releaseState: revision.releaseState,
+    })),
+    build_status: buildStatus ? { ...buildStatus, binding: { ...buildStatus.binding } } : null,
+    lifecycle_projection: lifecycle.map((record) => structuredClone(record)),
+    environment_digest: derivePortableCustodyEnvironmentDigest(),
+    exported_at: new Date().toISOString(),
+  };
+}
+
+function packetToBrowserProject(packet: PortableCustodyPacket): BrowserProject {
+  return {
+    id: packet.project.id,
+    name: packet.project.name,
+    acceptedRevisionId: packet.project.accepted_revision_id,
+    currentRevisionId: packet.project.current_revision_id,
+    revisions: packet.revisions.map((revision) => ({
+      id: revision.id,
+      parentRevisionId: revision.parentRevisionId,
+      createdAt: revision.createdAt,
+      authorityProfile: revision.authorityProfile,
+      parameters: { ...revision.parameters },
+      reviewState: revision.reviewState,
+      fabricationRelease: revision.fabricationRelease,
+      machineActuation: revision.machineActuation,
+      releaseState: revision.releaseState,
+    })),
   };
 }
 
@@ -584,6 +676,30 @@ export class SqliteOpfsProjectRepository implements ProjectRepository {
       currentRevisionReadback: String(project.current_revision_id),
       tables: (tableResult.result.resultRows as Row[]).map((row) => String(row.name)),
     };
+  }
+
+  async exportPortableCustody(): Promise<PortableCustodyPacket> {
+    const project = await this.load();
+    if (!project) throw new Error("project is not initialized");
+    const buildStatus = await this.loadBuildStatus(project.id);
+    const lifecycle = await this.loadLifecycleRecords(project.id);
+    return buildPortableCustodyPacket(project, buildStatus, lifecycle);
+  }
+
+  async importFreshCustody(packet: PortableCustodyPacket, expectedFingerprint: string): Promise<BrowserProject> {
+    assertPortableCustodyPacket(packet);
+    if (packet.schema_version !== CURRENT_SCHEMA_VERSION) {
+      throw new Error(`portable custody schema_version ${packet.schema_version} is not the current schema version ${CURRENT_SCHEMA_VERSION}`);
+    }
+    const fingerprint = await this.portableCustodyFingerprint(packet);
+    if (fingerprint !== expectedFingerprint) throw new Error("portable custody fingerprint mismatch");
+    // Fresh-custody: never mutate OPFS. The imported BrowserProject is returned
+    // to the caller; the next open() / load() will reassert OPFS state.
+    return structuredClone(packetToBrowserProject(packet));
+  }
+
+  async portableCustodyFingerprint(packet: PortableCustodyPacket): Promise<string> {
+    return `sha256-${sha256Hex(canonicalPortableCustodyJson(packet))}`;
   }
 }
 
