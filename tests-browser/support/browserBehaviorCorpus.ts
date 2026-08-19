@@ -7,7 +7,6 @@ import {
   geometryInputDigest,
   parseGeometryBuildRequest,
 } from "../../browser-src/geometry/protocol";
-import { exportPortableCustody, parsePortableCustody } from "../../browser-src/portable";
 import { MemoryProjectRepository } from "../../browser-src/storage/repository";
 
 const CORPUS_FORMAT = "piton-browser-behavior-corpus/v1" as const;
@@ -22,8 +21,6 @@ export const FAILURE_CLASSES = Object.freeze([
   "cross-project-command",
   "malformed-command-envelope",
   "out-of-bounds-command",
-  "portable-custody-tamper",
-  "nonempty-custody-reopen",
   "stale-preview-status",
   "stale-worker-result",
   "malformed-review-geometry",
@@ -37,7 +34,7 @@ export type FailureClass = typeof FAILURE_CLASSES[number];
 type Scenario = Readonly<{
   format: typeof CORPUS_FORMAT;
   id: string;
-  boundary: "application" | "revision" | "portable" | "opfs" | "worker" | "viewer" | "lifecycle" | "safety";
+  boundary: "application" | "revision" | "opfs" | "worker" | "viewer" | "lifecycle" | "safety";
   behavior: string;
 }>;
 
@@ -56,20 +53,15 @@ export const BROWSER_BEHAVIOR_CORPUS: readonly Scenario[] = Object.freeze([
   scenario("BCS-09-cross-project-command", "application", "reject foreign project custody"),
   scenario("BCS-10-malformed-command-envelope", "application", "reject authority-shaped extras"),
   scenario("BCS-11-out-of-bounds-command", "application", "reject an unbounded parameter"),
-  scenario("BCS-12-canonical-portable-export", "portable", "export canonical authored custody only"),
-  scenario("BCS-13-portable-fresh-reopen", "portable", "reopen into empty custody"),
-  scenario("BCS-14-portable-tamper-rejection", "portable", "reject changed portable bytes"),
-  scenario("BCS-15-portable-nonempty-rejection", "portable", "reject overwrite of existing custody"),
-  scenario("BCS-16-opfs-status-revision-binding", "opfs", "reject stale durable preview status"),
-  scenario("BCS-17-worker-protocol-success", "worker", "admit a closed review request"),
-  scenario("BCS-18-stale-worker-result", "worker", "preserve last-good for stale worker output"),
-  scenario("BCS-19-malformed-review-geometry", "worker", "preserve last-good for malformed geometry"),
-  scenario("BCS-20-cad-z-zero-build-plane", "viewer", "reject review geometry above physical z zero"),
-  scenario("BCS-21-transactional-mesh-replacement", "viewer", "retain prior mesh on install failure"),
-  scenario("BCS-22-artifact-local-review-identity", "viewer", "bind result to the complete current request"),
-  scenario("BCS-23-portable-cache-exclusion", "portable", "exclude mesh preview camera and SQLite state"),
-  scenario("BCS-24-no-browser-release-authority", "lifecycle", "reject caller-minted build success"),
-  scenario("BCS-25-root-safety-truth", "safety", "retain unreleased human-review truth"),
+  scenario("BCS-12-opfs-status-revision-binding", "opfs", "reject stale durable preview status"),
+  scenario("BCS-13-worker-protocol-success", "worker", "admit a closed review request"),
+  scenario("BCS-14-stale-worker-result", "worker", "preserve last-good for stale worker output"),
+  scenario("BCS-15-malformed-review-geometry", "worker", "preserve last-good for malformed geometry"),
+  scenario("BCS-16-cad-z-zero-build-plane", "viewer", "reject review geometry above physical z zero"),
+  scenario("BCS-17-transactional-mesh-replacement", "viewer", "retain prior mesh on install failure"),
+  scenario("BCS-18-artifact-local-review-identity", "viewer", "bind result to the complete current request"),
+  scenario("BCS-19-no-browser-release-authority", "lifecycle", "reject caller-minted build success"),
+  scenario("BCS-20-root-safety-truth", "safety", "retain unreleased human-review truth"),
 ]);
 
 const SCENARIO_KEYS = ["format", "id", "boundary", "behavior"].sort().join("\u0000");
@@ -77,7 +69,7 @@ const EXPECTED_SCENARIO_IDS = BROWSER_BEHAVIOR_CORPUS.map(({ id }) => id);
 const BOUNDARIES = new Set(BROWSER_BEHAVIOR_CORPUS.map(({ boundary }) => boundary));
 
 export function assertClosedBrowserBehaviorCorpus(input: readonly unknown[]): readonly Scenario[] {
-  if (!Array.isArray(input) || input.length !== 25) throw new Error("browser corpus must contain exactly 25 scenarios");
+  if (!Array.isArray(input) || input.length !== 20) throw new Error("browser corpus must contain exactly 20 scenarios");
   for (const item of input) {
     if (!item || typeof item !== "object" || Array.isArray(item)
       || Object.keys(item).sort().join("\u0000") !== SCENARIO_KEYS) throw new Error("browser corpus scenario is malformed");
@@ -175,72 +167,50 @@ async function executeScenario(index: number): Promise<void> {
       await expectRejected(() => application.executeCommand(command(opened.project.id, base, "corpus-bounds-0001", 161)), "between 40 and 160");
       if ((await application.loadProject()).revisions.length !== 1) throw new Error("out-of-bounds command partially mutated custody");
       break;
-    case 12: parsePortableCustody(await application.exportPortableCustody()); break;
-    case 13: {
-      const target = new CadApplication(new MemoryProjectRepository());
-      await target.reopenPortableCustody(await application.exportPortableCustody());
-      break;
-    }
-    case 14: {
-      const packet = await application.exportPortableCustody();
-      packet.records[0].content += " ";
-      try { parsePortableCustody(packet); throw new Error("tamper accepted"); } catch (error) { if ((error as Error).message === "tamper accepted") throw error; }
-      break;
-    }
-    case 15: {
-      const packet = await application.exportPortableCustody();
-      await expectRejected(() => application.reopenPortableCustody(packet), "portable reopen requires empty custody");
-      break;
-    }
-    case 16: {
+    case 12: {
       const revision = opened.project.revisions[0];
       await expectRejected(() => application.recordBuildStatus({ projectId: opened.project.id, requestId: 1, binding: { baseRevisionId: "stale", previewDigest: revision.id }, state: "failed", message: "injected" }), "base revision is stale");
       if (await repository.loadBuildStatus(opened.project.id)) throw new Error("stale preview status replaced last-good status");
       break;
     }
-    case 17: {
+    case 13: {
       const revision = opened.project.revisions[0];
       const binding = deriveGeometryBinding(revision, revision.parameters);
       const request = { type: "build-review-mesh", requestId: 1, workerGeneration: 1, sourceRevisionId: revision.id, inputDigest: geometryInputDigest(revision.parameters), environmentDigest: GEOMETRY_ENVIRONMENT_DIGEST, binding, parameters: revision.parameters };
       if (!parseGeometryBuildRequest(request).ok) throw new Error("worker protocol rejected");
       break;
     }
-    case 18: {
+    case 14: {
       const { gate, result, binding } = geometryFixture(); gate.accept(result); const stale = gate.begin(binding); gate.begin(binding);
       if (gate.accept({ ...result, ...stale }) || gate.lastGood !== result) throw new Error("stale result replaced last-good");
       break;
     }
-    case 19: {
+    case 15: {
       const { gate, result, binding } = geometryFixture(); gate.accept(result); const next = gate.begin(binding);
       if (gate.accept({ ...next, vertices: [], triangles: [] }) || gate.lastGood !== result) throw new Error("malformed geometry replaced last-good");
       break;
     }
-    case 20: {
+    case 16: {
       const { gate, identity } = geometryFixture();
       if (gate.accept({ ...identity, vertices: [0, 0, 2, 1, 0, 2, 0, 1, 3], triangles: [0, 1, 2] })) throw new Error("off-plane geometry accepted");
       break;
     }
-    case 21: {
+    case 17: {
       const current = { id: "last-good" };
       try { installReplacement(current, () => ({ id: "candidate" }), () => { throw new Error("install failed"); }, () => {}, () => {}); throw new Error("replacement accepted"); }
       catch (error) { if ((error as Error).message === "replacement accepted") throw error; }
       break;
     }
-    case 22: {
+    case 18: {
       const { gate, result } = geometryFixture();
       if (gate.accept({ ...result, environmentDigest: `sha256-${"0".repeat(64)}` })) throw new Error("foreign artifact identity accepted");
       break;
     }
-    case 23: {
-      const packet = exportPortableCustody(opened.project, []);
-      if (packet.records.some(({ path }) => /mesh|preview|camera|sqlite/i.test(path))) throw new Error("cache leaked into custody");
-      break;
-    }
-    case 24:
+    case 19:
       await expectRejected(() => repository.appendLifecycleRecord({ kind: "build_attempt", id: `attempt-${"a".repeat(64)}`, projectId: opened.project.id, revisionId: base, recipeDigest: "b".repeat(64), state: "succeeded", createdAt: "2026-08-18T00:00:00.000Z" } as never, base), "trusted coordinator custody");
       if ((await repository.loadLifecycleRecords(opened.project.id)).length !== 0) throw new Error("caller minted lifecycle authority");
       break;
-    case 25: if (opened.project.revisions.some((revision) => revision.reviewState !== SAFETY_TRUTH.reviewState || revision.fabricationRelease || revision.machineActuation || revision.releaseState !== SAFETY_TRUTH.releaseState)) throw new Error("root truth changed"); break;
+    case 20: if (opened.project.revisions.some((revision) => revision.reviewState !== SAFETY_TRUTH.reviewState || revision.fabricationRelease || revision.machineActuation || revision.releaseState !== SAFETY_TRUTH.releaseState)) throw new Error("root truth changed"); break;
     default: throw new Error("unknown browser corpus scenario");
   }
 }
@@ -297,14 +267,12 @@ const SCENARIO_INDEX_BY_FAILURE_CLASS: Record<FailureClass, number> = {
   "cross-project-command": 8,
   "malformed-command-envelope": 9,
   "out-of-bounds-command": 10,
-  "portable-custody-tamper": 13,
-  "nonempty-custody-reopen": 14,
-  "stale-preview-status": 15,
-  "stale-worker-result": 17,
-  "malformed-review-geometry": 18,
-  "off-plane-review-geometry": 19,
-  "replacement-install-failure": 20,
-  "unauthorized-lifecycle-authority": 23,
+  "stale-preview-status": 11,
+  "stale-worker-result": 13,
+  "malformed-review-geometry": 14,
+  "off-plane-review-geometry": 15,
+  "replacement-install-failure": 16,
+  "unauthorized-lifecycle-authority": 18,
 };
 const expectedClass = (seed: number): FailureClass => FAILURE_CLASSES[seed % FAILURE_CLASSES.length];
 const expectedScenario = (seed: number) => BROWSER_BEHAVIOR_CORPUS[SCENARIO_INDEX_BY_FAILURE_CLASS[expectedClass(seed)]].id;

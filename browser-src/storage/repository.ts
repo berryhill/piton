@@ -47,7 +47,6 @@ export interface ProjectRepository {
   appendLifecycleRecord(record: CallerLifecycleRecord, expectedCurrentRevisionId: string): Promise<void>;
   moveChannel(pointer: ChannelPointer, expectedVersion: number): Promise<void>;
   loadLifecycleRecords(projectId: string): Promise<LifecycleRecord[]>;
-  importFreshCustody(project: BrowserProject, lifecycleRecords: readonly LifecycleRecord[]): Promise<void>;
   persistenceLabel: string;
 }
 
@@ -134,14 +133,6 @@ export class MemoryProjectRepository implements ProjectRepository {
     if (!this.project || projectId !== this.project.id) throw new Error("lifecycle project authority mismatch");
     this.lifecycleRecords.forEach(assertLifecycleRecord);
     return structuredClone(this.lifecycleRecords);
-  }
-
-  async importFreshCustody(project: BrowserProject, lifecycleRecords: readonly LifecycleRecord[]): Promise<void> {
-    if (this.project) throw new Error("portable reopen requires empty custody");
-    assertProjectIntegrity(project);
-    lifecycleRecords.forEach(assertLifecycleRecord);
-    this.project = structuredClone(project);
-    this.lifecycleRecords = structuredClone([...lifecycleRecords]);
   }
 }
 
@@ -560,56 +551,6 @@ export class SqliteOpfsProjectRepository implements ProjectRepository {
     });
     records.forEach(assertLifecycleRecord);
     return records;
-  }
-
-  async importFreshCustody(project: BrowserProject, lifecycleRecords: readonly LifecycleRecord[]): Promise<void> {
-    assertProjectIntegrity(project);
-    lifecycleRecords.forEach(assertLifecycleRecord);
-    await this.exec("BEGIN IMMEDIATE");
-    try {
-      const existing = await this.exec("SELECT id FROM projects LIMIT 1");
-      if ((existing.result.resultRows as Row[])[0]) throw new Error("portable reopen requires empty custody");
-      await this.exec("INSERT INTO projects (id, name, accepted_revision_id, current_revision_id, schema_version) VALUES (?, ?, ?, ?, ?)",
-        [project.id, project.name, project.acceptedRevisionId, project.currentRevisionId, CURRENT_SCHEMA_VERSION]);
-      for (const revision of project.revisions) await this.insertRevision(project.id, revision);
-      for (const record of lifecycleRecords) await this.insertPortableLifecycle(record);
-      await this.exec("COMMIT");
-    } catch (error) {
-      await this.exec("ROLLBACK");
-      throw error;
-    }
-  }
-
-  private async insertPortableLifecycle(record: LifecycleRecord): Promise<void> {
-    switch (record.kind) {
-      case "change_proposal":
-        await this.exec("INSERT INTO change_proposals (id, project_id, base_revision_id, command_json, created_at) VALUES (?, ?, ?, ?, ?)",
-          [record.id, record.projectId, record.baseRevisionId, JSON.stringify(record.command), record.createdAt]); break;
-      case "proposal_disposition":
-        await this.exec("INSERT INTO proposal_dispositions (id, project_id, proposal_id, disposition, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-          [record.id, record.projectId, record.proposalId, record.disposition, record.reason, record.createdAt]); break;
-      case "build_attempt":
-        await this.exec("INSERT INTO build_attempts (id, project_id, revision_id, recipe_digest, state, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-          [record.id, record.projectId, record.revisionId, record.recipeDigest, record.state, record.createdAt]); break;
-      case "evidence_closure":
-        await this.exec("INSERT INTO evidence_closures (id, project_id, revision_id, build_attempt_id, requirements_json, artifacts_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [record.id, record.projectId, record.revisionId, record.buildAttemptId, JSON.stringify(record.requirementIds), JSON.stringify(record.artifactDigests), record.createdAt]); break;
-      case "channel_pointer":
-        await this.exec("INSERT INTO channel_pointers (project_id, channel, revision_id, version, updated_at) VALUES (?, ?, ?, ?, ?)",
-          [record.projectId, record.channel, record.revisionId, record.version, record.updatedAt]); break;
-      case "approval_record":
-        await this.exec("INSERT INTO approval_records (id, project_id, revision_id, evidence_closure_id, decision, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [record.id, record.projectId, record.revisionId, record.evidenceClosureId, record.decision, record.reason, record.createdAt]); break;
-      case "draft_export":
-        await this.exec("INSERT INTO draft_exports (id, project_id, revision_id, evidence_closure_id, manifest_digest, release_state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [record.id, record.projectId, record.revisionId, record.evidenceClosureId, record.manifestDigest, record.releaseState, record.createdAt]); break;
-      case "fabrication_release":
-        await this.exec("INSERT INTO fabrication_releases (id, project_id, revision_id, approval_record_id, draft_export_id, fabrication_release, machine_actuation, created_at) VALUES (?, ?, ?, ?, ?, 0, 0, ?)",
-          [record.id, record.projectId, record.revisionId, record.approvalRecordId, record.draftExportId, record.createdAt]); break;
-      case "released_package_projection":
-        await this.exec("INSERT INTO released_package_projections (id, project_id, fabrication_release_id, package_digest, fabrication_release, machine_actuation, created_at) VALUES (?, ?, ?, ?, 0, 0, ?)",
-          [record.id, record.projectId, record.fabricationReleaseId, record.packageDigest, record.createdAt]); break;
-    }
   }
 
   async readMigrationEvidence(): Promise<SqliteMigrationEvidence> {
