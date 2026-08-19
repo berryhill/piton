@@ -13,7 +13,6 @@ This inventory carries no product claim scope and does not imply review acceptan
 | `primary-writable-authority-browser` | `browser-src/**`, `index.html` | Sole writable authored authority |
 | `browser-verification` | `tests-browser/**`, `.github/workflows/ci.yml`, package/toolchain configuration, `launch-browser-mvi.sh` | Candidate verification only |
 | `docs-governance` | `README.md`, `AGENTS.md`, `docs/**`, `.otoxan/**`, `flows/**` | Advisory text; doctrine wins conflicts |
-| `schemas-templates` | `schemas/**`, `templates/**` | Inert claim-scope and evidence vocabulary |
 | `historical-evidence` | `evidence/**` | Immutable Stage 0 fixtures; no runtime authority |
 
 ## Removed estate
@@ -24,10 +23,12 @@ The current tracked tree contains none of the following:
 - `scripts/**`;
 - `tests/**` (the removed application test suite; browser tests remain under `tests-browser/**`);
 - `examples/minimal-project/**`;
+- `src/piton/storage/migrations/**`;
+- `src/piton/viewer_assets/**`;
+- root `schemas/**` and `templates/**` support assets;
 - tracked `*.py` files;
 - `pyproject.toml`, `uv.lock`, or `.python-version`;
-- a Python/exact-adapter CI job;
-- the adapter-specific `schemas/piton-project-v1.schema.json`.
+- a Python/exact-adapter CI job.
 
 The canonical repository gate is now only:
 

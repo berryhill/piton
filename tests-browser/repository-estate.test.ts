@@ -17,7 +17,14 @@ describe("browser-only repository estate", () => {
     expect(trackedUnder("src")).toEqual([]);
     expect(trackedUnder("scripts")).toEqual([]);
     expect(trackedUnder("tests")).toEqual([]);
+  });
+
+  it("contains no retired Python-authority support estate", () => {
+    expect(trackedUnder("schemas")).toEqual([]);
+    expect(trackedUnder("templates")).toEqual([]);
     expect(trackedUnder("examples/minimal-project")).toEqual([]);
+    expect(trackedUnder("src/piton/storage/migrations")).toEqual([]);
+    expect(trackedUnder("src/piton/viewer_assets")).toEqual([]);
   });
 
   it("contains no Python package or dependency estate", () => {
