@@ -1,4 +1,4 @@
-import { sha256Hex, type LBracketParameters } from "../domain";
+import { sha256Hex, validateLBracketParameters, type LBracketParameters } from "../domain";
 import type { GeometryAuthorityBinding } from "./binding";
 
 const REVISION_DIGEST = /^rev-[0-9a-f]{64}$/;
@@ -91,17 +91,8 @@ function parseParameters(value: unknown): ProtocolParse<LBracketParameters> {
   if (!isRecord(value) || !hasExactKeys(value, PARAMETER_KEYS)) {
     return failure("protocol_invalid_parameters", "parameters must contain exactly the declared L-bracket inputs");
   }
-  for (const key of PARAMETER_KEYS) {
-    if (typeof value[key] !== "number" || !Number.isFinite(value[key]) || (value[key] as number) <= 0) {
-      return failure("protocol_invalid_parameters", `${key} must be a finite positive number`);
-    }
-  }
-  if ((value.leg_length_mm as number) < 40 || (value.leg_length_mm as number) > 160) {
-    return failure("protocol_invalid_parameters", "leg_length_mm must be between 40 and 160 mm");
-  }
-  if ((value.hole_diameter_mm as number) >= Math.min(value.leg_width_mm as number, value.leg_length_mm as number)) {
-    return failure("protocol_invalid_parameters", "hole_diameter_mm must fit inside the leg");
-  }
+  const parameterError = validateLBracketParameters(value);
+  if (parameterError) return failure("protocol_invalid_parameters", parameterError);
   return { ok: true, value: Object.fromEntries(PARAMETER_KEYS.map((key) => [key, value[key]])) as unknown as LBracketParameters };
 }
 

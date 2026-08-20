@@ -92,6 +92,20 @@ describe("browser SQLite schema", () => {
     expect(() => assertLifecycleRecord(forged)).toThrow("lifecycle root truth is invalid");
   });
 
+  it("rejects non-string evidence requirement identifiers", () => {
+    const forged = {
+      kind: "evidence_closure",
+      id: `evidence-${"1".repeat(64)}`,
+      projectId: "piton-seeded-l-bracket",
+      revisionId: `rev-${"2".repeat(64)}`,
+      buildAttemptId: `attempt-${"3".repeat(64)}`,
+      requirementIds: [{}],
+      artifactDigests: ["4".repeat(64)],
+      createdAt: "2026-08-20T00:00:00.000Z",
+    } as unknown as EvidenceClosure;
+    expect(() => assertLifecycleRecord(forged)).toThrow("evidence requirements are invalid");
+  });
+
   it("appends exact lifecycle facts and rejects duplicate, cross-project, and stale pointer writes", async () => {
     const repository = new MemoryProjectRepository();
     const project = await repository.initialize();

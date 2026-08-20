@@ -32,20 +32,20 @@ const productSource = [
 ].map((path) => readFileSync(new URL(path, import.meta.url), "utf8")).join("\n--piton-source-boundary--\n");
 
 describe("closed browser behavior corpus", () => {
-  it("predeclares exactly 20 ordered, unique, closed browser scenarios", () => {
+  it("predeclares exactly 25 ordered, unique, closed browser scenarios", () => {
     expect(assertClosedBrowserBehaviorCorpus(BROWSER_BEHAVIOR_CORPUS)).toBe(BROWSER_BEHAVIOR_CORPUS);
-    expect(BROWSER_BEHAVIOR_CORPUS).toHaveLength(20);
+    expect(BROWSER_BEHAVIOR_CORPUS).toHaveLength(25);
 
-    expect(() => assertClosedBrowserBehaviorCorpus(BROWSER_BEHAVIOR_CORPUS.slice(1))).toThrow("browser corpus must contain exactly 20 scenarios");
-    expect(() => assertClosedBrowserBehaviorCorpus([...BROWSER_BEHAVIOR_CORPUS.slice(0, 19), BROWSER_BEHAVIOR_CORPUS[0]])).toThrow("browser corpus identity or order mismatch");
+    expect(() => assertClosedBrowserBehaviorCorpus(BROWSER_BEHAVIOR_CORPUS.slice(1))).toThrow("browser corpus must contain exactly 25 scenarios");
+    expect(() => assertClosedBrowserBehaviorCorpus([...BROWSER_BEHAVIOR_CORPUS.slice(0, 24), BROWSER_BEHAVIOR_CORPUS[0]])).toThrow("browser corpus identity or order mismatch");
     expect(() => assertClosedBrowserBehaviorCorpus([...BROWSER_BEHAVIOR_CORPUS].reverse())).toThrow("browser corpus identity or order mismatch");
     expect(() => assertClosedBrowserBehaviorCorpus(BROWSER_BEHAVIOR_CORPUS.map((scenario, index) =>
       index === 0 ? { ...scenario, unexpected: true } : scenario) as never)).toThrow("browser corpus scenario is malformed");
   });
 
-  it("executes all 20 declarations against browser TypeScript boundaries", async () => {
+  it("executes all 25 declarations against browser TypeScript boundaries", async () => {
     const outcomes = await runBrowserBehaviorCorpus();
-    expect(outcomes).toHaveLength(20);
+    expect(outcomes).toHaveLength(25);
     expect(outcomes.map((outcome) => outcome.scenarioId)).toEqual(BROWSER_BEHAVIOR_CORPUS.map((scenario) => scenario.id));
     expect(outcomes.every((outcome) => outcome.passed)).toBe(true);
     for (const outcome of outcomes) {

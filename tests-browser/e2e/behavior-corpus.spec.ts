@@ -23,7 +23,7 @@ const productSource = [
   "../../playwright.config.ts",
 ].map((path) => readFileSync(new URL(path, import.meta.url), "utf8")).join("\n--piton-source-boundary--\n");
 
-test("executes the closed 20-scenario corpus and 1,000-replay campaign in Chromium", async ({ page }) => {
+test("executes the closed 25-scenario corpus and 1,000-replay campaign in Chromium", async ({ page }) => {
   await page.goto("/");
   const evidence = await page.evaluate(async (sourceBinding) => {
     const moduleUrl = "/tests-browser/support/browserBehaviorCorpus.ts";
@@ -59,7 +59,7 @@ test("executes the closed 20-scenario corpus and 1,000-replay campaign in Chromi
   }, productSource);
 
   expect(evidence.scenarioIds).toEqual(evidence.declaredScenarioIds);
-  expect(evidence.scenarioIds).toHaveLength(20);
+  expect(evidence.scenarioIds).toHaveLength(25);
   expect(evidence.allScenariosPassed).toBe(true);
   expect(evidence.allScenariosUnreleased).toBe(true);
   expect(evidence.outcomeCount).toBe(1_000);

@@ -24,6 +24,8 @@ The governed surface is the browser-local TypeScript workbench, SQLite WASM OPFS
 | Dependency or CI action changes unexpectedly | Exact package versions, frozen pnpm lock, commit-pinned actions, read-only CI permission | Third-party packages and runners remain external |
 | Automation implies approval or release | Root truth fixed false/unreleased; no issuance or machine path | Social claims outside product controls remain possible |
 | Secret enters source or output | Secret literals forbidden; no runtime credential requirement | Repository review remains necessary |
+| Untrusted portable custody packet smuggles unsafe revision, lifecycle, or build evidence | Closed envelope keys, current format/schema, bounded finite parameters, timestamp and revision-digest checks, fixed revision SAFETY_TRUTH, parent-chain integrity, closed lifecycle validation plus project/reference binding, false fabrication/machine lifecycle truth, current-project build-status binding, and fingerprint equality | A compromised browser context can still deceive a person |
+| Import overwrites existing browser custody or becomes a transient UI-only project | UUID-bounded fresh OPFS namespace, empty-namespace precondition, one transaction for project/revisions/build/lifecycle, stable validated reopen URL, and commit/reload Playwright proof | Browser profile loss remains possible; users must retain the packet or profile |
 
 ## Verification
 

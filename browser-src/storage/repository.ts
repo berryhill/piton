@@ -1,6 +1,6 @@
 import { sqlite3Worker1Promiser, type Worker1Promiser } from "@sqlite.org/sqlite-wasm";
-import type { BrowserProject, CadCommandReceipt, CadCommandRequest, CandidateCommand, DesignRevision } from "../domain";
-import { SAFETY_TRUTH, assertProjectIntegrity, deriveCandidateFromCommand, seedProject } from "../domain";
+import type { BrowserProject, CadCommandReceipt, CadCommandRequest, CandidateCommand, DesignRevision, PortableCustodyEnvelope, PortableCustodyPacket } from "../domain";
+import { SAFETY_TRUTH, assertPortableCustodyPacket, assertProjectIntegrity, canonicalPortableCustodyJson, deriveCandidateFromCommand, seedProject, sha256Hex } from "../domain";
 import { CURRENT_SCHEMA_VERSION, migrationStatements } from "./schema";
 import type { GeometryAuthorityBinding } from "../geometry/binding";
 import type { BuildAttempt, ChangeProposal, ChannelPointer, LifecycleRecord, ProposalDisposition } from "../lifecycle";
@@ -47,6 +47,9 @@ export interface ProjectRepository {
   appendLifecycleRecord(record: CallerLifecycleRecord, expectedCurrentRevisionId: string): Promise<void>;
   moveChannel(pointer: ChannelPointer, expectedVersion: number): Promise<void>;
   loadLifecycleRecords(projectId: string): Promise<LifecycleRecord[]>;
+  exportPortableCustody(): Promise<PortableCustodyPacket>;
+  importFreshCustody(packet: PortableCustodyPacket, expectedFingerprint: string): Promise<BrowserProject>;
+  portableCustodyFingerprint(packet: PortableCustodyPacket): Promise<string>;
   persistenceLabel: string;
 }
 
@@ -134,6 +137,30 @@ export class MemoryProjectRepository implements ProjectRepository {
     this.lifecycleRecords.forEach(assertLifecycleRecord);
     return structuredClone(this.lifecycleRecords);
   }
+
+  async exportPortableCustody(): Promise<PortableCustodyPacket> {
+    if (!this.project) throw new Error("project is not initialized");
+    return buildPortableCustodyPacket(this.project, this.buildStatus, this.lifecycleRecords);
+  }
+
+  async importFreshCustody(packet: PortableCustodyPacket, expectedFingerprint: string): Promise<BrowserProject> {
+    assertPortableCustodyPacket(packet);
+    const fingerprint = await this.portableCustodyFingerprint(packet);
+    if (fingerprint !== expectedFingerprint) throw new Error("portable custody fingerprint mismatch");
+    const importedProject = structuredClone(packetToBrowserProject(packet));
+    const importedBuildStatus = packet.build_status === null || packet.build_status === undefined
+      ? null
+      : structuredClone(packet.build_status as BuildStatus);
+    const importedLifecycle = packet.lifecycle_projection.map((record) => structuredClone(record as LifecycleRecord));
+    this.project = importedProject;
+    this.buildStatus = importedBuildStatus;
+    this.lifecycleRecords = importedLifecycle;
+    return structuredClone(this.project);
+  }
+
+  async portableCustodyFingerprint(packet: PortableCustodyPacket): Promise<string> {
+    return `sha256-${sha256Hex(canonicalPortableCustodyJson(packet))}`;
+  }
 }
 
 function commandReceipt(request: CadCommandRequest, requestDigest: string, resultingRevisionId: string): CadCommandReceipt {
@@ -145,6 +172,71 @@ function commandReceipt(request: CadCommandRequest, requestDigest: string, resul
     canonicalRequestDigest: requestDigest,
     authorityProfile: "browser-typescript/v1",
     ...SAFETY_TRUTH,
+  };
+}
+
+function derivePortableCustodyEnvironmentDigest(): string {
+  const canonical = JSON.stringify({
+    authorityProfile: "browser-typescript/v1",
+    portableCustodyFormat: "piton-custody/v1",
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    parameterKeys: [
+      "base_length_mm", "base_thickness_mm", "hole_diameter_mm",
+      "leg_length_mm", "leg_thickness_mm", "leg_width_mm",
+    ],
+  });
+  return `sha256-${sha256Hex(canonical)}`;
+}
+
+function buildPortableCustodyPacket(
+  project: BrowserProject,
+  buildStatus: BuildStatus | null,
+  lifecycle: readonly LifecycleRecord[],
+): PortableCustodyPacket {
+  return {
+    format: "piton-custody/v1",
+    schema_version: CURRENT_SCHEMA_VERSION,
+    project: {
+      id: project.id,
+      name: project.name,
+      accepted_revision_id: project.acceptedRevisionId,
+      current_revision_id: project.currentRevisionId,
+    },
+    revisions: project.revisions.map((revision) => ({
+      id: revision.id,
+      parentRevisionId: revision.parentRevisionId,
+      createdAt: revision.createdAt,
+      authorityProfile: revision.authorityProfile,
+      parameters: { ...revision.parameters },
+      reviewState: revision.reviewState,
+      fabricationRelease: revision.fabricationRelease,
+      machineActuation: revision.machineActuation,
+      releaseState: revision.releaseState,
+    })),
+    build_status: buildStatus ? { ...buildStatus, binding: { ...buildStatus.binding } } : null,
+    lifecycle_projection: lifecycle.map((record) => structuredClone(record)),
+    environment_digest: derivePortableCustodyEnvironmentDigest(),
+    exported_at: new Date().toISOString(),
+  };
+}
+
+function packetToBrowserProject(packet: PortableCustodyPacket): BrowserProject {
+  return {
+    id: packet.project.id,
+    name: packet.project.name,
+    acceptedRevisionId: packet.project.accepted_revision_id,
+    currentRevisionId: packet.project.current_revision_id,
+    revisions: packet.revisions.map((revision) => ({
+      id: revision.id,
+      parentRevisionId: revision.parentRevisionId,
+      createdAt: revision.createdAt,
+      authorityProfile: revision.authorityProfile,
+      parameters: { ...revision.parameters },
+      reviewState: revision.reviewState,
+      fabricationRelease: revision.fabricationRelease,
+      machineActuation: revision.machineActuation,
+      releaseState: revision.releaseState,
+    })),
   };
 }
 
@@ -266,13 +358,16 @@ export class SqliteOpfsProjectRepository implements ProjectRepository {
   private dbId!: string;
   persistenceLabel = "SQLite WASM · OPFS";
 
-  static async open(): Promise<SqliteOpfsProjectRepository> {
+  static async open(namespace = "piton"): Promise<SqliteOpfsProjectRepository> {
+    if (!/^piton(?:-import-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})?$/i.test(namespace)) {
+      throw new Error("invalid OPFS project namespace");
+    }
     if (!crossOriginIsolated || !navigator.storage?.getDirectory) {
       throw new Error("OPFS persistence requires a cross-origin-isolated browser context");
     }
     const repository = new SqliteOpfsProjectRepository();
     repository.promiser = await startSqliteWorker();
-    const opened = await repository.promiser("open", { filename: "file:piton.sqlite3?vfs=opfs" });
+    const opened = await repository.promiser("open", { filename: `file:${namespace}.sqlite3?vfs=opfs` });
     repository.dbId = opened.result.dbId;
     await migrateSqliteDatabase(repository.promiser, repository.dbId);
     return repository;
@@ -409,6 +504,47 @@ export class SqliteOpfsProjectRepository implements ProjectRepository {
       [revision.id, projectId, revision.parentRevisionId, revision.createdAt, revision.authorityProfile,
         JSON.stringify(revision.parameters), revision.reviewState, revision.releaseState],
     );
+  }
+
+  private async insertLifecycleProjection(record: LifecycleRecord): Promise<void> {
+    switch (record.kind) {
+      case "change_proposal":
+        await this.exec("INSERT INTO change_proposals (id, project_id, base_revision_id, command_json, created_at) VALUES (?, ?, ?, ?, ?)",
+          [record.id, record.projectId, record.baseRevisionId, JSON.stringify(record.command), record.createdAt]);
+        break;
+      case "proposal_disposition":
+        await this.exec("INSERT INTO proposal_dispositions (id, project_id, proposal_id, disposition, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+          [record.id, record.projectId, record.proposalId, record.disposition, record.reason, record.createdAt]);
+        break;
+      case "build_attempt":
+        await this.exec("INSERT INTO build_attempts (id, project_id, revision_id, recipe_digest, state, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+          [record.id, record.projectId, record.revisionId, record.recipeDigest, record.state, record.createdAt]);
+        break;
+      case "evidence_closure":
+        await this.exec("INSERT INTO evidence_closures (id, project_id, revision_id, build_attempt_id, requirements_json, artifacts_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [record.id, record.projectId, record.revisionId, record.buildAttemptId, JSON.stringify(record.requirementIds), JSON.stringify(record.artifactDigests), record.createdAt]);
+        break;
+      case "channel_pointer":
+        await this.exec("INSERT INTO channel_pointers (project_id, channel, revision_id, version, updated_at) VALUES (?, ?, ?, ?, ?)",
+          [record.projectId, record.channel, record.revisionId, record.version, record.updatedAt]);
+        break;
+      case "approval_record":
+        await this.exec("INSERT INTO approval_records (id, project_id, revision_id, evidence_closure_id, decision, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [record.id, record.projectId, record.revisionId, record.evidenceClosureId, record.decision, record.reason, record.createdAt]);
+        break;
+      case "draft_export":
+        await this.exec("INSERT INTO draft_exports (id, project_id, revision_id, evidence_closure_id, manifest_digest, release_state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [record.id, record.projectId, record.revisionId, record.evidenceClosureId, record.manifestDigest, record.releaseState, record.createdAt]);
+        break;
+      case "fabrication_release":
+        await this.exec("INSERT INTO fabrication_releases (id, project_id, revision_id, approval_record_id, draft_export_id, fabrication_release, machine_actuation, created_at) VALUES (?, ?, ?, ?, ?, 0, 0, ?)",
+          [record.id, record.projectId, record.revisionId, record.approvalRecordId, record.draftExportId, record.createdAt]);
+        break;
+      case "released_package_projection":
+        await this.exec("INSERT INTO released_package_projections (id, project_id, fabrication_release_id, package_digest, fabrication_release, machine_actuation, created_at) VALUES (?, ?, ?, ?, 0, 0, ?)",
+          [record.id, record.projectId, record.fabricationReleaseId, record.packageDigest, record.createdAt]);
+        break;
+    }
   }
 
   async loadBuildStatus(projectId: string): Promise<BuildStatus | null> {
@@ -585,8 +721,58 @@ export class SqliteOpfsProjectRepository implements ProjectRepository {
       tables: (tableResult.result.resultRows as Row[]).map((row) => String(row.name)),
     };
   }
+
+  async exportPortableCustody(): Promise<PortableCustodyPacket> {
+    const project = await this.load();
+    if (!project) throw new Error("project is not initialized");
+    const buildStatus = await this.loadBuildStatus(project.id);
+    const lifecycle = await this.loadLifecycleRecords(project.id);
+    return buildPortableCustodyPacket(project, buildStatus, lifecycle);
+  }
+
+  async importFreshCustody(packet: PortableCustodyPacket, expectedFingerprint: string): Promise<BrowserProject> {
+    assertPortableCustodyPacket(packet);
+    if (packet.schema_version !== CURRENT_SCHEMA_VERSION) {
+      throw new Error(`portable custody schema_version ${packet.schema_version} is not the current schema version ${CURRENT_SCHEMA_VERSION}`);
+    }
+    const fingerprint = await this.portableCustodyFingerprint(packet);
+    if (fingerprint !== expectedFingerprint) throw new Error("portable custody fingerprint mismatch");
+    const imported = packetToBrowserProject(packet);
+    const buildStatus = packet.build_status as BuildStatus | null;
+    const lifecycle = packet.lifecycle_projection as LifecycleRecord[];
+    await this.exec("BEGIN IMMEDIATE");
+    try {
+      const existing = await this.exec("SELECT id FROM projects LIMIT 1");
+      if ((existing.result.resultRows as Row[])[0]) throw new Error("fresh import namespace is not empty");
+      await this.exec(
+        "INSERT INTO projects (id, name, accepted_revision_id, current_revision_id, schema_version) VALUES (?, ?, ?, ?, ?)",
+        [imported.id, imported.name, imported.acceptedRevisionId, imported.currentRevisionId, CURRENT_SCHEMA_VERSION],
+      );
+      for (const revision of imported.revisions) await this.insertRevision(imported.id, revision);
+      if (buildStatus) {
+        await this.exec(`INSERT INTO build_status
+          (project_id, request_id, base_revision_id, preview_digest, state, message)
+          VALUES (?, ?, ?, ?, ?, ?)`, [
+          buildStatus.projectId, buildStatus.requestId, buildStatus.binding.baseRevisionId,
+          buildStatus.binding.previewDigest, buildStatus.state, buildStatus.message,
+        ]);
+      }
+      for (const record of lifecycle) await this.insertLifecycleProjection(record);
+      await this.exec("COMMIT");
+    } catch (error) {
+      await this.exec("ROLLBACK");
+      throw error;
+    }
+    const authoritative = await this.load();
+    if (!authoritative) throw new Error("imported project disappeared");
+    return authoritative;
+  }
+
+  async portableCustodyFingerprint(packet: PortableCustodyPacket): Promise<string> {
+    return `sha256-${sha256Hex(canonicalPortableCustodyJson(packet))}`;
+  }
 }
 
-export function openProjectRepository(): Promise<ProjectRepository> {
-  return SqliteOpfsProjectRepository.open();
+export function openProjectRepository(namespace = "piton"): Promise<ProjectRepository> {
+  return SqliteOpfsProjectRepository.open(namespace);
 }

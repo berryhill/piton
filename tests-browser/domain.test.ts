@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   SAFETY_TRUTH,
   assertProjectIntegrity,
+  assertPortableCustodyPacket,
   assertRevisionIntegrity,
   deriveCandidateRevision,
   seedProject,
@@ -60,5 +61,105 @@ describe("browser authority domain", () => {
     expect(() => assertProjectIntegrity({ ...project, revisions: [...project.revisions, project.revisions[0]] })).toThrow(
       "conflicting revision identity",
     );
+  });
+
+  it("rejects malformed revision values before trusting a matching digest", () => {
+    const revision = seedProject().revisions[0];
+    expect(() => assertRevisionIntegrity({ ...revision, createdAt: "not-a-timestamp" })).toThrow(
+      "revision timestamp is invalid",
+    );
+    expect(() => assertRevisionIntegrity({
+      ...revision,
+      parameters: { ...revision.parameters, base_thickness_mm: -1 },
+    })).toThrow("revision parameter base_thickness_mm is invalid");
+    expect(() => assertRevisionIntegrity({
+      ...revision,
+      parameters: { ...revision.parameters, leg_length_mm: 200 },
+    })).toThrow("leg_length_mm must be between 40 and 160 mm");
+    expect(() => assertRevisionIntegrity({
+      ...revision,
+      parameters: { ...revision.parameters, hole_diameter_mm: 20 },
+    })).toThrow("hole_diameter_mm must leave at least 0.5 mm wall");
+  });
+
+  it("rejects unsafe lifecycle and foreign build evidence in portable custody", () => {
+    const project = seedProject();
+    const packet: Record<string, unknown> = {
+      format: "piton-custody/v1",
+      schema_version: 4,
+      project: {
+        id: project.id,
+        name: project.name,
+        accepted_revision_id: project.acceptedRevisionId,
+        current_revision_id: project.currentRevisionId,
+      },
+      revisions: project.revisions,
+      build_status: null,
+      lifecycle_projection: [{
+        kind: "fabrication_release",
+        id: `release-${"1".repeat(64)}`,
+        projectId: project.id,
+        revisionId: project.currentRevisionId,
+        approvalRecordId: `approval-${"2".repeat(64)}`,
+        draftExportId: `export-${"3".repeat(64)}`,
+        fabricationRelease: true,
+        machineActuation: false,
+        createdAt: "2026-08-20T00:00:00.000Z",
+      }],
+      environment_digest: `sha256-${"4".repeat(64)}`,
+      exported_at: "2026-08-20T00:00:00.000Z",
+    };
+    expect(() => assertPortableCustodyPacket(packet)).toThrow("lifecycle root truth is invalid");
+
+    packet.lifecycle_projection = [];
+    packet.build_status = {
+      projectId: "foreign-project",
+      requestId: 1,
+      binding: { baseRevisionId: project.currentRevisionId, previewDigest: project.currentRevisionId },
+      state: "ready",
+      message: "forged ready evidence",
+    };
+    expect(() => assertPortableCustodyPacket(packet)).toThrow("build status project authority mismatch");
+  });
+
+  it("rejects lifecycle references that cross revision custody", () => {
+    const seeded = seedProject();
+    const accepted = seeded.revisions[0];
+    const candidate = deriveCandidateRevision(accepted, "leg_length_mm", 92);
+    const hex = (character: string) => character.repeat(64);
+    const packet = {
+      format: "piton-custody/v1",
+      schema_version: 4,
+      project: {
+        id: seeded.id,
+        name: seeded.name,
+        accepted_revision_id: accepted.id,
+        current_revision_id: candidate.id,
+      },
+      revisions: [accepted, candidate],
+      build_status: null,
+      lifecycle_projection: [
+        {
+          kind: "build_attempt", id: `attempt-${hex("1")}`, projectId: seeded.id,
+          revisionId: accepted.id, recipeDigest: hex("2"), state: "succeeded",
+          createdAt: "2026-08-20T00:00:00.000Z",
+        },
+        {
+          kind: "evidence_closure", id: `evidence-${hex("3")}`, projectId: seeded.id,
+          revisionId: accepted.id, buildAttemptId: `attempt-${hex("1")}`,
+          requirementIds: ["AC-01"], artifactDigests: [hex("4")],
+          createdAt: "2026-08-20T00:01:00.000Z",
+        },
+        {
+          kind: "approval_record", id: `approval-${hex("5")}`, projectId: seeded.id,
+          revisionId: candidate.id, evidenceClosureId: `evidence-${hex("3")}`,
+          decision: "deferred", reason: "requires human review",
+          createdAt: "2026-08-20T00:02:00.000Z",
+        },
+      ],
+      environment_digest: `sha256-${hex("6")}`,
+      exported_at: "2026-08-20T00:03:00.000Z",
+    };
+    expect(() => assertPortableCustodyPacket(packet)).toThrow("approval evidence binding is invalid");
   });
 });

@@ -1,3 +1,6 @@
+import type { LifecycleRecord } from "./lifecycle";
+import { assertLifecycleRecord } from "./lifecycle";
+
 export const SAFETY_TRUTH = Object.freeze({
   reviewState: "needs_human_review" as const,
   fabricationRelease: false as const,
@@ -12,6 +15,44 @@ export interface LBracketParameters {
   base_thickness_mm: number;
   leg_thickness_mm: number;
   hole_diameter_mm: number;
+}
+
+export function validateLBracketParameters(value: Readonly<object>): string | null {
+  const input = value as Readonly<Record<string, unknown>>;
+  const bounds: Readonly<Record<keyof LBracketParameters, readonly [number, number]>> = {
+    leg_length_mm: [40, 160],
+    leg_width_mm: [5, 300],
+    base_length_mm: [5, 300],
+    base_thickness_mm: [1, 50],
+    leg_thickness_mm: [1.5, 50],
+    hole_diameter_mm: [0.5, 49],
+  };
+  for (const key of Object.keys(bounds) as (keyof LBracketParameters)[]) {
+    const parameter = input[key];
+    if (typeof parameter !== "number" || !Number.isFinite(parameter) || parameter <= 0) {
+      return `revision parameter ${key} is invalid`;
+    }
+    const [minimum, maximum] = bounds[key];
+    if (parameter < minimum || parameter > maximum) {
+      return key === "leg_length_mm"
+        ? "leg_length_mm must be between 40 and 160 mm"
+        : `${key} must be between ${minimum} and ${maximum} mm`;
+    }
+  }
+  const parameters = value as unknown as LBracketParameters;
+  if (parameters.base_thickness_mm >= parameters.leg_length_mm) {
+    return "base_thickness_mm must be less than leg_length_mm";
+  }
+  if (parameters.leg_thickness_mm >= parameters.base_length_mm) {
+    return "leg_thickness_mm must be less than base_length_mm";
+  }
+  if (parameters.hole_diameter_mm > parameters.leg_thickness_mm - 1) {
+    return "hole_diameter_mm must leave at least 0.5 mm wall in the vertical leg";
+  }
+  if (parameters.hole_diameter_mm >= Math.min(parameters.leg_width_mm, parameters.leg_length_mm * 0.7)) {
+    return "hole_diameter_mm does not fit within the vertical leg";
+  }
+  return null;
 }
 
 export interface DesignRevision {
@@ -35,6 +76,30 @@ export interface BrowserProject {
 }
 
 export type CandidateCommand = Readonly<{ type: "set-leg-length"; value: number }>;
+
+export const PORTABLE_CUSTODY_FORMAT = "piton-custody/v1" as const;
+
+export interface PortableCustodyProject {
+  id: string;
+  name: string;
+  accepted_revision_id: string;
+  current_revision_id: string;
+}
+
+export interface PortableCustodyPacket {
+  format: typeof PORTABLE_CUSTODY_FORMAT;
+  schema_version: number;
+  project: PortableCustodyProject;
+  revisions: DesignRevision[];
+  build_status: unknown;
+  lifecycle_projection: ReadonlyArray<unknown>;
+  environment_digest: string;
+  exported_at: string;
+}
+
+export interface PortableCustodyEnvelope extends PortableCustodyPacket {
+  fingerprint: string;
+}
 
 export interface CadCommandRequest {
   format: "piton-command/v1";
@@ -186,6 +251,15 @@ export function assertRevisionIntegrity(revision: DesignRevision): void {
     || Object.keys(revision.parameters).sort().join("\u0000") !== parameterKeys.join("\u0000")) {
     throw new Error("revision parameter keys are invalid");
   }
+  if (!/^rev-[0-9a-f]{64}$/.test(revision.id)
+    || (revision.parentRevisionId !== null && !/^rev-[0-9a-f]{64}$/.test(revision.parentRevisionId))) {
+    throw new Error("revision identity is invalid");
+  }
+  if (typeof revision.createdAt !== "string" || Number.isNaN(Date.parse(revision.createdAt))) {
+    throw new Error("revision timestamp is invalid");
+  }
+  const parameterError = validateLBracketParameters(revision.parameters);
+  if (parameterError) throw new Error(parameterError);
   if (revision.authorityProfile !== "browser-typescript/v1"
     || revision.reviewState !== "needs_human_review"
     || revision.fabricationRelease !== false
@@ -216,4 +290,229 @@ export function assertProjectIntegrity(project: BrowserProject): void {
   }
   const accepted = project.revisions.find((revision) => revision.id === project.acceptedRevisionId)!;
   if (accepted.parentRevisionId !== null) throw new Error("accepted revision must be a root revision");
+}
+
+// Closed keys for every level of the portable custody envelope. The validator
+// enforces these lists verbatim; any drift is a strict reject.
+const PORTABLE_PACKET_KEYS = [
+  "build_status", "environment_digest", "exported_at", "format",
+  "lifecycle_projection", "project", "revisions", "schema_version",
+].sort();
+const PORTABLE_PROJECT_KEYS = [
+  "accepted_revision_id", "current_revision_id", "id", "name",
+].sort();
+const PORTABLE_REVISION_KEYS = [
+  "authorityProfile", "createdAt", "fabricationRelease", "id",
+  "machineActuation", "parameters", "parentRevisionId", "releaseState",
+  "reviewState",
+].sort();
+const PORTABLE_PARAMETER_KEYS = [
+  "base_length_mm", "base_thickness_mm", "hole_diameter_mm",
+  "leg_length_mm", "leg_thickness_mm", "leg_width_mm",
+].sort();
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+export function assertPortableCustodyPacket(input: unknown): asserts input is PortableCustodyPacket {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("portable custody envelope is not an object");
+  }
+  const record = input as Record<string, unknown>;
+  if (!hasExactKeys(record, PORTABLE_PACKET_KEYS)) {
+    throw new Error("portable custody envelope keys are invalid");
+  }
+  if (record.format !== PORTABLE_CUSTODY_FORMAT) {
+    throw new Error("portable custody format is not piton-custody/v1");
+  }
+  if (!isFiniteNumber(record.schema_version) || !Number.isInteger(record.schema_version)) {
+    throw new Error("portable custody schema_version is not an integer");
+  }
+  if (!record.project || typeof record.project !== "object" || Array.isArray(record.project)) {
+    throw new Error("portable custody project is not an object");
+  }
+  const project = record.project as Record<string, unknown>;
+  if (!hasExactKeys(project, PORTABLE_PROJECT_KEYS)) {
+    throw new Error("portable custody project keys are invalid");
+  }
+  if (!isNonEmptyString(project.id) || !isNonEmptyString(project.name)) {
+    throw new Error("portable custody project identity is invalid");
+  }
+  if (!isNonEmptyString(project.accepted_revision_id) || !isNonEmptyString(project.current_revision_id)) {
+    throw new Error("portable custody project pointer is invalid");
+  }
+  if (!Array.isArray(record.revisions) || record.revisions.length === 0) {
+    throw new Error("portable custody revisions must be a non-empty array");
+  }
+  const revisionIds = new Set<string>();
+  for (const revision of record.revisions) {
+    if (!revision || typeof revision !== "object" || Array.isArray(revision)) {
+      throw new Error("portable custody revision is not an object");
+    }
+    const revRecord = revision as Record<string, unknown>;
+    if (!hasExactKeys(revRecord, PORTABLE_REVISION_KEYS)) {
+      throw new Error("portable custody revision keys are invalid");
+    }
+    if (!revRecord.parameters || typeof revRecord.parameters !== "object" || Array.isArray(revRecord.parameters)) {
+      throw new Error("portable custody revision parameters are not an object");
+    }
+    const params = revRecord.parameters as Record<string, unknown>;
+    if (!hasExactKeys(params, PORTABLE_PARAMETER_KEYS)) {
+      throw new Error("portable custody revision parameter keys are invalid");
+    }
+    if (revisionIds.has(String(revRecord.id))) {
+      throw new Error("portable custody revision identity is duplicated");
+    }
+    revisionIds.add(String(revRecord.id));
+  }
+  for (const revision of record.revisions) {
+    assertRevisionIntegrity(revision as DesignRevision);
+  }
+  if (!revisionIds.has(String(project.accepted_revision_id))) {
+    throw new Error("portable custody accepted revision does not resolve");
+  }
+  if (!revisionIds.has(String(project.current_revision_id))) {
+    throw new Error("portable custody current revision does not resolve");
+  }
+  for (const revision of record.revisions) {
+    const parent = (revision as DesignRevision).parentRevisionId;
+    if (parent !== null && !revisionIds.has(parent)) {
+      throw new Error("portable custody revision parent pointer is invalid");
+    }
+  }
+  const accepted = record.revisions.find(
+    (revision) => (revision as DesignRevision).id === project.accepted_revision_id,
+  ) as DesignRevision;
+  if (accepted.parentRevisionId !== null) {
+    throw new Error("portable custody accepted revision must be a root revision");
+  }
+  if (!isNonEmptyString(record.environment_digest)) {
+    throw new Error("portable custody environment_digest is invalid");
+  }
+  if (!isNonEmptyString(record.exported_at) || Number.isNaN(Date.parse(record.exported_at))) {
+    throw new Error("portable custody exported_at is invalid");
+  }
+  if (!Array.isArray(record.lifecycle_projection)) {
+    throw new Error("portable custody lifecycle_projection must be an array");
+  }
+  const lifecycle = record.lifecycle_projection as LifecycleRecord[];
+  for (const entry of lifecycle) {
+    assertLifecycleRecord(entry);
+    if (entry.projectId !== project.id) throw new Error("lifecycle project authority mismatch");
+    if ("revisionId" in entry && !revisionIds.has(entry.revisionId)) {
+      throw new Error("lifecycle revision reference is missing");
+    }
+    if (entry.kind === "change_proposal" && !revisionIds.has(entry.baseRevisionId)) {
+      throw new Error("lifecycle revision reference is missing");
+    }
+  }
+  const byIdentity = new Map<string, LifecycleRecord>();
+  for (const entry of lifecycle) {
+    if ("id" in entry) {
+      if (byIdentity.has(entry.id)) throw new Error("duplicate lifecycle identity");
+      byIdentity.set(entry.id, entry);
+    }
+  }
+  for (const entry of lifecycle) {
+    if (entry.kind === "proposal_disposition" && byIdentity.get(entry.proposalId)?.kind !== "change_proposal") {
+      throw new Error("proposal disposition reference is missing");
+    }
+    if (entry.kind === "evidence_closure") {
+      const attempt = byIdentity.get(entry.buildAttemptId);
+      if (!attempt || attempt.kind !== "build_attempt" || attempt.state !== "succeeded"
+        || attempt.projectId !== entry.projectId || attempt.revisionId !== entry.revisionId) {
+        throw new Error("evidence build attempt binding is invalid");
+      }
+    }
+    if (entry.kind === "approval_record") {
+      const evidence = byIdentity.get(entry.evidenceClosureId);
+      if (!evidence || evidence.kind !== "evidence_closure"
+        || evidence.projectId !== entry.projectId || evidence.revisionId !== entry.revisionId) {
+        throw new Error("approval evidence binding is invalid");
+      }
+    }
+    if (entry.kind === "draft_export") {
+      const evidence = byIdentity.get(entry.evidenceClosureId);
+      if (!evidence || evidence.kind !== "evidence_closure"
+        || evidence.projectId !== entry.projectId || evidence.revisionId !== entry.revisionId) {
+        throw new Error("draft export evidence binding is invalid");
+      }
+    }
+    if (entry.kind === "fabrication_release") {
+      const approval = byIdentity.get(entry.approvalRecordId);
+      const draft = byIdentity.get(entry.draftExportId);
+      if (!approval || approval.kind !== "approval_record" || approval.projectId !== entry.projectId
+        || approval.revisionId !== entry.revisionId || !draft || draft.kind !== "draft_export"
+        || draft.projectId !== entry.projectId || draft.revisionId !== entry.revisionId
+        || approval.evidenceClosureId !== draft.evidenceClosureId) {
+        throw new Error("fabrication release binding is invalid");
+      }
+    }
+    if (entry.kind === "released_package_projection"
+      && byIdentity.get(entry.fabricationReleaseId)?.kind !== "fabrication_release") {
+      throw new Error("released package reference is missing");
+    }
+  }
+  if (record.build_status !== null && record.build_status !== undefined) {
+    if (typeof record.build_status !== "object" || Array.isArray(record.build_status)) {
+      throw new Error("portable custody build_status is invalid");
+    }
+    const status = record.build_status as Record<string, unknown>;
+    if (!hasExactKeys(status, ["projectId", "requestId", "binding", "state", "message"])
+      || status.projectId !== project.id) {
+      throw new Error("build status project authority mismatch");
+    }
+    if (!Number.isInteger(status.requestId) || Number(status.requestId) < 0
+      || !["idle", "previewing", "ready", "failed"].includes(String(status.state))
+      || typeof status.message !== "string"
+      || !status.binding || typeof status.binding !== "object" || Array.isArray(status.binding)) {
+      throw new Error("portable custody build_status is invalid");
+    }
+    const binding = status.binding as Record<string, unknown>;
+    if (!hasExactKeys(binding, ["baseRevisionId", "previewDigest"])
+      || binding.baseRevisionId !== project.current_revision_id
+      || (binding.previewDigest !== project.current_revision_id
+        && !/^preview-[0-9a-f]{64}$/.test(String(binding.previewDigest)))) {
+      throw new Error("build status binding is invalid");
+    }
+  }
+}
+
+// Deterministic canonical JSON used for the portable custody fingerprint.
+// The same algorithm is intentionally reused for the command envelope to keep
+// the canonicalization surface closed; portable custody never reuses the
+// command-specific shape, only the key-sorting and NFC string normalization.
+export function canonicalPortableCustodyJson(packet: PortableCustodyPacket): string {
+  return `${JSON.stringify(canonicalPortableCustodyValue(packet))}\n`;
+}
+
+function canonicalPortableCustodyValue(value: unknown): unknown {
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new Error("portable custody canonical JSON rejects non-finite numbers");
+    return value;
+  }
+  if (typeof value === "string") return value.normalize("NFC");
+  if (Array.isArray(value)) return value.map(canonicalPortableCustodyValue);
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const output: Record<string, unknown> = {};
+    for (const key of Object.keys(record).sort()) {
+      if (record[key] === undefined) throw new Error("portable custody canonical JSON rejects undefined values");
+      output[key.normalize("NFC")] = canonicalPortableCustodyValue(record[key]);
+    }
+    return output;
+  }
+  throw new Error("portable custody canonical JSON value is unsupported");
 }

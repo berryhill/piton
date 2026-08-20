@@ -39,6 +39,8 @@ Open the URL printed by Vite (normally `http://127.0.0.1:5173`). The server supp
 6. Commit the candidate. Confirm the accepted revision ID remains unchanged.
 7. Reload. Confirm the candidate and parameter value reopen from SQLite WASM OPFS.
 8. Confirm `fabrication_release` and `machine_actuation` remain false.
+9. Click "Export portable custody" in the model panel; capture the downloaded `.piton-custody.json` file.
+10. Click "Import into fresh custody…", select the packet on the isolated import screen, and retain the generated `?mode=reopen&ns=<uuid>` URL. Commit another bounded change, reload that exact URL, and confirm the imported project, new candidate, accepted revision ID, and root truth reopen from their dedicated OPFS namespace.
 
 ## Verification
 

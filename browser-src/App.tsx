@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { BrowserProject, DesignRevision } from "./domain";
 import type { BuildStatus, CadApplication } from "./application";
 import Viewport from "./components/Viewport";
 import type { MeshBounds } from "./geometry/view";
 import { reviewDistanceMm } from "./geometry/view";
 import { durableGeometryStatusLabel } from "./geometry/binding";
+import type { StartupMode } from "./startup";
 import "./styles.css";
 
-interface Props { application: CadApplication; geometryDisabled?: boolean; }
+interface Props { application: CadApplication; geometryDisabled?: boolean; startupMode?: StartupMode; }
 
 type FixtureKind = "part" | "assembly";
 type SelectionMode = "smart" | "face" | "component";
@@ -21,7 +22,13 @@ const SEMANTIC_SELECTIONS: ReadonlyArray<{ id: SemanticSelectionId; label: strin
   { id: "mate:review-only", label: "Review mate" },
 ];
 
-export default function App({ application, geometryDisabled }: Props) {
+function derivePortableCustodyFilename(name: string, fingerprint: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "piton-project";
+  const tag = fingerprint.replace(/^sha256-/, "").slice(0, 12);
+  return `${slug}-${tag}.piton-custody.json`;
+}
+
+export default function App({ application, geometryDisabled, startupMode = "open-or-seed" }: Props) {
   const [project, setProject] = useState<BrowserProject | null>(null);
   const [value, setValue] = useState(80);
   const [message, setMessage] = useState("Opening browser-local custody…");
@@ -33,15 +40,22 @@ export default function App({ application, geometryDisabled }: Props) {
   const [currentSelection, setCurrentSelection] = useState<SemanticSelectionId | null>(null);
   const [attachedContext, setAttachedContext] = useState<{ id: SemanticSelectionId; label: string; revisionId: string } | null>(null);
   const [measurementMm, setMeasurementMm] = useState<number | null>(null);
+  const [portableBusy, setPortableBusy] = useState(false);
+  const [portableError, setPortableError] = useState<string | null>(null);
+  const portableFileInput = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => { void (async () => {
     try {
-      const opened = await application.open();
+      const opened = await application.open(startupMode);
+      if (!opened) {
+        setMessage("Import portable custody into fresh browser storage");
+        return;
+      }
       setProject(opened.project); setDurableBuildStatus(opened.buildStatus);
       setValue(opened.project.revisions.find((r) => r.id === opened.project.currentRevisionId)!.parameters.leg_length_mm);
       setMessage(`Reopened from ${opened.persistenceLabel}`);
     } catch (error) { setMessage(`Persistence unavailable: ${error instanceof Error ? error.message : "unknown error"}`); }
-  })(); }, [application]);
+  })(); }, [application, startupMode]);
 
   const current = project?.revisions.find((revision) => revision.id === project.currentRevisionId) ?? null;
   const accepted = project?.revisions.find((revision) => revision.id === project.acceptedRevisionId) ?? null;
@@ -101,6 +115,105 @@ export default function App({ application, geometryDisabled }: Props) {
     }
   }
 
+  async function exportPortableCustody() {
+    if (!project) return;
+    setPortableBusy(true);
+    setPortableError(null);
+    try {
+      const envelope = await application.exportPortableCustody();
+      const text = `${JSON.stringify(envelope, null, 2)}\n`;
+      const blob = new Blob([text], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = derivePortableCustodyFilename(project.name, envelope.fingerprint);
+      anchor.dataset.testid = "portable-custody-download";
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+      setMessage(`Portable custody exported · ${anchor.download}`);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "unknown error";
+      setPortableError(reason);
+      setMessage(`Portable custody export failed: ${reason}`);
+    } finally {
+      setPortableBusy(false);
+    }
+  }
+
+  async function importPortableCustody(text: string) {
+    if (!text) {
+      setPortableError("portable custody file is empty");
+      setMessage("Portable custody import failed: portable custody file is empty");
+      return;
+    }
+    setPortableBusy(true);
+    setPortableError(null);
+    try {
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const fingerprint = typeof parsed.fingerprint === "string" ? parsed.fingerprint : "";
+      if (!fingerprint) throw new Error("portable custody envelope is missing fingerprint");
+      const snapshot = await application.reopenPortableCustody(parsed, fingerprint);
+      setProject(snapshot.project);
+      setDurableBuildStatus(snapshot.buildStatus);
+      const authoritativeCurrent = snapshot.project.revisions.find((revision) => revision.id === snapshot.project.currentRevisionId)!;
+      setValue(authoritativeCurrent.parameters.leg_length_mm);
+      setAttachedContext(null);
+      setMeasurementMm(null);
+      setMessage(`Reopened from portable custody · ${snapshot.project.name}`);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "unknown error";
+      setPortableError(reason);
+      setMessage(`Portable custody import failed: ${reason}`);
+    } finally {
+      setPortableBusy(false);
+    }
+  }
+
+  async function importPortableCustodyFromFile(file: File) {
+    await importPortableCustody(await file.text());
+  }
+
+  async function importPortableCustodyFromClipboard() {
+    if (!navigator.clipboard?.readText) {
+      setPortableError("clipboard paste is not available in this browser context");
+      setMessage("Portable custody import failed: clipboard paste is not available in this browser context");
+      return;
+    }
+    try {
+      await importPortableCustody(await navigator.clipboard.readText());
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "unknown error";
+      setPortableError(reason);
+      setMessage(`Portable custody import failed: ${reason}`);
+    }
+  }
+
+  if (!project && startupMode === "import-fresh") return <main className="loading">
+    <h1>Piton</h1>
+    <p>{message}</p>
+    <button data-testid="portable-custody-import-file" disabled={portableBusy} onClick={() => portableFileInput.current?.click()}>
+      Select portable custody file…
+    </button>
+    <button data-testid="portable-custody-import-clipboard" disabled={portableBusy} onClick={() => void importPortableCustodyFromClipboard()}>
+      Import from clipboard
+    </button>
+    <input
+      ref={portableFileInput}
+      type="file"
+      accept=".json,application/json"
+      data-testid="portable-custody-file-input"
+      style={{ display: "none" }}
+      onChange={(event) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (file) void importPortableCustodyFromFile(file);
+      }}
+    />
+    {portableError ? <p className="portable-error" data-testid="portable-custody-error" role="alert">Portable custody error: {portableError}</p> : null}
+    <small>Fresh namespace only · review-only · unreleased · no machine actuation.</small>
+  </main>;
   if (!project || !current || !accepted) return <main className="loading"><h1>Piton</h1><p>{message}</p></main>;
   return <main>
     <header><div><span className="eyebrow">BROWSER-LOCAL MECHANICAL CAD MVI</span><h1>Piton Workbench</h1></div><div className="truth-badge">REVIEW ONLY · UNRELEASED</div></header>
@@ -151,6 +264,14 @@ export default function App({ application, geometryDisabled }: Props) {
         <Parameter label="Base thickness" value={current.parameters.base_thickness_mm} />
         <Parameter label="Leg thickness" value={current.parameters.leg_thickness_mm} />
         <Parameter label="Hole diameter" value={current.parameters.hole_diameter_mm} />
+        <h2>Portable custody</h2>
+        <p className="muted">Export a self-contained <code>.piton-custody.json</code> file, or open a fresh isolated import namespace. No network calls.</p>
+        <div className="context-actions">
+          <button data-testid="portable-custody-export" disabled={portableBusy} onClick={() => void exportPortableCustody()}>Export portable custody</button>
+          <button data-testid="portable-custody-start-import" disabled={portableBusy} onClick={() => window.location.assign("?mode=import")}>Import into fresh custody…</button>
+        </div>
+        {portableError ? <p className="portable-error" data-testid="portable-custody-error" role="alert">Portable custody error: {portableError}</p> : null}
+        <small className="identity-note">Portable custody is a closed browser-typescript/v1 derivative. It does not carry Manifold review meshes, exact B-rep, approval, release, fabrication, or machine actuation authority.</small>
       </aside>
       <section className="canvas"><Viewport
         parameters={(previewParameters ?? current.parameters) as DesignRevision["parameters"]}
