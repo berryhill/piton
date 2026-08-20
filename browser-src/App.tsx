@@ -5,9 +5,10 @@ import Viewport from "./components/Viewport";
 import type { MeshBounds } from "./geometry/view";
 import { reviewDistanceMm } from "./geometry/view";
 import { durableGeometryStatusLabel } from "./geometry/binding";
+import type { StartupMode } from "./startup";
 import "./styles.css";
 
-interface Props { application: CadApplication; geometryDisabled?: boolean; }
+interface Props { application: CadApplication; geometryDisabled?: boolean; startupMode?: StartupMode; }
 
 type FixtureKind = "part" | "assembly";
 type SelectionMode = "smart" | "face" | "component";
@@ -27,7 +28,7 @@ function derivePortableCustodyFilename(name: string, fingerprint: string): strin
   return `${slug}-${tag}.piton-custody.json`;
 }
 
-export default function App({ application, geometryDisabled }: Props) {
+export default function App({ application, geometryDisabled, startupMode = "open-or-seed" }: Props) {
   const [project, setProject] = useState<BrowserProject | null>(null);
   const [value, setValue] = useState(80);
   const [message, setMessage] = useState("Opening browser-local custody…");
@@ -41,17 +42,20 @@ export default function App({ application, geometryDisabled }: Props) {
   const [measurementMm, setMeasurementMm] = useState<number | null>(null);
   const [portableBusy, setPortableBusy] = useState(false);
   const [portableError, setPortableError] = useState<string | null>(null);
-  const [portableDropActive, setPortableDropActive] = useState(false);
   const portableFileInput = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => { void (async () => {
     try {
-      const opened = await application.open();
+      const opened = await application.open(startupMode);
+      if (!opened) {
+        setMessage("Import portable custody into fresh browser storage");
+        return;
+      }
       setProject(opened.project); setDurableBuildStatus(opened.buildStatus);
       setValue(opened.project.revisions.find((r) => r.id === opened.project.currentRevisionId)!.parameters.leg_length_mm);
       setMessage(`Reopened from ${opened.persistenceLabel}`);
     } catch (error) { setMessage(`Persistence unavailable: ${error instanceof Error ? error.message : "unknown error"}`); }
-  })(); }, [application]);
+  })(); }, [application, startupMode]);
 
   const current = project?.revisions.find((revision) => revision.id === project.currentRevisionId) ?? null;
   const accepted = project?.revisions.find((revision) => revision.id === project.acceptedRevisionId) ?? null;
@@ -186,14 +190,30 @@ export default function App({ application, geometryDisabled }: Props) {
     }
   }
 
-  function onPortableDrop(event: React.DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    setPortableDropActive(false);
-    const file = event.dataTransfer.files[0];
-    if (!file) return;
-    void importPortableCustodyFromFile(file);
-  }
-
+  if (!project && startupMode === "import-fresh") return <main className="loading">
+    <h1>Piton</h1>
+    <p>{message}</p>
+    <button data-testid="portable-custody-import-file" disabled={portableBusy} onClick={() => portableFileInput.current?.click()}>
+      Select portable custody file…
+    </button>
+    <button data-testid="portable-custody-import-clipboard" disabled={portableBusy} onClick={() => void importPortableCustodyFromClipboard()}>
+      Import from clipboard
+    </button>
+    <input
+      ref={portableFileInput}
+      type="file"
+      accept=".json,application/json"
+      data-testid="portable-custody-file-input"
+      style={{ display: "none" }}
+      onChange={(event) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (file) void importPortableCustodyFromFile(file);
+      }}
+    />
+    {portableError ? <p className="portable-error" data-testid="portable-custody-error" role="alert">Portable custody error: {portableError}</p> : null}
+    <small>Fresh namespace only · review-only · unreleased · no machine actuation.</small>
+  </main>;
   if (!project || !current || !accepted) return <main className="loading"><h1>Piton</h1><p>{message}</p></main>;
   return <main>
     <header><div><span className="eyebrow">BROWSER-LOCAL MECHANICAL CAD MVI</span><h1>Piton Workbench</h1></div><div className="truth-badge">REVIEW ONLY · UNRELEASED</div></header>
@@ -245,32 +265,10 @@ export default function App({ application, geometryDisabled }: Props) {
         <Parameter label="Leg thickness" value={current.parameters.leg_thickness_mm} />
         <Parameter label="Hole diameter" value={current.parameters.hole_diameter_mm} />
         <h2>Portable custody</h2>
-        <p className="muted">Export & import a self-contained <code>.piton-custody.json</code> file. No network calls.</p>
+        <p className="muted">Export a self-contained <code>.piton-custody.json</code> file, or open a fresh isolated import namespace. No network calls.</p>
         <div className="context-actions">
           <button data-testid="portable-custody-export" disabled={portableBusy} onClick={() => void exportPortableCustody()}>Export portable custody</button>
-          <button data-testid="portable-custody-import-file" disabled={portableBusy} onClick={() => portableFileInput.current?.click()}>Import portable custody…</button>
-          <button data-testid="portable-custody-import-clipboard" disabled={portableBusy} onClick={() => void importPortableCustodyFromClipboard()}>Import from clipboard</button>
-        </div>
-        <input
-          ref={portableFileInput}
-          type="file"
-          accept=".json,application/json"
-          data-testid="portable-custody-file-input"
-          style={{ display: "none" }}
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            event.target.value = "";
-            if (file) void importPortableCustodyFromFile(file);
-          }}
-        />
-        <div
-          className={`portable-dropzone${portableDropActive ? " drop-active" : ""}`}
-          data-testid="portable-custody-dropzone"
-          onDragOver={(event) => { event.preventDefault(); setPortableDropActive(true); }}
-          onDragLeave={() => setPortableDropActive(false)}
-          onDrop={onPortableDrop}
-        >
-          <span>Drop a <code>.piton-custody.json</code> file here to reopen the workbench.</span>
+          <button data-testid="portable-custody-start-import" disabled={portableBusy} onClick={() => window.location.assign("?mode=import")}>Import into fresh custody…</button>
         </div>
         {portableError ? <p className="portable-error" data-testid="portable-custody-error" role="alert">Portable custody error: {portableError}</p> : null}
         <small className="identity-note">Portable custody is a closed browser-typescript/v1 derivative. It does not carry Manifold review meshes, exact B-rep, approval, release, fabrication, or machine actuation authority.</small>

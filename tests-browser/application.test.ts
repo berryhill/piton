@@ -190,6 +190,33 @@ describe("CadApplication browser authority boundary", () => {
     expect(restored.project.revisions.map((revision) => revision.id)).toEqual(sourceAfter.revisions.map((revision) => revision.id));
   });
 
+  it("keeps memory custody unchanged when late lifecycle validation rejects import", async () => {
+    const repository = new MemoryProjectRepository();
+    const application = new CadApplication(repository);
+    const opened = await application.open();
+    const envelope = await application.exportPortableCustody();
+    const { fingerprint: _oldFingerprint, ...packet } = {
+      ...envelope,
+      lifecycle_projection: [{
+        kind: "fabrication_release",
+        id: `release-${"1".repeat(64)}`,
+        projectId: opened.project.id,
+        revisionId: opened.project.currentRevisionId,
+        approvalRecordId: `approval-${"2".repeat(64)}`,
+        draftExportId: `export-${"3".repeat(64)}`,
+        fabricationRelease: true,
+        machineActuation: false,
+        createdAt: "2026-08-20T00:00:00.000Z",
+      }],
+    };
+    const fingerprint = await repository.portableCustodyFingerprint(packet);
+
+    await expect(application.reopenPortableCustody({ ...packet, fingerprint }, fingerprint)).rejects.toThrow(
+      "lifecycle root truth is invalid",
+    );
+    expect(await application.loadProject()).toEqual(opened.project);
+  });
+
   it("keeps the portable custody authority inside the closed CadApplication surface", () => {
     const appSource = source("../browser-src/application.ts");
     const appFile = source("../browser-src/App.tsx");

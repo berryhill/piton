@@ -78,50 +78,73 @@ test("seeded edit preview commit and OPFS reload remain unreleased", async ({ pa
   await expect(page.locator(".viewport-status")).toContainText("CAD Z-min 0 on grid");
 });
 
-test("round-trips portable custody through export, drop, paste, and reload in Chromium", async ({ page, context }) => {
+test("imports into a fresh bounded OPFS namespace, commits, and reopens that exact custody", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
-  const acceptedId = await page.locator(".state-card code").first().textContent();
   const input = page.getByLabel("Leg length (mm)");
-  const newValue = 132;
-  await input.fill(String(newValue));
-  await expect(page.getByText("80 mm → 132 mm")).toBeVisible();
+  await input.fill("132");
   await page.getByRole("button", { name: "Commit candidate" }).click();
   await expect(page.getByText("Candidate committed locally")).toBeVisible();
-  const committedValue = await input.inputValue();
-  expect(committedValue).toBe(String(newValue));
 
   const exportedEnvelope = await page.evaluate(async () => {
     const module = await import("../../browser-src/application");
     const { openProjectRepository } = await import("../../browser-src/storage/repository");
-    const repository = await openProjectRepository();
+    const repository = await openProjectRepository("piton");
     const application = new module.CadApplication(repository);
     await application.open();
     return application.exportPortableCustody();
   });
-  expect(exportedEnvelope.format).toBe("piton-custody/v1");
-  expect(exportedEnvelope.fingerprint).toMatch(/^sha256-[0-9a-f]{64}$/);
-  expect(exportedEnvelope.project.current_revision_id).toMatch(/^rev-[0-9a-f]{64}$/);
 
-  await context.clearCookies();
-  await page.goto("/");
-  await expect(page.getByText("Reopened from SQLite WASM · OPFS")).toBeVisible();
-  await expect(page.getByLabel("Leg length (mm)")).toHaveValue(String(newValue));
+  await page.goto("/?mode=import");
+  await expect(page.getByText("Import portable custody into fresh browser storage")).toBeVisible();
+  const forgedEnvelope = await page.evaluate(async (envelope) => {
+    const { canonicalPortableCustodyJson, sha256Hex } = await import("../../browser-src/domain");
+    const { fingerprint: _fingerprint, ...packet } = envelope;
+    packet.lifecycle_projection = [{
+      kind: "fabrication_release",
+      id: `release-${"1".repeat(64)}`,
+      projectId: packet.project.id,
+      revisionId: packet.project.current_revision_id,
+      approvalRecordId: `approval-${"2".repeat(64)}`,
+      draftExportId: `export-${"3".repeat(64)}`,
+      fabricationRelease: true,
+      machineActuation: false,
+      createdAt: "2026-08-20T00:00:00.000Z",
+    }];
+    return { ...packet, fingerprint: `sha256-${sha256Hex(canonicalPortableCustodyJson(packet))}` };
+  }, exportedEnvelope);
+  await page.getByTestId("portable-custody-file-input").setInputFiles({
+    name: "unsafe.piton-custody.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(forgedEnvelope)),
+  });
+  await expect(page.getByTestId("portable-custody-error")).toContainText("lifecycle root truth is invalid");
 
-  await page.getByTestId("portable-custody-import-clipboard").evaluate(async (button: HTMLButtonElement, text: string) => {
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { readText: () => Promise.resolve(text) },
-    });
-    button.click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }, JSON.stringify(exportedEnvelope));
+  await page.getByTestId("portable-custody-file-input").setInputFiles({
+    name: "portable.piton-custody.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(exportedEnvelope)),
+  });
   await expect(page.getByText(/Reopened from portable custody/)).toBeVisible();
-  await expect(page.getByLabel("Leg length (mm)")).toHaveValue(String(newValue));
-  await expect(page.locator(".state-card code").first()).toHaveText(acceptedId!);
+  await expect(page.getByLabel("Leg length (mm)")).toHaveValue("132");
+  const reopenUrl = page.url();
+  expect(reopenUrl).toMatch(/\?mode=reopen&ns=[0-9a-f-]{36}$/);
+
+  await page.getByLabel("Leg length (mm)").fill("133");
+  await page.getByRole("button", { name: "Commit candidate" }).click();
+  await expect(page.getByText("Candidate committed locally")).toBeVisible();
+  await page.goto(reopenUrl);
+  await expect(page.getByText("Reopened from SQLite WASM · OPFS")).toBeVisible();
+  await expect(page.getByLabel("Leg length (mm)")).toHaveValue("133");
   await expect(page.getByTestId("fabrication-release")).toHaveText("false");
   await expect(page.getByTestId("machine-actuation")).toHaveText("false");
   await expect(page.locator(".viewport-status")).toContainText("CAD Z-min 0 on grid");
+});
+
+test("malformed reopen namespace fails visibly before any database opens", async ({ page }) => {
+  await page.goto("/?mode=reopen&ns=../../piton");
+  await expect(page.getByRole("heading", { name: "Piton failed to open" })).toBeVisible();
+  await expect(page.getByText("invalid import namespace")).toBeVisible();
 });
 
 test("SQLite WASM reports migrated schema and direct durable readback", async ({ page }) => {

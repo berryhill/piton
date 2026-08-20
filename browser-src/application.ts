@@ -1,3 +1,4 @@
+import type { StartupMode } from "./startup";
 import type { BrowserProject, CadCommandReceipt, CadCommandRequest, CandidateCommand, PortableCustodyEnvelope } from "./domain";
 import { assertPortableCustodyPacket, sha256Hex } from "./domain";
 import type { BuildStatus, ProjectRepository } from "./storage/repository";
@@ -20,8 +21,19 @@ export class CadApplication {
 
   constructor(private readonly repository: ProjectRepository) {}
 
-  async open(): Promise<CadApplicationSnapshot> {
-    const project = await this.repository.initialize();
+  async open(): Promise<CadApplicationSnapshot>;
+  async open(mode: "open-or-seed" | "reopen-existing"): Promise<CadApplicationSnapshot>;
+  async open(mode: "import-fresh"): Promise<null>;
+  async open(mode: StartupMode): Promise<CadApplicationSnapshot | null>;
+  async open(mode: StartupMode = "open-or-seed"): Promise<CadApplicationSnapshot | null> {
+    if (mode === "import-fresh") {
+      if (await this.repository.load()) throw new Error("fresh import namespace is not empty");
+      return null;
+    }
+    const project = mode === "reopen-existing"
+      ? await this.repository.load()
+      : await this.repository.initialize();
+    if (!project) throw new Error("import namespace has no custody");
     return {
       project,
       buildStatus: await this.repository.loadBuildStatus(project.id),

@@ -56,6 +56,7 @@ describe("geometry result admission", () => {
       { ...protocolRequest(), inputDigest: "not-a-digest" },
       { ...protocolRequest(), parameters: { ...base.parameters, leg_length_mm: Number.NaN } },
       { ...protocolRequest(), parameters: { ...base.parameters, leg_length_mm: 999 } },
+      { ...protocolRequest(), parameters: { ...base.parameters, hole_diameter_mm: 20 } },
       { ...protocolRequest(), sourceRevisionId: "rev-" + "0".repeat(64) },
       { ...protocolRequest(), inputDigest: geometryInputDigest({ ...base.parameters, leg_length_mm: 90 }) },
     ]) {

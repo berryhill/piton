@@ -165,10 +165,15 @@ export function assertLifecycleRecord(record: LifecycleRecord): void {
       break;
     case "evidence_closure":
       identity(record.id, "evidence"); revision(record.revisionId); identity(record.buildAttemptId, "attempt");
-      if (!record.requirementIds.length || new Set(record.requirementIds).size !== record.requirementIds.length) {
+      if (!Array.isArray(record.requirementIds) || !record.requirementIds.length
+        || record.requirementIds.some((value) => typeof value !== "string" || !value)
+        || new Set(record.requirementIds).size !== record.requirementIds.length) {
         throw new Error("evidence requirements are invalid");
       }
-      if (!record.artifactDigests.length) throw new Error("evidence artifacts are invalid");
+      if (!Array.isArray(record.artifactDigests) || !record.artifactDigests.length
+        || record.artifactDigests.some((value) => typeof value !== "string")) {
+        throw new Error("evidence artifacts are invalid");
+      }
       record.artifactDigests.forEach((value) => digest(value, "artifact digest"));
       break;
     case "channel_pointer":

@@ -1,3 +1,6 @@
+import type { LifecycleRecord } from "./lifecycle";
+import { assertLifecycleRecord } from "./lifecycle";
+
 export const SAFETY_TRUTH = Object.freeze({
   reviewState: "needs_human_review" as const,
   fabricationRelease: false as const,
@@ -12,6 +15,44 @@ export interface LBracketParameters {
   base_thickness_mm: number;
   leg_thickness_mm: number;
   hole_diameter_mm: number;
+}
+
+export function validateLBracketParameters(value: Readonly<object>): string | null {
+  const input = value as Readonly<Record<string, unknown>>;
+  const bounds: Readonly<Record<keyof LBracketParameters, readonly [number, number]>> = {
+    leg_length_mm: [40, 160],
+    leg_width_mm: [5, 300],
+    base_length_mm: [5, 300],
+    base_thickness_mm: [1, 50],
+    leg_thickness_mm: [1.5, 50],
+    hole_diameter_mm: [0.5, 49],
+  };
+  for (const key of Object.keys(bounds) as (keyof LBracketParameters)[]) {
+    const parameter = input[key];
+    if (typeof parameter !== "number" || !Number.isFinite(parameter) || parameter <= 0) {
+      return `revision parameter ${key} is invalid`;
+    }
+    const [minimum, maximum] = bounds[key];
+    if (parameter < minimum || parameter > maximum) {
+      return key === "leg_length_mm"
+        ? "leg_length_mm must be between 40 and 160 mm"
+        : `${key} must be between ${minimum} and ${maximum} mm`;
+    }
+  }
+  const parameters = value as unknown as LBracketParameters;
+  if (parameters.base_thickness_mm >= parameters.leg_length_mm) {
+    return "base_thickness_mm must be less than leg_length_mm";
+  }
+  if (parameters.leg_thickness_mm >= parameters.base_length_mm) {
+    return "leg_thickness_mm must be less than base_length_mm";
+  }
+  if (parameters.hole_diameter_mm > parameters.leg_thickness_mm - 1) {
+    return "hole_diameter_mm must leave at least 0.5 mm wall in the vertical leg";
+  }
+  if (parameters.hole_diameter_mm >= Math.min(parameters.leg_width_mm, parameters.leg_length_mm * 0.7)) {
+    return "hole_diameter_mm does not fit within the vertical leg";
+  }
+  return null;
 }
 
 export interface DesignRevision {
@@ -210,6 +251,15 @@ export function assertRevisionIntegrity(revision: DesignRevision): void {
     || Object.keys(revision.parameters).sort().join("\u0000") !== parameterKeys.join("\u0000")) {
     throw new Error("revision parameter keys are invalid");
   }
+  if (!/^rev-[0-9a-f]{64}$/.test(revision.id)
+    || (revision.parentRevisionId !== null && !/^rev-[0-9a-f]{64}$/.test(revision.parentRevisionId))) {
+    throw new Error("revision identity is invalid");
+  }
+  if (typeof revision.createdAt !== "string" || Number.isNaN(Date.parse(revision.createdAt))) {
+    throw new Error("revision timestamp is invalid");
+  }
+  const parameterError = validateLBracketParameters(revision.parameters);
+  if (parameterError) throw new Error(parameterError);
   if (revision.authorityProfile !== "browser-typescript/v1"
     || revision.reviewState !== "needs_human_review"
     || revision.fabricationRelease !== false
@@ -356,18 +406,86 @@ export function assertPortableCustodyPacket(input: unknown): asserts input is Po
   if (!Array.isArray(record.lifecycle_projection)) {
     throw new Error("portable custody lifecycle_projection must be an array");
   }
-  for (const record2 of record.lifecycle_projection) {
-    if (!record2 || typeof record2 !== "object" || Array.isArray(record2)) {
-      throw new Error("portable custody lifecycle record is not an object");
+  const lifecycle = record.lifecycle_projection as LifecycleRecord[];
+  for (const entry of lifecycle) {
+    assertLifecycleRecord(entry);
+    if (entry.projectId !== project.id) throw new Error("lifecycle project authority mismatch");
+    if ("revisionId" in entry && !revisionIds.has(entry.revisionId)) {
+      throw new Error("lifecycle revision reference is missing");
     }
-    const entry = record2 as Record<string, unknown>;
-    if (!isNonEmptyString(entry.kind)) {
-      throw new Error("portable custody lifecycle record kind is missing");
+    if (entry.kind === "change_proposal" && !revisionIds.has(entry.baseRevisionId)) {
+      throw new Error("lifecycle revision reference is missing");
     }
   }
-  if (record.build_status !== null && record.build_status !== undefined
-    && (typeof record.build_status !== "object" || Array.isArray(record.build_status))) {
-    throw new Error("portable custody build_status is invalid");
+  const byIdentity = new Map<string, LifecycleRecord>();
+  for (const entry of lifecycle) {
+    if ("id" in entry) {
+      if (byIdentity.has(entry.id)) throw new Error("duplicate lifecycle identity");
+      byIdentity.set(entry.id, entry);
+    }
+  }
+  for (const entry of lifecycle) {
+    if (entry.kind === "proposal_disposition" && byIdentity.get(entry.proposalId)?.kind !== "change_proposal") {
+      throw new Error("proposal disposition reference is missing");
+    }
+    if (entry.kind === "evidence_closure") {
+      const attempt = byIdentity.get(entry.buildAttemptId);
+      if (!attempt || attempt.kind !== "build_attempt" || attempt.state !== "succeeded"
+        || attempt.projectId !== entry.projectId || attempt.revisionId !== entry.revisionId) {
+        throw new Error("evidence build attempt binding is invalid");
+      }
+    }
+    if (entry.kind === "approval_record") {
+      const evidence = byIdentity.get(entry.evidenceClosureId);
+      if (!evidence || evidence.kind !== "evidence_closure"
+        || evidence.projectId !== entry.projectId || evidence.revisionId !== entry.revisionId) {
+        throw new Error("approval evidence binding is invalid");
+      }
+    }
+    if (entry.kind === "draft_export") {
+      const evidence = byIdentity.get(entry.evidenceClosureId);
+      if (!evidence || evidence.kind !== "evidence_closure"
+        || evidence.projectId !== entry.projectId || evidence.revisionId !== entry.revisionId) {
+        throw new Error("draft export evidence binding is invalid");
+      }
+    }
+    if (entry.kind === "fabrication_release") {
+      const approval = byIdentity.get(entry.approvalRecordId);
+      const draft = byIdentity.get(entry.draftExportId);
+      if (!approval || approval.kind !== "approval_record" || approval.projectId !== entry.projectId
+        || approval.revisionId !== entry.revisionId || !draft || draft.kind !== "draft_export"
+        || draft.projectId !== entry.projectId || draft.revisionId !== entry.revisionId
+        || approval.evidenceClosureId !== draft.evidenceClosureId) {
+        throw new Error("fabrication release binding is invalid");
+      }
+    }
+    if (entry.kind === "released_package_projection"
+      && byIdentity.get(entry.fabricationReleaseId)?.kind !== "fabrication_release") {
+      throw new Error("released package reference is missing");
+    }
+  }
+  if (record.build_status !== null && record.build_status !== undefined) {
+    if (typeof record.build_status !== "object" || Array.isArray(record.build_status)) {
+      throw new Error("portable custody build_status is invalid");
+    }
+    const status = record.build_status as Record<string, unknown>;
+    if (!hasExactKeys(status, ["projectId", "requestId", "binding", "state", "message"])
+      || status.projectId !== project.id) {
+      throw new Error("build status project authority mismatch");
+    }
+    if (!Number.isInteger(status.requestId) || Number(status.requestId) < 0
+      || !["idle", "previewing", "ready", "failed"].includes(String(status.state))
+      || typeof status.message !== "string"
+      || !status.binding || typeof status.binding !== "object" || Array.isArray(status.binding)) {
+      throw new Error("portable custody build_status is invalid");
+    }
+    const binding = status.binding as Record<string, unknown>;
+    if (!hasExactKeys(binding, ["baseRevisionId", "previewDigest"])
+      || binding.baseRevisionId !== project.current_revision_id
+      || (binding.previewDigest !== project.current_revision_id
+        && !/^preview-[0-9a-f]{64}$/.test(String(binding.previewDigest)))) {
+      throw new Error("build status binding is invalid");
+    }
   }
 }
 
