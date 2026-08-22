@@ -1,34 +1,89 @@
-# Piton runtime operations
+# Piton browser runtime operations
 
-Piton runs entirely in the browser workbench. There is no repository server daemon or external exact-CAD runtime.
+## Operating boundary
 
-## Launch
+Piton runs as a browser-local TypeScript application served by Vite. Authored `DesignRevision` custody stays in SQLite WASM in OPFS. The Manifold WASM Web Worker produces review mesh geometry, which is not exact geometry. There is no repository server daemon, Python runtime, external exact-CAD process, fabrication exporter, release service, or machine interface to operate.
+
+## Prerequisites and launch
+
+Use the repository-pinned toolchain: Node.js 22.22.3 and pnpm 11.1.3. Install dependencies without changing the lockfile, then launch:
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm launch:mvi
 ```
 
-Use the Vite URL printed by the launcher. Cross-origin isolation is required for SQLite WASM OPFS. If OPFS is unavailable, the application must fail visibly rather than create transient writable authority.
+Open the Vite URL printed by the launcher, normally `http://127.0.0.1:5173`. The launcher/Vite headers must provide cross-origin isolation for SQLite WASM OPFS. Treat the visible `Piton failed to open` screen as a failed startup; do not work around it with transient storage.
 
-## Verification
+## Startup modes
+
+`browser-src/startup.ts` admits three modes:
+
+| mode | URL shape | custody behavior |
+| --- | --- | --- |
+| `open-or-seed` | default URL | Opens namespace `piton`; seeds one project only when empty |
+| `import-fresh` | `?mode=import` | Allocates a UUID-derived namespace and waits for a validated packet |
+| `reopen-existing` | `?mode=reopen&ns=<uuid>` | Reopens that exact imported namespace; missing custody fails visibly |
+
+Keep the full reopen URL when working with imported custody. Browser origin changes, profile deletion, site-data deletion, or storage eviction can make OPFS custody unavailable.
+
+## Operator smoke check
+
+1. Confirm the persistence label reads `SQLite WASM · OPFS`.
+2. Confirm the seeded/current Part, accepted revision, and current revision are visible.
+3. Confirm CAD Z=0 sits on the viewer grid/build plane and the bbox/build-volume context is present.
+4. Preview one bounded `leg_length_mm` change between 40 and 160 mm; confirm it says preview-only and not committed.
+5. Commit the candidate; confirm a new immutable `DesignRevision` becomes current while the accepted revision remains unchanged.
+6. Reload the same URL and confirm current revision and parameter read back from OPFS.
+7. Confirm the root truth below remains unchanged.
+
+## Portable custody and restore-forward recovery
+
+Export produces a self-contained UTF-8 `piton-custody/v1` JSON packet. Retain the packet outside the browser profile when it is needed for recovery. The packet includes revisions, accepted/current pointers, optional build status, lifecycle projection, schema/environment metadata, and a SHA-256 fingerprint; it excludes Manifold review meshes and transient viewer state.
+
+Recovery is restore-forward:
+
+1. Open `?mode=import` on the same supported origin.
+2. Select the retained packet through the workbench. The importer verifies the packet's embedded fingerprint against its canonical content; this is integrity evidence, not an independently supplied fingerprint or sender-authentication claim.
+3. Let closed-shape, schema, digest, chain, lifecycle, build-binding, and fixed-safety checks finish.
+4. Retain the generated `?mode=reopen&ns=<uuid>` URL.
+5. Reload that exact URL and confirm direct project/revision readback.
+6. Make later changes as new immutable revisions; never mutate accepted history.
+
+Import writes one validated packet transactionally into an empty namespace. Fingerprint mismatch, unsafe fields, invalid references, stale build binding, unsupported schema, or an occupied namespace fails without partial custody. Export and import make no network calls. A packet is custody data, not approval, exact geometry, fabrication release, or machine instruction.
+
+## Failure response
+
+| Symptom | Operator action | Authority consequence |
+| --- | --- | --- |
+| Cross-origin isolation or OPFS unavailable | Stop; relaunch with `pnpm launch:mvi` on the supported origin | No writable fallback is permitted |
+| SQLite worker startup/migration/readback fails | Preserve the browser profile and error; do not clear site data before retaining any available custody packet | Startup remains failed; no revision is committed |
+| Command reports stale current revision | Reload current custody, inspect the new base, and submit a new bounded command | Failed candidate does not replace current state |
+| Idempotency conflict | Use a new key only for genuinely new command content | Existing receipt/revision remains authoritative |
+| Geometry worker fails or returns stale/malformed output | Keep last-good review geometry, record diagnostics, and retry the preview | No authored revision or review disposition changes |
+| Portable import fails | Preserve the source packet; correct provenance or choose a new fresh import attempt | Existing namespaces are not overwritten |
+| Browser profile/origin custody is lost | Import a retained portable packet into fresh custody | Recovery creates forward custody; it does not rewrite history |
+
+Do not call browser cache clearing, OPFS deletion, editing SQLite directly, or changing current/accepted pointers “rollback.” Accepted history is immutable; corrections use restore-forward.
+
+## Deterministic verification
+
+Install the pinned Playwright Chromium when required, then run the canonical gate:
 
 ```bash
 pnpm exec playwright install chromium
 pnpm verify:mvi
 ```
 
-The command runs type checking, unit/component tests, the production build, and Playwright. A pass is candidate-bound verification evidence only; it is not review acceptance, engineering approval, export, fabrication release, or machine actuation.
+`pnpm verify:mvi` runs TypeScript checking, unit/component tests, a production build, and Playwright. CI runs the same gate with frozen dependencies and read-only repository permission. Record the exact Git candidate SHA with results. A pass is candidate verification evidence only; it does not grant human review acceptance, engineering approval, exact export, fabrication release, or machine actuation.
 
-## Recovery
-
-Browser custody is local to the browser profile and origin. The browser-local SQLite WASM OPFS durable store is the only recovery surface implemented in Stage 1: the workbench reopens the existing SQLite project on `application.open()` and additionally exposes a closed portable custody contract under format `piton-custody/v1`. The portable custody packet is a self-contained UTF-8 JSON document that carries the immutable `DesignRevision` chain, the project's accepted/current pointers, an optional `build_status` snapshot bound to that chain, and a frozen lifecycle projection. It does not carry Manifold review meshes or transient viewer state. Every revision must have valid bounded parameters, a valid timestamp, fixed review-only safety truth, and `id === rev-{sha256(canonicalRevisionBody)}`. Lifecycle records are closed-shape validated, project/revision/reference bound, and pinned to false fabrication/machine truth. Optional build status must bind to the imported project and current revision. The expected packet fingerprint (sha256 of canonical JSON) must match before admission. Import is fresh-custody only: `?mode=import` allocates a bounded UUID-derived OPFS namespace, rejects any unsafe packet without mutating it, writes one valid packet transactionally, and installs a stable `?mode=reopen&ns=<uuid>` URL. Later commits and reloads use that same imported authority; existing OPFS custody is never overwritten. Export and import make zero network calls and surface named, visible failures. Accepted revision history is immutable; recovery is restore-forward, never mutation of accepted history. Failed or stale candidates cannot replace accepted or last-good state.
-
-## Root truth
+## Root truth and escalation
 
 ```text
-review_state = needs_human_review
-fabrication_release = false
-machine_actuation = false
-release_state = unreleased
+review_state=needs_human_review
+fabrication_release=false
+machine_actuation=false
+release_state=unreleased
 ```
+
+Stop and escalate rather than improvise if custody integrity is ambiguous, a secret appears, review geometry is represented as exact, a release-critical reference is ambiguous, or any request attempts to bypass human review or enable fabrication/machine authority.
