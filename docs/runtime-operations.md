@@ -77,6 +77,8 @@ pnpm verify:mvi
 
 `pnpm verify:mvi` runs TypeScript checking, unit/component tests, a production build, and Playwright. CI runs the same gate with frozen dependencies and read-only repository permission. Record the exact Git candidate SHA with results. A pass is candidate verification evidence only; it does not grant human review acceptance, engineering approval, exact export, fabrication release, or machine actuation.
 
+The anti-regression gate list in `tests-browser/e2e/anti-regression-gates.spec.ts` and the permanence meta-gate in `tests-browser/anti-regression-gates-meta.test.ts` exist only to make `pnpm verify:mvi` the sole verification entry point and to fail closed if the gate spec is removed, skipped, or shielded by `playwright.config.ts` overrides.
+
 ## Root truth and escalation
 
 ```text
