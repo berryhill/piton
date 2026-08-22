@@ -30,6 +30,13 @@ Ordered steps:
 prepare_feature_worktree → understand → inspect → trace → implement_minimally → test_the_behavior → diagnose_and_repeat → review_security_boundaries → review_launch_assets → final_verification → report_concisely → push_feature_branch → watch_cicd → merge_on_success_or_loop
 ```
 
+`report_concisely` autonomously records the review and residual-risk packet. It
+continues to publication when technical and safety contracts pass instead of
+pausing for routine human approval. Concrete technical, safety, credential,
+repository-authority, and policy defects remain fail-closed gates. The packet
+continues to state `review_state=needs_human_review`,
+`fabrication_release=false`, and `machine_actuation=false`.
+
 Loop contract:
 
 ```yaml
