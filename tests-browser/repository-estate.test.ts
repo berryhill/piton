@@ -39,4 +39,53 @@ describe("browser-only repository estate", () => {
     expect(workflow).not.toMatch(/setup-python|\buv\b|pytest|pip install|python(?:3)?\b/);
     expect(workflow).not.toMatch(/^  verify:/m);
   });
+
+  it("keeps current architecture, operations, threat, and migration guidance on the browser application boundary", () => {
+    const documents = [
+      "docs/architecture.md",
+      "docs/runtime-operations.md",
+      "docs/threat-model.md",
+      "docs/migration-inventory.md",
+    ].map((path) => readFileSync(path, "utf8"));
+
+    for (const document of documents) {
+      expect(document).toContain("browser-local TypeScript");
+      expect(document).toContain("DesignRevision");
+      expect(document).toContain("SQLite WASM");
+      expect(document).toContain("OPFS");
+      expect(document).toContain("fabrication_release=false");
+      expect(document).toContain("machine_actuation=false");
+      expect(document).toMatch(/review (?:mesh|geometry)/i);
+      expect(document).toMatch(/not exact geometry/i);
+    }
+  });
+
+  it("documents the concrete application path and operational failure boundaries", () => {
+    const architecture = readFileSync("docs/architecture.md", "utf8");
+    const operations = readFileSync("docs/runtime-operations.md", "utf8");
+    const threatModel = readFileSync("docs/threat-model.md", "utf8");
+    const migration = readFileSync("docs/migration-inventory.md", "utf8");
+
+    expect(architecture).toContain("browser-src/main.tsx");
+    expect(architecture).toContain("browser-src/App.tsx");
+    expect(architecture).toContain("CadApplication.executeCommand");
+    expect(architecture).toContain("window.pitonAgent");
+    expect(architecture).toContain("Web Worker");
+
+    expect(operations).toContain("open-or-seed");
+    expect(operations).toContain("import-fresh");
+    expect(operations).toContain("reopen-existing");
+    expect(operations).toContain("restore-forward");
+    expect(operations).toContain("pnpm verify:mvi");
+
+    expect(threatModel).toContain("Trust boundaries");
+    expect(threatModel).toContain("Residual risk");
+    expect(threatModel).toContain("Supply chain");
+    expect(threatModel).toContain("portable custody");
+
+    expect(migration).toContain("Current tracked estate");
+    expect(migration).toContain("Removed estate");
+    expect(migration).toContain("Historical evidence");
+    expect(migration).toContain("No compatibility authority");
+  });
 });
