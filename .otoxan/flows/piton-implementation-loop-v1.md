@@ -38,6 +38,13 @@ clean_reset_required_between_attempts: false
 
 Retry preserves the same task, flow session, worktree, branch, and PR. The same task owns branch preparation, implementation, publication, exact-head CI observation, current-base refresh, safe merge, and merged-tree readback. The final gate is the only step allowed to execute the merge or emit `loop_decision`.
 
+`report_concisely` is an autonomous execute step. It records the review and
+residual-risk packet and continues when technical and safety contracts pass; it
+must not create a routine human-approval wait. Concrete technical, safety,
+credential, repository-authority, and policy defects still fail closed. This
+does not change `review_state=needs_human_review`, `fabrication_release=false`,
+or `machine_actuation=false`.
+
 `review_launch_assets` is task-local: it reviews artifacts owned by the current
 trusted task contract and records downstream-owned cutover work as deferred. It
 must not require an early task to remove, relocate, or archive files assigned to

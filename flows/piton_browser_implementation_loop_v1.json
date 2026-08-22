@@ -162,7 +162,7 @@
     "runtime_template_status": "active",
     "source_publication_status": "published_by_piton-browser-only-python-retirement-2026-08-18:T001",
     "source_repository": "berryhill/piton",
-    "template_sha256": "8381827113eccb7a0d4c33465dc1cea65008fd01926c8a78e475355beaaccf71"
+    "template_sha256": "de00016c2b690c8111c99eb341223a2bc4d62f04932def75ce91ae0a084b175c"
   },
   "name": "Piton Browser Application Implementation Loop",
   "requires_isolated_worktree": true,
@@ -342,9 +342,9 @@
       "name": "Assemble the review and residual-risk packet",
       "optional": false,
       "output_field": "report_concisely",
-      "prompt_template": "Report changed files, exact base/head, browser tests and review artifacts, unavailable exact-CAD capabilities, CI/install state, known risks, migration/restore limits, human decisions, review_state=needs_human_review, fabrication_release=false, and machine_actuation=false. Do not overclaim unavailable browser, kernel, remote, release, or exact-geometry evidence.",
+      "prompt_template": "Autonomously assemble and record the review and residual-risk packet from the current exact-head evidence. Report changed files, exact base/head, browser tests and review artifacts, unavailable exact-CAD capabilities, CI/install state, known risks, migration/restore limits, human decisions, review_state=needs_human_review, fabrication_release=false, and machine_actuation=false. Do not pause or wait for routine human approval when technical and safety contracts pass. Block only on a concrete technical, safety, credential, repository-authority, or policy defect. Do not overclaim unavailable browser, kernel, remote, release, or exact-geometry evidence.",
       "step_id": "report_concisely",
-      "type": "review"
+      "type": "execute"
     },
     {
       "description": "Publish the authorized branch without force.",
@@ -374,9 +374,9 @@
       "type": "review"
     }
   ],
-  "updated_by": "nick-mercer:interactive-browser-only-plan-admission",
+  "updated_by": "nick-mercer:issue-85-autonomous-review-packet",
   "usage_count": 1,
-  "version": 1,
+  "version": 2,
   "worktree_policy": {
     "canonical_clone_mutation_forbidden": true,
     "destructive_reset_forbidden": true,
