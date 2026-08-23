@@ -88,4 +88,17 @@ describe("browser-only repository estate", () => {
     expect(migration).toContain("Historical evidence");
     expect(migration).toContain("No compatibility authority");
   });
+
+  it("defines a head-bound browser-only cutover closure readback", () => {
+    const migration = readFileSync("docs/migration-inventory.md", "utf8");
+
+    expect(migration).toContain("Closure qualification contract");
+    expect(migration).toContain("git rev-parse HEAD");
+    expect(migration).toContain("git ls-tree -r --name-only HEAD");
+    expect(migration).toContain("pnpm install --frozen-lockfile");
+    expect(migration).toContain("pnpm verify:mvi");
+    expect(migration).toContain("exact candidate HEAD");
+    expect(migration).toContain("exact merged tree");
+    expect(migration).toContain("does not create a release");
+  });
 });
