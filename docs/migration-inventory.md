@@ -70,3 +70,28 @@ release_state=unreleased
 ```
 
 Removing the old estate narrowed capability. It did not promote review meshes to exact geometry and did not add approval, export, release, or machine authority.
+
+## Closure qualification contract
+
+Cutover closure is head-bound evidence, not a timeless claim made by this document. The reviewer records the exact candidate HEAD and evaluates only that committed tree:
+
+```bash
+git rev-parse HEAD
+git status --short
+git ls-tree -r --name-only HEAD
+pnpm install --frozen-lockfile
+pnpm verify:mvi
+```
+
+A qualifying candidate has a clean worktree, contains only the current tracked estate described above, passes the canonical gate at the exact candidate HEAD, and has exact-head CI read back for that same commit. A passing local run, a different commit's CI result, or an uncommitted working tree is not candidate qualification.
+
+After authorized integration, closure requires a fresh protected-base fetch and readback of the exact merged tree. The readback must identify the merged commit, confirm that the reviewed candidate is integrated, rerun the tracked-estate inspection, and confirm the root safety truth remains:
+
+```text
+review_state=needs_human_review
+fabrication_release=false
+machine_actuation=false
+release_state=unreleased
+```
+
+Qualification is review evidence only. It does not create a release, approve a revision, export exact geometry, or authorize machine actuation.
