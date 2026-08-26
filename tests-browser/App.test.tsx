@@ -13,6 +13,8 @@ describe("Piton workbench", () => {
   it("shows safety truth and a preview diff before commit", async () => {
     render(<App application={application()} geometryDisabled />);
     expect(await screen.findByText("Accepted immutable revision")).toBeVisible();
+    expect(screen.getByText("PITON")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Piton Workbench" })).toBeVisible();
     expect(screen.getByTestId("fabrication-release")).toHaveTextContent("false");
     expect(screen.getByTestId("machine-actuation")).toHaveTextContent("false");
     for (const parameter of [

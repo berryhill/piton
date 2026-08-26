@@ -1,6 +1,6 @@
 # Piton
 
-Piton is a runnable, browser-local Mechanical CAD MVI. It remains review-only and does not authorize fabrication.
+Piton is a runnable, browser-local Mechanical CAD application. It remains review-only and does not authorize fabrication.
 
 ```text
 review_state = needs_human_review
@@ -11,7 +11,9 @@ release_state = unreleased
 
 ## Product surface
 
-The browser MVI is the application. Browser-local TypeScript commands author immutable revisions, Manifold WASM generates revision-scoped review meshes in a Web Worker, and SQLite WASM stores the local project in OPFS. Generated review geometry is not exact geometry, and no build or verification result grants review acceptance, approval, export, release, or machine actuation.
+The Piton Workbench is the application. Browser-local TypeScript commands author immutable revisions, Manifold WASM generates revision-scoped review meshes in a Web Worker, and SQLite WASM stores the local project in OPFS. Review geometry is not exact geometry, and no build or verification result grants review acceptance, approval, export, release, or machine actuation.
+
+MVI describes the delivery stage and canonical doctrine, not a separate launch mode or application.
 
 Piton was named after the OpenDesign R14 Bench Clamp Fixture prototype (project `8da9ea71-1dce-454a-bc4a-7e835eadfdd5`, conversation `76d3d331-cb2e-4a40-aca7-f6737ea538fe`, revision `r14-05729d28`). Canonical doctrine: [`docs/mvi-doctrine.md`](docs/mvi-doctrine.md).
 
@@ -24,7 +26,7 @@ Prerequisites:
 - Chromium 145+ on Linux (the currently verified browser/platform combination)
 
 ```bash
-pnpm launch:mvi
+pnpm start
 ```
 
 Open the URL printed by Vite (normally `http://127.0.0.1:5173`). The server supplies the cross-origin-isolation headers required by SQLite WASM OPFS. The app fails visibly rather than falling back to transient writable state when OPFS is unavailable.
@@ -47,7 +49,7 @@ Open the URL printed by Vite (normally `http://127.0.0.1:5173`). The server supp
 Install Chromium once with `pnpm exec playwright install chromium`, then run:
 
 ```bash
-pnpm verify:mvi
+pnpm verify
 ```
 
 The canonical gate runs TypeScript checking, unit/component tests, the production build, and Playwright in sequence. The browser test surface includes the closed ordered 25-scenario behavior corpus and deterministic 1,000-replay failure-class campaign. These results are candidate-bound browser behavior evidence only.

@@ -25,5 +25,5 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Install pinned Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
-      - name: Canonical browser MVI verification
-        run: pnpm verify:mvi
+      - name: Canonical Piton verification
+        run: pnpm verify
