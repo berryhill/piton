@@ -10,22 +10,21 @@ The former Python application, external exact-CAD adapter, server/daemon scripts
 
 | role | tracked surface | current consequence |
 | --- | --- | --- |
-| Browser application | `index.html`, `browser-src/main.tsx`, `browser-src/App.tsx`, `browser-src/components/**`, `browser-src/styles.css` | Interactive product surface; reaches authority only through `CadApplication` |
-| Authored command/domain authority | `browser-src/application.ts`, `browser-src/domain.ts`, `browser-src/agentAdapter.ts`, `browser-src/lifecycle.ts` | Closed browser-local TypeScript commands, immutable revisions, safety validation; `window.pitonAgent` is untrusted adapter only |
-| Durable custody and migration | `browser-src/storage/**`, `browser-src/startup.ts` | SQLite WASM OPFS repository, transactional schema migration, fresh portable import and exact namespace reopen |
-| Review geometry and viewer | `browser-src/geometry/**`, `browser-src/components/Viewport.tsx` | Revision-scoped review mesh/evidence only; no exact or authored authority |
+| Browser application | `index.html`, `src/main.tsx`, `src/App.tsx`, `src/components/**`, `src/styles.css` | Interactive product surface; reaches authority only through `CadApplication` |
+| Authored command/domain authority | `src/application.ts`, `src/domain.ts`, `src/agentAdapter.ts`, `src/lifecycle.ts` | Closed browser-local TypeScript commands, immutable revisions, safety validation; `window.pitonAgent` is untrusted adapter only |
+| Durable custody and migration | `src/storage/**`, `src/startup.ts` | SQLite WASM OPFS repository, transactional schema migration, fresh portable import and exact namespace reopen |
+| Review geometry and viewer | `src/geometry/**`, `src/components/Viewport.tsx` | Revision-scoped review mesh/evidence only; no exact or authored authority |
 | Browser verification | `tests-browser/**`, `playwright.config.ts`, `tsconfig.json`, `vite.config.ts` | Candidate behavior evidence only |
 | Toolchain and operations | `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `launch-browser-mvi.sh`, `.github/workflows/ci.yml` | Pinned build/test/launch surfaces; no product approval or release authority |
 | Governance | `README.md`, `AGENTS.md`, `docs/**`, `.otoxan/**`, `flows/**`, `.github/CODEOWNERS`, `.gitignore` | Advisory/operational contract; `docs/mvi-doctrine.md` wins conflicts |
 | Historical evidence | `evidence/**`, `docs/historical-evidence-manifest.json`, `tools/verify-historical-evidence.mjs` | Stage 0 evidence and integrity tooling; no runtime or writable authority |
 
-Only application startup constructs `SqliteOpfsProjectRepository`. `browser-src/App.tsx` and `window.pitonAgent` receive `CadApplication`, not the repository. Geometry workers may realize revision-bound review geometry and emit evidence but cannot mutate authored revisions, lifecycle disposition, accepted/current/channel pointers, approval, release, or machine state.
+Only application startup constructs `SqliteOpfsProjectRepository`. `src/App.tsx` and `window.pitonAgent` receive `CadApplication`, not the repository. Geometry workers may realize revision-bound review geometry and emit evidence but cannot mutate authored revisions, lifecycle disposition, accepted/current/channel pointers, approval, release, or machine state.
 
 ## Removed estate
 
 The current tracked tree contains none of the retired application estate:
 
-- `src/**`;
 - `scripts/**`;
 - `tests/**` (browser tests remain under `tests-browser/**`);
 - `examples/minimal-project/**`;

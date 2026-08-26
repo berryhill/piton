@@ -1,15 +1,15 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { CadApplication } from "../browser-src/application";
-import { deriveGeometryBinding } from "../browser-src/geometry/binding";
-import { MemoryProjectRepository } from "../browser-src/storage/repository";
-import { AgentCadAdapter } from "../browser-src/agentAdapter";
+import { CadApplication } from "../src/application";
+import { deriveGeometryBinding } from "../src/geometry/binding";
+import { MemoryProjectRepository } from "../src/storage/repository";
+import { AgentCadAdapter } from "../src/agentAdapter";
 import {
   PORTABLE_CUSTODY_FORMAT,
   type PortableCustodyEnvelope,
   type PortableCustodyPacket,
-} from "../browser-src/domain";
-import { CURRENT_SCHEMA_VERSION } from "../browser-src/storage/schema";
+} from "../src/domain";
+import { CURRENT_SCHEMA_VERSION } from "../src/storage/schema";
 
 function source(path: string): string {
   return readFileSync(new URL(path, import.meta.url), "utf8");
@@ -105,10 +105,10 @@ describe("CadApplication browser authority boundary", () => {
   });
 
   it("keeps writable storage ports out of React and geometry adapters", () => {
-    const appSource = source("../browser-src/App.tsx");
-    const viewportSource = source("../browser-src/components/Viewport.tsx");
-    const workerClientSource = source("../browser-src/geometry/workerClient.ts");
-    const agentSource = source("../browser-src/agentAdapter.ts");
+    const appSource = source("../src/App.tsx");
+    const viewportSource = source("../src/components/Viewport.tsx");
+    const workerClientSource = source("../src/geometry/workerClient.ts");
+    const agentSource = source("../src/agentAdapter.ts");
 
     for (const browserAdapter of [appSource, viewportSource, workerClientSource, agentSource]) {
       expect(browserAdapter).not.toMatch(/ProjectRepository|ProjectCustodyPort/);
@@ -218,11 +218,11 @@ describe("CadApplication browser authority boundary", () => {
   });
 
   it("keeps the portable custody authority inside the closed CadApplication surface", () => {
-    const appSource = source("../browser-src/application.ts");
-    const appFile = source("../browser-src/App.tsx");
-    const viewportSource = source("../browser-src/components/Viewport.tsx");
-    const workerClientSource = source("../browser-src/geometry/workerClient.ts");
-    const agentSource = source("../browser-src/agentAdapter.ts");
+    const appSource = source("../src/application.ts");
+    const appFile = source("../src/App.tsx");
+    const viewportSource = source("../src/components/Viewport.tsx");
+    const workerClientSource = source("../src/geometry/workerClient.ts");
+    const agentSource = source("../src/agentAdapter.ts");
 
     expect(appSource).toMatch(/exportPortableCustody/);
     expect(appSource).toMatch(/reopenPortableCustody/);

@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { GeometryResultGate, installReplacement } from "../browser-src/geometry/gate";
-import { deriveGeometryBinding, durableGeometryStatusLabel } from "../browser-src/geometry/binding";
-import { seedProject } from "../browser-src/domain";
+import { GeometryResultGate, installReplacement } from "../src/geometry/gate";
+import { deriveGeometryBinding, durableGeometryStatusLabel } from "../src/geometry/binding";
+import { seedProject } from "../src/domain";
 import {
   constructGeometryWorker,
   geometryWorkerGeneration,
   postGeometryWorkerMessage,
   type GeometryWorkerSurface,
-} from "../browser-src/geometry/workerClient";
-import { bracketHole } from "../browser-src/geometry/bracket";
+} from "../src/geometry/workerClient";
+import { bracketHole } from "../src/geometry/bracket";
 import {
   GEOMETRY_ENVIRONMENT_DIGEST,
   geometryInputDigest,
@@ -16,7 +16,7 @@ import {
   parseGeometryWorkerMessage,
   type GeometryBuildRequest,
   type GeometryWorkerSuccess,
-} from "../browser-src/geometry/protocol";
+} from "../src/geometry/protocol";
 
 const base = seedProject().revisions[0];
 const committedBinding = deriveGeometryBinding(base, base.parameters);

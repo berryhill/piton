@@ -6,7 +6,7 @@ import {
   assertRevisionIntegrity,
   deriveCandidateRevision,
   seedProject,
-} from "../browser-src/domain";
+} from "../src/domain";
 
 describe("browser authority domain", () => {
   it("derives an immutable candidate without mutating the accepted revision", () => {

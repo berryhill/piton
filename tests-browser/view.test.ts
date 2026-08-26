@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { cameraPresetDirection, fitCameraToBounds, meshBounds, reviewDistanceMm, selectedLegZone, rolledCameraUp } from "../browser-src/geometry/view";
-import { DEFAULT_PARAMETERS } from "../browser-src/domain";
+import { cameraPresetDirection, fitCameraToBounds, meshBounds, reviewDistanceMm, selectedLegZone, rolledCameraUp } from "../src/geometry/view";
+import { DEFAULT_PARAMETERS } from "../src/domain";
 
 describe("review viewport interaction geometry", () => {
   it("maps the selected leg-length parameter to the real vertical-leg zone", () => {

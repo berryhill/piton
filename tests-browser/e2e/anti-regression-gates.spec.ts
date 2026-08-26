@@ -53,8 +53,8 @@ test("anti-regression gate 3: forged fabrication_release envelope is rejected at
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
 
   const exportedEnvelope = await page.evaluate(async () => {
-    const module = await import("../../browser-src/application");
-    const { openProjectRepository } = await import("../../browser-src/storage/repository");
+    const module = await import("../../src/application");
+    const { openProjectRepository } = await import("../../src/storage/repository");
     const repository = await openProjectRepository("piton");
     const application = new module.CadApplication(repository);
     await application.open();
@@ -65,7 +65,7 @@ test("anti-regression gate 3: forged fabrication_release envelope is rejected at
   await expect(page.getByText("Import portable custody into fresh browser storage")).toBeVisible();
 
   const forgedEnvelope = await page.evaluate(async (envelope) => {
-    const { canonicalPortableCustodyJson, sha256Hex } = await import("../../browser-src/domain");
+    const { canonicalPortableCustodyJson, sha256Hex } = await import("../../src/domain");
     const { fingerprint: _fingerprint, ...packet } = envelope;
     packet.lifecycle_projection = [{
       kind: "fabrication_release",
@@ -101,7 +101,7 @@ test("anti-regression gate 4: worker output is request- and revision-bound and n
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
 
   const gate = await page.evaluate(async () => {
-    const { GeometryResultGate } = await import("../../browser-src/geometry/gate");
+    const { GeometryResultGate } = await import("../../src/geometry/gate");
     const gateInstance = new GeometryResultGate();
     const triangle = [0, 1, 2] as const;
     const buildMesh = () => ({
@@ -135,7 +135,7 @@ test("anti-regression gate 5: durable SQLite row readback and unchanged UI defau
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
 
   const initial = await page.evaluate(async () => {
-    const { SqliteOpfsProjectRepository } = await import("../../browser-src/storage/repository");
+    const { SqliteOpfsProjectRepository } = await import("../../src/storage/repository");
     const repository = await SqliteOpfsProjectRepository.open();
     return repository.readMigrationEvidence();
   });
@@ -151,7 +151,7 @@ test("anti-regression gate 5: durable SQLite row readback and unchanged UI defau
   await expect(page.getByText("Reopened from SQLite WASM · OPFS")).toBeVisible();
 
   const after = await page.evaluate(async () => {
-    const { SqliteOpfsProjectRepository } = await import("../../browser-src/storage/repository");
+    const { SqliteOpfsProjectRepository } = await import("../../src/storage/repository");
     const repository = await SqliteOpfsProjectRepository.open();
     return repository.readMigrationEvidence();
   });

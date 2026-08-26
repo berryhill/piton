@@ -1,9 +1,9 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import App from "../browser-src/App";
-import { CadApplication } from "../browser-src/application";
-import { MemoryProjectRepository } from "../browser-src/storage/repository";
-import { deriveGeometryBinding } from "../browser-src/geometry/binding";
+import App from "../src/App";
+import { CadApplication } from "../src/application";
+import { MemoryProjectRepository } from "../src/storage/repository";
+import { deriveGeometryBinding } from "../src/geometry/binding";
 
 describe("Piton workbench", () => {
   function application(repository = new MemoryProjectRepository()) {
