@@ -11,12 +11,55 @@ function trackedUnder(prefix: string): string[] {
   return trackedFiles.filter((path) => path === prefix || path.startsWith(`${prefix}/`));
 }
 
+const applicationSourceFiles = [
+  "App.tsx",
+  "agentAdapter.ts",
+  "application.ts",
+  "components/Viewport.tsx",
+  "domain.ts",
+  "geometry/binding.ts",
+  "geometry/bracket.ts",
+  "geometry/gate.ts",
+  "geometry/geometry.worker.ts",
+  "geometry/protocol.ts",
+  "geometry/view.ts",
+  "geometry/workerClient.ts",
+  "lifecycle.ts",
+  "main.tsx",
+  "startup.ts",
+  "storage/repository.ts",
+  "storage/schema.ts",
+  "styles.css",
+  "vite-env.d.ts",
+].map((path) => `src/${path}`);
+
+const retiredSourceDirectory = ["browser", "src"].join("-");
+
 describe("browser-only repository estate", () => {
   it("contains no executable Python application, package, scripts, tests, or adapter fixture", () => {
     expect(trackedFiles.filter((path) => path.endsWith(".py"))).toEqual([]);
-    expect(trackedUnder("src")).toEqual([]);
     expect(trackedUnder("scripts")).toEqual([]);
     expect(trackedUnder("tests")).toEqual([]);
+  });
+
+  it("keeps the browser application in the conventional source directory only", () => {
+    expect(trackedUnder("src").sort()).toEqual(applicationSourceFiles.sort());
+    expect(trackedUnder(retiredSourceDirectory)).toEqual([]);
+
+    const activeTextFiles = trackedFiles.filter((path) =>
+      /^(?:docs\/|tests-browser\/|src\/|index\.html$|tsconfig\.json$|vite\.config\.ts$|playwright\.config\.ts$)/.test(path),
+    );
+    for (const path of activeTextFiles) {
+      expect(readFileSync(path, "utf8"), path).not.toContain(retiredSourceDirectory);
+    }
+  });
+
+  it("does not classify the current source directory as removed estate", () => {
+    const migration = readFileSync("docs/migration-inventory.md", "utf8");
+    const removedEstate = migration.match(/## Removed estate\n\n([\s\S]*?)\n## /)?.[1];
+
+    expect(removedEstate).toBeDefined();
+    expect(removedEstate).not.toContain("- `src/**`;");
   });
 
   it("contains no retired Python-authority support estate", () => {
@@ -66,8 +109,8 @@ describe("browser-only repository estate", () => {
     const threatModel = readFileSync("docs/threat-model.md", "utf8");
     const migration = readFileSync("docs/migration-inventory.md", "utf8");
 
-    expect(architecture).toContain("browser-src/main.tsx");
-    expect(architecture).toContain("browser-src/App.tsx");
+    expect(architecture).toContain("src/main.tsx");
+    expect(architecture).toContain("src/App.tsx");
     expect(architecture).toContain("CadApplication.executeCommand");
     expect(architecture).toContain("window.pitonAgent");
     expect(architecture).toContain("Web Worker");

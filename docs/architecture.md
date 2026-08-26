@@ -12,17 +12,17 @@ The concrete startup and command path is:
 
 ```text
 index.html
-  -> browser-src/main.tsx
+  -> src/main.tsx
      -> resolveStartup(...)
      -> openProjectRepository(namespace)
      -> new CadApplication(repository)
-     -> browser-src/App.tsx
+     -> src/App.tsx
         -> CadApplication.executeCommand(input)
            -> SqliteOpfsProjectRepository.executeCommand(...)
               -> immutable DesignRevision + current pointer + command receipt
 ```
 
-`browser-src/main.tsx` constructs the writable repository once and gives `browser-src/App.tsx` a `CadApplication`, never the repository port. The application boundary validates the closed `piton-command/v1` envelope, exact project and base revision identities, idempotency key, command kind, millimetre unit, and the 40–160 mm `leg_length_mm` bound before requesting a transaction.
+`src/main.tsx` constructs the writable repository once and gives `src/App.tsx` a `CadApplication`, never the repository port. The application boundary validates the closed `piton-command/v1` envelope, exact project and base revision identities, idempotency key, command kind, millimetre unit, and the 40–160 mm `leg_length_mm` bound before requesting a transaction.
 
 `window.pitonAgent` is an untrusted automation adapter. `AgentCadAdapter.execute` delegates unknown input to the same `CadApplication.executeCommand` method used by the workbench. It receives no repository reference and creates no second command, persistence, review, approval, export, release, or actuation authority.
 
