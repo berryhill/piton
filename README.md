@@ -15,6 +15,12 @@ The Piton Workbench is the application. Browser-local TypeScript commands author
 
 MVI describes the delivery stage and canonical doctrine, not a separate launch mode or application.
 
+## Runtime boundary
+
+Piton's current product is the browser-local TypeScript application. No Python runtime, environment, backend, package, or process is required. The tracked repository contains no executable Python application or external exact-CAD adapter. `pnpm start` launches the complete current application; there is no separate server or worker service to start.
+
+Historical evidence may describe the retired Python/build123d implementation. Those records are preserved only as history and are not current source, installation instructions, runtime capability, or product authority. See [`docs/migration-inventory.md`](docs/migration-inventory.md) for the tracked-estate and historical-evidence boundary.
+
 Piton was named after the OpenDesign R14 Bench Clamp Fixture prototype (project `8da9ea71-1dce-454a-bc4a-7e835eadfdd5`, conversation `76d3d331-cb2e-4a40-aca7-f6737ea538fe`, revision `r14-05729d28`). Canonical doctrine: [`docs/mvi-doctrine.md`](docs/mvi-doctrine.md).
 
 ## Fresh-clone quickstart

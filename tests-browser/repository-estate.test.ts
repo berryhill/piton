@@ -76,6 +76,14 @@ describe("browser-only repository estate", () => {
     expect(trackedFiles).not.toContain(".python-version");
   });
 
+  it("states the browser-only runtime contract in the primary README", () => {
+    const readme = readFileSync("README.md", "utf8");
+
+    expect(readme).toContain("No Python runtime, environment, backend, package, or process is required");
+    expect(readme).toContain("The tracked repository contains no executable Python application or external exact-CAD adapter");
+    expect(readme).toContain("`pnpm start` launches the complete current application");
+  });
+
   it("runs only the browser verification job in CI", () => {
     const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
     expect(workflow).toContain("pnpm verify");
