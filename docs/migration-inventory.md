@@ -15,7 +15,7 @@ The former Python application, external exact-CAD adapter, server/daemon scripts
 | Durable custody and migration | `src/storage/**`, `src/startup.ts` | SQLite WASM OPFS repository, transactional schema migration, fresh portable import and exact namespace reopen |
 | Review geometry and viewer | `src/geometry/**`, `src/components/Viewport.tsx` | Revision-scoped review mesh/evidence only; no exact or authored authority |
 | Browser verification | `tests-browser/**`, `playwright.config.ts`, `tsconfig.json`, `vite.config.ts` | Candidate behavior evidence only |
-| Toolchain and operations | `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `launch-browser-mvi.sh`, `.github/workflows/ci.yml` | Pinned build/test/launch surfaces; no product approval or release authority |
+| Toolchain and operations | `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `launch-piton.sh`, `.github/workflows/ci.yml` | Pinned build/test/launch surfaces; no product approval or release authority |
 | Governance | `README.md`, `AGENTS.md`, `docs/**`, `.otoxan/**`, `flows/**`, `.github/CODEOWNERS`, `.gitignore` | Advisory/operational contract; `docs/mvi-doctrine.md` wins conflicts |
 | Historical evidence | `evidence/**`, `docs/historical-evidence-manifest.json`, `tools/verify-historical-evidence.mjs` | Stage 0 evidence and integrity tooling; no runtime or writable authority |
 
@@ -54,7 +54,7 @@ Reintroducing Python tooling for an unrelated inert repository task would not by
 The only current repository gate is:
 
 ```bash
-pnpm verify:mvi
+pnpm verify
 ```
 
 It runs browser TypeScript checking, unit/component tests, production build, and Playwright. Verification, historical evidence, review geometry, and portable custody success do not imply exact geometry, human review acceptance, engineering approval, export, fabrication release, or machine actuation.
@@ -79,7 +79,7 @@ git rev-parse HEAD
 git status --short
 git ls-tree -r --name-only HEAD
 pnpm install --frozen-lockfile
-pnpm verify:mvi
+pnpm verify
 ```
 
 A qualifying candidate has a clean worktree, contains only the current tracked estate described above, passes the canonical gate at the exact candidate HEAD, and has exact-head CI read back for that same commit. A passing local run, a different commit's CI result, or an uncommitted working tree is not candidate qualification.

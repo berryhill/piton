@@ -216,7 +216,7 @@ export default function App({ application, geometryDisabled, startupMode = "open
   </main>;
   if (!project || !current || !accepted) return <main className="loading"><h1>Piton</h1><p>{message}</p></main>;
   return <main>
-    <header><div><span className="eyebrow">BROWSER-LOCAL MECHANICAL CAD MVI</span><h1>Piton Workbench</h1></div><div className="truth-badge">REVIEW ONLY · UNRELEASED</div></header>
+    <header><div><span className="eyebrow">PITON</span><h1>Piton Workbench</h1></div><div className="truth-badge">REVIEW ONLY · UNRELEASED</div></header>
     <section className="truth-strip" aria-label="Safety truth">
       <Truth label="review_state" value={current.reviewState} />
       <Truth label="fabrication_release" value={String(current.fabricationRelease)} testId="fabrication-release" />

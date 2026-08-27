@@ -10,7 +10,7 @@ Use the repository-pinned toolchain: Node.js 22.22.3 and pnpm 11.1.3. Install de
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm launch:mvi
+pnpm start
 ```
 
 Open the Vite URL printed by the launcher, normally `http://127.0.0.1:5173`. The launcher/Vite headers must provide cross-origin isolation for SQLite WASM OPFS. Treat the visible `Piton failed to open` screen as a failed startup; do not work around it with transient storage.
@@ -56,7 +56,7 @@ Import writes one validated packet transactionally into an empty namespace. Fing
 
 | Symptom | Operator action | Authority consequence |
 | --- | --- | --- |
-| Cross-origin isolation or OPFS unavailable | Stop; relaunch with `pnpm launch:mvi` on the supported origin | No writable fallback is permitted |
+| Cross-origin isolation or OPFS unavailable | Stop; relaunch with `pnpm start` on the supported origin | No writable fallback is permitted |
 | SQLite worker startup/migration/readback fails | Preserve the browser profile and error; do not clear site data before retaining any available custody packet | Startup remains failed; no revision is committed |
 | Command reports stale current revision | Reload current custody, inspect the new base, and submit a new bounded command | Failed candidate does not replace current state |
 | Idempotency conflict | Use a new key only for genuinely new command content | Existing receipt/revision remains authoritative |
@@ -72,12 +72,12 @@ Install the pinned Playwright Chromium when required, then run the canonical gat
 
 ```bash
 pnpm exec playwright install chromium
-pnpm verify:mvi
+pnpm verify
 ```
 
-`pnpm verify:mvi` runs TypeScript checking, unit/component tests, a production build, and Playwright. CI runs the same gate with frozen dependencies and read-only repository permission. Record the exact Git candidate SHA with results. A pass is candidate verification evidence only; it does not grant human review acceptance, engineering approval, exact export, fabrication release, or machine actuation.
+`pnpm verify` runs TypeScript checking, unit/component tests, a production build, and Playwright. CI runs the same gate with frozen dependencies and read-only repository permission. Record the exact Git candidate SHA with results. A pass is candidate verification evidence only; it does not grant human review acceptance, engineering approval, exact export, fabrication release, or machine actuation.
 
-The anti-regression gate list in `tests-browser/e2e/anti-regression-gates.spec.ts` and the permanence meta-gate in `tests-browser/anti-regression-gates-meta.test.ts` exist only to make `pnpm verify:mvi` the sole verification entry point and to fail closed if the gate spec is removed, skipped, or shielded by `playwright.config.ts` overrides.
+The anti-regression gate list in `tests-browser/e2e/anti-regression-gates.spec.ts` and the permanence meta-gate in `tests-browser/anti-regression-gates-meta.test.ts` exist only to make `pnpm verify` the sole verification entry point and to fail closed if the gate spec is removed, skipped, or shielded by `playwright.config.ts` overrides.
 
 ## Root truth and escalation
 

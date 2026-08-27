@@ -55,7 +55,7 @@ Portable custody fingerprints detect changed canonical packet content; they do n
 Run:
 
 ```bash
-pnpm verify:mvi
+pnpm verify
 ```
 
 Verification is candidate-bound behavior evidence only. Reassess this threat model whenever any of these change: command authority, startup/origin model, OPFS schema or migration, portable custody format, lifecycle write surface, worker protocol, geometry kernel, viewer mapping, dependency graph, CI permissions, exact-geometry support, export format, user authentication, human authorization, fabrication release, or machine interface.

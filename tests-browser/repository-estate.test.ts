@@ -78,7 +78,7 @@ describe("browser-only repository estate", () => {
 
   it("runs only the browser verification job in CI", () => {
     const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
-    expect(workflow).toContain("pnpm verify:mvi");
+    expect(workflow).toContain("pnpm verify");
     expect(workflow).not.toMatch(/setup-python|\buv\b|pytest|pip install|python(?:3)?\b/);
     expect(workflow).not.toMatch(/^  verify:/m);
   });
@@ -119,7 +119,7 @@ describe("browser-only repository estate", () => {
     expect(operations).toContain("import-fresh");
     expect(operations).toContain("reopen-existing");
     expect(operations).toContain("restore-forward");
-    expect(operations).toContain("pnpm verify:mvi");
+    expect(operations).toContain("pnpm verify");
 
     expect(threatModel).toContain("Trust boundaries");
     expect(threatModel).toContain("Residual risk");
@@ -139,7 +139,7 @@ describe("browser-only repository estate", () => {
     expect(migration).toContain("git rev-parse HEAD");
     expect(migration).toContain("git ls-tree -r --name-only HEAD");
     expect(migration).toContain("pnpm install --frozen-lockfile");
-    expect(migration).toContain("pnpm verify:mvi");
+    expect(migration).toContain("pnpm verify");
     expect(migration).toContain("exact candidate HEAD");
     expect(migration).toContain("exact merged tree");
     expect(migration).toContain("does not create a release");

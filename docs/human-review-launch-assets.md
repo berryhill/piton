@@ -6,8 +6,8 @@ These assets prepare evidence for a person; they do not approve, export for fabr
 
 1. Install the exact locked dependencies with `pnpm install --frozen-lockfile`.
 2. Install Chromium once with `pnpm exec playwright install chromium`.
-3. Run the canonical gate with `pnpm verify:mvi`.
-4. Launch with `pnpm launch:mvi` and open the URL printed by Vite.
+3. Run the canonical gate with `pnpm verify`.
+4. Launch with `pnpm start` and open the URL printed by Vite.
 5. Confirm the seeded L-bracket, source-parameter zone, bbox, build-volume context, and review-only disclosure.
 6. Confirm CAD Z=0 sits on the physical grid.
 7. Preview and commit one bounded `leg_length_mm` mutation, then reload and verify OPFS readback.
