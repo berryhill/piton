@@ -36,7 +36,7 @@ describe("Piton product identity", () => {
   it("uses Piton as the browser and visible workbench identity", () => {
     expect(read("index.html")).toContain("<title>Piton</title>");
 
-    const app = read("browser-src/App.tsx");
+    const app = read("src/App.tsx");
     expect(app).toContain('<span className="eyebrow">PITON</span><h1>Piton Workbench</h1>');
     expect(app).not.toMatch(/BROWSER-LOCAL MECHANICAL CAD MVI/);
   });
