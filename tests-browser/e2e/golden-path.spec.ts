@@ -87,8 +87,8 @@ test("imports into a fresh bounded OPFS namespace, commits, and reopens that exa
   await expect(page.getByText("Candidate committed locally")).toBeVisible();
 
   const exportedEnvelope = await page.evaluate(async () => {
-    const module = await import("../../browser-src/application");
-    const { openProjectRepository } = await import("../../browser-src/storage/repository");
+    const module = await import("../../src/application");
+    const { openProjectRepository } = await import("../../src/storage/repository");
     const repository = await openProjectRepository("piton");
     const application = new module.CadApplication(repository);
     await application.open();
@@ -98,7 +98,7 @@ test("imports into a fresh bounded OPFS namespace, commits, and reopens that exa
   await page.goto("/?mode=import");
   await expect(page.getByText("Import portable custody into fresh browser storage")).toBeVisible();
   const forgedEnvelope = await page.evaluate(async (envelope) => {
-    const { canonicalPortableCustodyJson, sha256Hex } = await import("../../browser-src/domain");
+    const { canonicalPortableCustodyJson, sha256Hex } = await import("../../src/domain");
     const { fingerprint: _fingerprint, ...packet } = envelope;
     packet.lifecycle_projection = [{
       kind: "fabrication_release",
@@ -152,7 +152,7 @@ test("SQLite WASM reports migrated schema and direct durable readback", async ({
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
 
   const evidence = await page.evaluate(async () => {
-    const { SqliteOpfsProjectRepository } = await import("../../browser-src/storage/repository");
+    const { SqliteOpfsProjectRepository } = await import("../../src/storage/repository");
     const repository = await SqliteOpfsProjectRepository.open();
     return repository.readMigrationEvidence();
   });
@@ -176,8 +176,8 @@ test("SQLite WASM reports migrated schema and direct durable readback", async ({
 test("executes a version-2 OPFS migration and durably reopens lifecycle custody", async ({ page }) => {
   await page.goto("/@vite/client");
   const evidence = await page.evaluate(async () => {
-    const { migrateSqliteDatabase, startSqliteWorker } = await import("../../browser-src/storage/repository");
-    const { seedProject } = await import("../../browser-src/domain");
+    const { migrateSqliteDatabase, startSqliteWorker } = await import("../../src/storage/repository");
+    const { seedProject } = await import("../../src/domain");
     const promiser = await startSqliteWorker();
     const filename = "file:piton-migration-v2.sqlite3?vfs=opfs";
     const open = async () => (await promiser("open", { filename })).result.dbId;

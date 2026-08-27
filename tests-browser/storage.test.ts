@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { CURRENT_SCHEMA_VERSION, LIFECYCLE_TABLES, migrationStatements } from "../browser-src/storage/schema";
-import { MemoryProjectRepository, migrateSqliteDatabase, waitForSqliteWorker } from "../browser-src/storage/repository";
-import type { BuildAdmission } from "../browser-src/storage/repository";
+import { CURRENT_SCHEMA_VERSION, LIFECYCLE_TABLES, migrationStatements } from "../src/storage/schema";
+import { MemoryProjectRepository, migrateSqliteDatabase, waitForSqliteWorker } from "../src/storage/repository";
+import type { BuildAdmission } from "../src/storage/repository";
 import type { Worker1Promiser } from "@sqlite.org/sqlite-wasm";
-import { deriveGeometryBinding } from "../browser-src/geometry/binding";
-import type { ChangeProposal, EvidenceClosure, FabricationRelease, ProposalDisposition } from "../browser-src/lifecycle";
-import { assertLifecycleRecord } from "../browser-src/lifecycle";
+import { deriveGeometryBinding } from "../src/geometry/binding";
+import type { ChangeProposal, EvidenceClosure, FabricationRelease, ProposalDisposition } from "../src/lifecycle";
+import { assertLifecycleRecord } from "../src/lifecycle";
 
 describe("browser SQLite schema", () => {
   it("rejects visible SQLite worker startup errors without a real worker", async () => {

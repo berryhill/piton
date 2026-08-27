@@ -1,13 +1,13 @@
-import { CadApplication } from "../../browser-src/application";
-import { SAFETY_TRUTH, seedProject, sha256Hex } from "../../browser-src/domain";
-import { deriveGeometryBinding } from "../../browser-src/geometry/binding";
-import { GeometryResultGate, installReplacement } from "../../browser-src/geometry/gate";
+import { CadApplication } from "../../src/application";
+import { SAFETY_TRUTH, seedProject, sha256Hex } from "../../src/domain";
+import { deriveGeometryBinding } from "../../src/geometry/binding";
+import { GeometryResultGate, installReplacement } from "../../src/geometry/gate";
 import {
   GEOMETRY_ENVIRONMENT_DIGEST,
   geometryInputDigest,
   parseGeometryBuildRequest,
-} from "../../browser-src/geometry/protocol";
-import { MemoryProjectRepository } from "../../browser-src/storage/repository";
+} from "../../src/geometry/protocol";
+import { MemoryProjectRepository } from "../../src/storage/repository";
 
 const CORPUS_FORMAT = "piton-browser-behavior-corpus/v1" as const;
 const CAMPAIGN_FORMAT = "piton-browser-failure-campaign/v2" as const;

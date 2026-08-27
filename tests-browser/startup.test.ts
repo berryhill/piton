@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { resolveStartup } from "../browser-src/startup";
+import { resolveStartup } from "../src/startup";
 
 describe("portable custody startup", () => {
   it("allocates a bounded fresh namespace and returns a stable reopen URL", () => {

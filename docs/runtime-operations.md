@@ -17,7 +17,7 @@ Open the Vite URL printed by the launcher, normally `http://127.0.0.1:5173`. The
 
 ## Startup modes
 
-`browser-src/startup.ts` admits three modes:
+`src/startup.ts` admits three modes:
 
 | mode | URL shape | custody behavior |
 | --- | --- | --- |
