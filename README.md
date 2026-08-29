@@ -49,6 +49,7 @@ Open the URL printed by Vite (normally `http://127.0.0.1:5173`). The server supp
 8. Confirm `fabrication_release` and `machine_actuation` remain false.
 9. Click "Export portable custody" in the model panel; capture the downloaded `.piton-custody.json` file.
 10. Click "Import into fresh custody…", select the packet on the isolated import screen, and retain the generated `?mode=reopen&ns=<uuid>` URL. Commit another bounded change, reload that exact URL, and confirm the imported project, new candidate, accepted revision ID, and root truth reopen from their dedicated OPFS namespace.
+11. Complete the [R14/B fixture-document and tab-lifecycle review](docs/human-review-launch-assets.md#r14b-fixture-documents-and-tabs), including ordered documents, initial tabs, duplicate-open prevention, bounded active-tab close behavior, deterministic final-tab recovery, and independent selection/view state across switching, closing, and reopening.
 
 ## Verification
 

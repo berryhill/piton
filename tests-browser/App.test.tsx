@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import App from "../src/App";
 import { CadApplication } from "../src/application";
@@ -94,6 +94,8 @@ describe("Piton workbench", () => {
     render(<App application={application()} geometryDisabled />);
     await screen.findByText("Accepted immutable revision");
 
+    expect(screen.getByRole("button", { name: "Assembly fixture" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Part fixture" }));
     expect(screen.getByRole("button", { name: "Part fixture" })).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(screen.getByRole("button", { name: "Assembly fixture" }));
     expect(screen.getByText(/review-only interaction evidence/i)).toBeVisible();
@@ -142,5 +144,34 @@ describe("Piton workbench", () => {
     expect(screen.getByTestId("review-measurement")).toHaveTextContent(/mm/);
     expect(screen.getByTestId("review-measurement")).toHaveTextContent(/review-mesh/i);
     expect(screen.getByText(/fixture-local review IDs.*not durable topology/i)).toBeVisible();
+  });
+
+  it("renders exact fixture files and unique tab lifecycle with independent document controls", async () => {
+    render(<App application={application()} geometryDisabled />);
+    await screen.findByText("Accepted immutable revision");
+
+    expect(screen.getByText("Project container · review fixture metadata")).toBeVisible();
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: /Bench Clamp\.assembly/ })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: /PRT · Clamp Jaw\.part/ }));
+    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    fireEvent.click(screen.getByRole("button", { name: "Face" }));
+    fireEvent.click(screen.getByRole("button", { name: "Top review face" }));
+    const fixtureView = screen.getByRole("group", { name: "Fixture view preset" });
+    fireEvent.click(within(fixtureView).getByRole("button", { name: "Top" }));
+
+    fireEvent.click(screen.getByRole("tab", { name: /Bench Clamp\.assembly/ }));
+    expect(screen.getByRole("button", { name: "Smart" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(fixtureView).getByRole("button", { name: "Iso" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("current-selection")).toHaveTextContent("None");
+
+    fireEvent.click(screen.getByRole("tab", { name: /Clamp Jaw\.part/ }));
+    expect(screen.getByRole("button", { name: "Face" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(fixtureView).getByRole("button", { name: "Top" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("current-selection")).toHaveTextContent("Top review face");
+    fireEvent.click(screen.getByRole("button", { name: "Close Clamp Jaw.part" }));
+    expect(screen.queryByRole("tab", { name: /Clamp Jaw\.part/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /PRT · Clamp Jaw\.part/ })).toBeVisible();
   });
 });

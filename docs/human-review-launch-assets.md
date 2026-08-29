@@ -13,4 +13,17 @@ These assets prepare evidence for a person; they do not approve, export for fabr
 7. Preview and commit one bounded `leg_length_mm` mutation, then reload and verify OPFS readback.
 8. Confirm accepted state remains distinct from the committed candidate and all release/actuation fields remain false.
 
+## R14/B fixture documents and tabs
+
+Use the browser workbench to complete this bounded interaction review:
+
+1. Confirm the project container lists exactly these documents in this order: `Base Plate.part`, `Clamp Jaw.part`, `Guide Pin.part`, and `Bench Clamp.assembly`.
+2. Confirm `Base Plate.part` and `Bench Clamp.assembly` initially have open tabs, with `Bench Clamp.assembly` active.
+3. Open a closed document from the project tree. Confirm it receives one active tab. Open that same document again and confirm no duplicate tab is created.
+4. Close an active tab while another tab remains. Confirm activation moves to the bounded neighboring tab rather than an unrelated or closed document.
+5. Close tabs until the final open tab is closed. Confirm the baseline workspace is restored deterministically: `Base Plate.part` and `Bench Clamp.assembly` are open and `Bench Clamp.assembly` is active.
+6. In one document, change its selection and view preset. Switch to another document and set different selection/view state. Switch back, then close and reopen the first document; confirm each document retains its own selection and view state without leaking state to the other document.
+
+The four document records and their displayed parameter values are static fixture metadata and review-interaction evidence only. They are not exact-kernel realization, exact topology, fabrication suitability, engineering approval, export, or release claims.
+
 The test gate is automated candidate evidence, not a substitute for this visual human review. The repository does not contain an exact-CAD adapter, disconnected packet generator, engineering-approval issuer, fabrication exporter, release path, or machine-control path.

@@ -8,3 +8,7 @@ header { height:70px; display:flex; align-items:center; justify-content:space-be
 .portable-dropzone { display:flex; align-items:center; justify-content:center; min-height:56px; margin:8px 0; padding:10px; border:1px dashed #42576a; border-radius:3px; font-size:10px; color:#7890a5; text-align:center; background:#0c1218; }
 .portable-dropzone.drop-active { border-color:#e6a54b; color:#ffc064; background:#291f14; }
 .portable-error { color:#ff8a73; font-size:11px; margin:8px 0; padding:8px; border:1px solid #5a2a22; background:#1c0d0a; border-radius:3px; }
+.fixture-documents { margin:0 0 12px; border:1px solid #293642; background:#111820; padding:10px; display:grid; gap:8px; }
+.fixture-project { display:flex; align-items:baseline; gap:12px; }.fixture-project span { color:#7890a5; font-size:10px; }
+.fixture-files,.fixture-tabs { display:flex; flex-wrap:wrap; gap:5px; }.fixture-files button,.fixture-tab button { border:1px solid #42576a; background:#16212b; color:#dce7ef; border-radius:3px; padding:6px 8px; cursor:pointer; font-size:10px; }.fixture-files button[aria-current="page"],.fixture-tab.active { border-color:#e6a54b; background:#392814; }.fixture-tab { display:inline-flex; border:1px solid transparent; border-radius:3px; }.fixture-tab button { border:0; border-radius:0; }.fixture-tab small { color:#87a0b4; }.fixture-tab.active button[role="tab"] { color:#ffc064; }
+.workspace { height:calc(100vh - 285px); }
