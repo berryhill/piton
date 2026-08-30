@@ -6,12 +6,20 @@ import type { MeshBounds } from "./geometry/view";
 import { reviewDistanceMm } from "./geometry/view";
 import { durableGeometryStatusLabel } from "./geometry/binding";
 import type { StartupMode } from "./startup";
+import {
+  R14_FIXTURE,
+  activateFixtureDocument,
+  closeFixtureDocument,
+  createFixtureSession,
+  fixtureDocument,
+  openFixtureDocument,
+  updateActiveDocumentState,
+} from "./fixture";
+import type { FixtureSelectionMode, FixtureViewPreset } from "./fixture";
 import "./styles.css";
 
 interface Props { application: CadApplication; geometryDisabled?: boolean; startupMode?: StartupMode; }
 
-type FixtureKind = "part" | "assembly";
-type SelectionMode = "smart" | "face" | "component";
 export type SemanticSelectionId = "face:top" | "component:l-bracket:1" | "origin" | "plane:top" | "mate:review-only";
 
 const SEMANTIC_SELECTIONS: ReadonlyArray<{ id: SemanticSelectionId; label: string }> = [
@@ -34,12 +42,9 @@ export default function App({ application, geometryDisabled, startupMode = "open
   const [message, setMessage] = useState("Opening browser-local custody…");
   const [durableBuildStatus, setDurableBuildStatus] = useState<BuildStatus | null>(null);
   const [renderedBounds, setRenderedBounds] = useState<MeshBounds | null>(null);
-  const [fixtureKind, setFixtureKind] = useState<FixtureKind>("part");
-  const [selectionMode, setSelectionMode] = useState<SelectionMode>("smart");
+  const [fixtureWorkspace, setFixtureWorkspace] = useState(createFixtureSession);
   const [navigationContext, setNavigationContext] = useState("Source-Part · L-bracket Part");
-  const [currentSelection, setCurrentSelection] = useState<SemanticSelectionId | null>(null);
   const [attachedContext, setAttachedContext] = useState<{ id: SemanticSelectionId; label: string; revisionId: string } | null>(null);
-  const [measurementMm, setMeasurementMm] = useState<number | null>(null);
   const [portableBusy, setPortableBusy] = useState(false);
   const [portableError, setPortableError] = useState<string | null>(null);
   const portableFileInput = useRef<HTMLInputElement | null>(null);
@@ -65,11 +70,24 @@ export default function App({ application, geometryDisabled, startupMode = "open
     return { ...current.parameters, leg_length_mm: value };
   }, [current, value]);
   const changed = Boolean(current && previewParameters && value !== current.parameters.leg_length_mm);
+  const activeFixtureDocument = fixtureDocument(fixtureWorkspace.activeDocumentId);
+  const activeFixtureState = fixtureWorkspace.documentStates[fixtureWorkspace.activeDocumentId];
+  const fixtureKind = activeFixtureDocument.kind;
+  const selectionMode = activeFixtureState.selectionMode;
+  const currentSelection = activeFixtureState.selection as SemanticSelectionId | null;
+  const measurementMm = activeFixtureState.reviewMeasurementMm;
   const currentSelectionLabel = SEMANTIC_SELECTIONS.find((selection) => selection.id === currentSelection)?.label ?? "None";
 
   function selectSemantic(id: SemanticSelectionId) {
-    setCurrentSelection(id);
-    setMeasurementMm(null);
+    setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, { selection: id, reviewMeasurementMm: null }));
+  }
+
+  function setSelectionMode(mode: FixtureSelectionMode) {
+    setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, { selectionMode: mode }));
+  }
+
+  function setFixtureView(viewPreset: FixtureViewPreset) {
+    setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, { viewPreset }));
   }
 
   function measureSelection() {
@@ -82,11 +100,13 @@ export default function App({ application, geometryDisabled, startupMode = "open
       "plane:top": [previewParameters.base_length_mm, 0, 0],
       "mate:review-only": [previewParameters.leg_thickness_mm, previewParameters.leg_width_mm, 0],
     };
-    setMeasurementMm(reviewDistanceMm([0, 0, 0], endpointBySelection[currentSelection]));
+    setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, {
+      reviewMeasurementMm: reviewDistanceMm([0, 0, 0], endpointBySelection[currentSelection]),
+    }));
   }
 
   useEffect(() => {
-    if (!previewParameters) setMeasurementMm(null);
+    if (!previewParameters) setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, { reviewMeasurementMm: null }));
   }, [previewParameters]);
 
   async function commit() {
@@ -160,7 +180,7 @@ export default function App({ application, geometryDisabled, startupMode = "open
       const authoritativeCurrent = snapshot.project.revisions.find((revision) => revision.id === snapshot.project.currentRevisionId)!;
       setValue(authoritativeCurrent.parameters.leg_length_mm);
       setAttachedContext(null);
-      setMeasurementMm(null);
+      setFixtureWorkspace(createFixtureSession());
       setMessage(`Reopened from portable custody · ${snapshot.project.name}`);
     } catch (error) {
       const reason = error instanceof Error ? error.message : "unknown error";
@@ -223,12 +243,38 @@ export default function App({ application, geometryDisabled, startupMode = "open
       <Truth label="machine_actuation" value={String(current.machineActuation)} testId="machine-actuation" />
       <Truth label="release_state" value={current.releaseState} />
     </section>
+    <section className="fixture-documents" aria-label="Bench Clamp Fixture documents">
+      <div className="fixture-project">
+        <b>{R14_FIXTURE.name}</b>
+        <span>Project container · review fixture metadata</span>
+      </div>
+      <div className="fixture-files" aria-label="Project files">
+        {R14_FIXTURE.documents.map((document) => <button
+          key={document.id}
+          aria-current={document.id === fixtureWorkspace.activeDocumentId ? "page" : undefined}
+          onClick={() => setFixtureWorkspace((workspace) => openFixtureDocument(workspace, document.id))}
+        >{document.kind === "part" ? "PRT" : "ASM"} · {document.fileName}</button>)}
+      </div>
+      <div className="fixture-tabs" role="tablist" aria-label="Open fixture documents">
+        {fixtureWorkspace.openDocumentIds.map((documentId) => {
+          const document = fixtureDocument(documentId);
+          const active = documentId === fixtureWorkspace.activeDocumentId;
+          return <span className={`fixture-tab${active ? " active" : ""}`} key={documentId}>
+            <button role="tab" aria-selected={active} tabIndex={active ? 0 : -1} onClick={() => setFixtureWorkspace((workspace) => activateFixtureDocument(workspace, documentId))}>
+              <small>{document.kind === "part" ? "PRT" : "ASM"}</small> {document.fileName}
+            </button>
+            <button aria-label={`Close ${document.fileName}`} onClick={() => setFixtureWorkspace((workspace) => closeFixtureDocument(workspace, documentId))}>×</button>
+          </span>;
+        })}
+      </div>
+      <small className="identity-note">{R14_FIXTURE.claimScope}</small>
+    </section>
     <div className="workspace">
       <aside className="panel model-panel">
         <h2>Review fixture</h2>
         <div className="segmented" role="group" aria-label="Review fixture kind">
-          <button aria-pressed={fixtureKind === "part"} onClick={() => { setFixtureKind("part"); setSelectionMode("smart"); }}>Part fixture</button>
-          <button aria-pressed={fixtureKind === "assembly"} onClick={() => setFixtureKind("assembly")}>Assembly fixture</button>
+          <button aria-pressed={fixtureKind === "part"} onClick={() => setFixtureWorkspace((workspace) => openFixtureDocument(workspace, "base-plate.part"))}>Part fixture</button>
+          <button aria-pressed={fixtureKind === "assembly"} onClick={() => setFixtureWorkspace((workspace) => openFixtureDocument(workspace, "bench-clamp.assembly"))}>Assembly fixture</button>
         </div>
         <p className="boundary-note">{fixtureKind === "assembly"
           ? "Assembly fixture is review-only interaction evidence. It cannot author occurrences, mates, transforms, or Assembly revisions."
@@ -243,6 +289,10 @@ export default function App({ application, geometryDisabled, startupMode = "open
         <div className="segmented" role="group" aria-label="Selection mode">
           {(["smart", "face", "component"] as const).map((mode) => <button key={mode} disabled={fixtureKind === "part" && mode === "component"} aria-pressed={selectionMode === mode} onClick={() => setSelectionMode(mode)}>{mode[0].toUpperCase() + mode.slice(1)}</button>)}
         </div>
+        <h2>Fixture view</h2>
+        <div className="segmented" role="group" aria-label="Fixture view preset">
+          {(["iso", "front", "top"] as const).map((preset) => <button key={preset} aria-pressed={activeFixtureState.viewPreset === preset} onClick={() => setFixtureView(preset)}>{preset[0].toUpperCase() + preset.slice(1)}</button>)}
+        </div>
         <div className="semantic-list" aria-label="Fixture-local semantic review selections">
           {SEMANTIC_SELECTIONS.map((selection) => <button key={selection.id} aria-pressed={currentSelection === selection.id} onClick={() => selectSemantic(selection.id)}>{selection.label}</button>)}
         </div>
@@ -253,9 +303,12 @@ export default function App({ application, geometryDisabled, startupMode = "open
             const selection = SEMANTIC_SELECTIONS.find((candidate) => candidate.id === currentSelection);
             if (selection && current) setAttachedContext({ ...selection, revisionId: current.id });
           }}>Attach current selection</button>
-          <button disabled={!currentSelection} onClick={() => { setCurrentSelection(null); setMeasurementMm(null); }}>Clear current selection</button>
+          <button disabled={!currentSelection} onClick={() => setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, { selection: null, reviewMeasurementMm: null }))}>Clear current selection</button>
         </div>
         <small className="identity-note">Fixture-local review IDs · admitted artifact scope · not durable topology.</small>
+        <h2>Fixture metadata · {activeFixtureDocument.fileName}</h2>
+        {Object.entries(activeFixtureDocument.parameters).map(([name, parameterValue]) => <Parameter key={name} label={name} value={parameterValue} />)}
+        <small className="identity-note">Static R14 values · not an exact-kernel realization claim.</small>
         <h2>Source parameters</h2><p className="muted">TypeScript authored authority</p>
         <label>Leg length (mm)<input aria-label="Leg length (mm)" type="number" min="40" max="160" value={value} onChange={(e) => setValue(Number(e.target.value))} /></label>
         <div className="zone selected"><b>Selected zone</b><span>Vertical leg height</span><small>Bounded 40–160 mm</small></div>

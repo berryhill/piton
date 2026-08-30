@@ -17,6 +17,7 @@ const applicationSourceFiles = [
   "application.ts",
   "components/Viewport.tsx",
   "domain.ts",
+  "fixture.ts",
   "geometry/binding.ts",
   "geometry/bracket.ts",
   "geometry/gate.ts",

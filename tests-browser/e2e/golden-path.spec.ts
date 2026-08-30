@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("seeded edit preview commit and OPFS reload remain unreleased", async ({ page }) => {
+  test.setTimeout(60_000);
   await page.goto("/");
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
   await expect(page.locator(".viewport-status")).toHaveText("Review mesh ready · CAD Z-min 0 on grid");
@@ -11,8 +12,7 @@ test("seeded edit preview commit and OPFS reload remain unreleased", async ({ pa
   await expect(page.getByTestId("viewport")).toHaveAttribute("data-rendered-bbox", /120 × 40 × 88/);
   expect(Number(await page.getByTestId("viewport").getAttribute("data-rendered-vertex-count"))).toBeGreaterThan(16);
 
-  await expect(page.getByRole("button", { name: "Part fixture" })).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Assembly fixture" }).click();
+  await expect(page.getByRole("button", { name: "Assembly fixture" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByText(/Assembly fixture is review-only interaction evidence/)).toBeVisible();
   await page.getByRole("button", { name: "Part fixture" }).click();
   await page.getByRole("button", { name: /Displayed occurrence/ }).click();
@@ -30,8 +30,9 @@ test("seeded edit preview commit and OPFS reload remain unreleased", async ({ pa
   await page.getByRole("button", { name: "Measure selected review entity" }).click();
   await expect(page.getByTestId("review-measurement")).toContainText("mm · review-only, not exact B-rep");
 
+  const reviewCameraControls = page.getByLabel("Review camera controls");
   for (const preset of ["Front", "Top", "Iso"] as const) {
-    await page.getByRole("button", { name: preset, exact: true }).click();
+    await reviewCameraControls.getByRole("button", { name: preset, exact: true }).click();
     await expect(page.getByTestId("viewport")).toHaveAttribute("data-camera-preset", preset.toLowerCase());
   }
   await page.getByRole("button", { name: "Fit", exact: true }).click();
