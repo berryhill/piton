@@ -32,6 +32,43 @@ describe("Piton workbench", () => {
     expect(screen.getByText("Preview only · not committed")).toBeVisible();
   });
 
+  it("exposes the R14 shell hierarchy, keyboard paths, and persistent root truth", async () => {
+    render(<App application={application()} geometryDisabled />);
+    await screen.findByText("Accepted immutable revision");
+
+    const shell = screen.getByTestId("workbench-shell");
+    expect(Array.from(shell.children).map((child) => child.tagName)).toEqual([
+      "A", "A", "HEADER", "NAV", "DIV", "FOOTER",
+    ]);
+    expect(screen.getByRole("navigation", { name: "Document commands" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Skip to model workspace" })).toHaveAttribute("href", "#model-workspace");
+    expect(screen.getByRole("link", { name: "Skip to revision custody" })).toHaveAttribute("href", "#revision-custody");
+    expect(screen.getByRole("region", { name: "Model workspace" })).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByRole("complementary", { name: "Revision custody" })).toHaveAttribute("tabindex", "-1");
+
+    const footer = screen.getByRole("contentinfo", { name: "Persistent safety truth" });
+    expect(within(footer).getByTestId("fabrication-release")).toHaveTextContent("false");
+    expect(within(footer).getByTestId("machine-actuation")).toHaveTextContent("false");
+  });
+
+  it("provides bounded responsive panel toggles without changing authored authority", async () => {
+    render(<App application={application()} geometryDisabled />);
+    await screen.findByText("Accepted immutable revision");
+
+    const modelToggle = screen.getByRole("button", { name: "Model panel" });
+    const custodyToggle = screen.getByRole("button", { name: "Revision custody panel" });
+    expect(modelToggle).toHaveAttribute("aria-expanded", "false");
+    expect(custodyToggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(modelToggle);
+    expect(modelToggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("complementary", { name: "Model and source controls" })).toHaveClass("open");
+    fireEvent.click(custodyToggle);
+    expect(custodyToggle).toHaveAttribute("aria-expanded", "true");
+    expect(modelToggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("complementary", { name: "Revision custody" })).toHaveClass("open");
+    expect(screen.getByTestId("fabrication-release")).toHaveTextContent("false");
+  });
+
   it("commits a candidate while retaining the accepted revision", async () => {
     const repository = new MemoryProjectRepository();
     render(<App application={application(repository)} geometryDisabled />);
