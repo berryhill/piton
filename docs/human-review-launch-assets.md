@@ -26,4 +26,17 @@ Use the browser workbench to complete this bounded interaction review:
 
 The four document records and their displayed parameter values are static fixture metadata and review-interaction evidence only. They are not exact-kernel realization, exact topology, fabrication suitability, engineering approval, export, or release claims.
 
+## R14/C static Assembly review scene
+
+With `Bench Clamp.assembly` active, complete this bounded review:
+
+1. Confirm the viewport identifies `Assembly scene · Bench Clamp`, reports four visible occurrences, and reports `CAD Z min 0 mm` on the physical grid/build plane.
+2. Confirm the occurrences are `Base Plate:1 (Fixed)`, `Clamp Jaw:1`, `Clamp Jaw:2`, and `Guide Pin:1`; both Clamp Jaw occurrences must remain independently selectable.
+3. Select each occurrence and use its disclosed source reference. Confirm both Clamp Jaw occurrences resolve to the same `Clamp Jaw.part` source while retaining distinct occurrence IDs.
+4. Select a contextual review face and confirm its ID is occurrence-qualified rather than presented as durable exact topology.
+5. Confirm the only relationships shown are `Distance Mate · Jaw spacing` at 72 mm and `Concentric Mate · Guide Pin`, both explicitly labeled `review-only`.
+6. Confirm no interaction can author an occurrence, transform, mate, Assembly revision, approval, export, fabrication release, or machine actuation.
+
+This scene is static browser-local Three.js review geometry. It communicates explicit occurrence/source/relationship semantics, but it is not exact geometry, a solved Assembly, or fabrication evidence.
+
 The test gate is automated candidate evidence, not a substitute for this visual human review. The repository does not contain an exact-CAD adapter, disconnected packet generator, engineering-approval issuer, fabrication exporter, release path, or machine-control path.

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { BrowserProject, DesignRevision } from "./domain";
 import type { BuildStatus, CadApplication } from "./application";
 import Viewport from "./components/Viewport";
+import AssemblyViewport from "./components/AssemblyViewport";
+import { R14_ASSEMBLY, assemblyContextualFaceId } from "./assembly";
 import type { MeshBounds } from "./geometry/view";
 import { reviewDistanceMm } from "./geometry/view";
 import { durableGeometryStatusLabel } from "./geometry/binding";
@@ -29,6 +31,10 @@ const SEMANTIC_SELECTIONS: ReadonlyArray<{ id: SemanticSelectionId; label: strin
   { id: "plane:top", label: "Top plane" },
   { id: "mate:review-only", label: "Review mate" },
 ];
+
+function isSemanticSelectionId(value: string | null): value is SemanticSelectionId {
+  return SEMANTIC_SELECTIONS.some(({ id }) => id === value);
+}
 
 function derivePortableCustodyFilename(name: string, fingerprint: string): string {
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "piton-project";
@@ -75,9 +81,15 @@ export default function App({ application, geometryDisabled, startupMode = "open
   const activeFixtureState = fixtureWorkspace.documentStates[fixtureWorkspace.activeDocumentId];
   const fixtureKind = activeFixtureDocument.kind;
   const selectionMode = activeFixtureState.selectionMode;
-  const currentSelection = activeFixtureState.selection as SemanticSelectionId | null;
+  const currentSelection = activeFixtureState.selection;
   const measurementMm = activeFixtureState.reviewMeasurementMm;
-  const currentSelectionLabel = SEMANTIC_SELECTIONS.find((selection) => selection.id === currentSelection)?.label ?? "None";
+  const currentSelectionLabel = SEMANTIC_SELECTIONS.find((selection) => selection.id === currentSelection)?.label
+    ?? R14_ASSEMBLY.occurrences.find(({ id }) => id === currentSelection)?.label
+    ?? R14_ASSEMBLY.relationships.find(({ id }) => id === currentSelection)?.label
+    ?? R14_ASSEMBLY.contextualFaces.find(({ id }) => id === currentSelection)?.id
+    ?? "None";
+  const assemblyContextOccurrence = R14_ASSEMBLY.occurrences.find(({ id }) => id === currentSelection)
+    ?? R14_ASSEMBLY.occurrences.find(({ id }) => currentSelection?.startsWith(`contextual-face:${id}:`));
 
   function selectSemantic(id: SemanticSelectionId) {
     setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, { selection: id, reviewMeasurementMm: null }));
@@ -92,7 +104,7 @@ export default function App({ application, geometryDisabled, startupMode = "open
   }
 
   function measureSelection() {
-    if (!previewParameters || !currentSelection) return;
+    if (!previewParameters || !isSemanticSelectionId(currentSelection)) return;
     const height = previewParameters.base_thickness_mm + previewParameters.leg_length_mm;
     const endpointBySelection: Record<SemanticSelectionId, [number, number, number]> = {
       "face:top": [0, 0, previewParameters.leg_length_mm],
@@ -285,8 +297,32 @@ export default function App({ application, geometryDisabled, startupMode = "open
           : "Part is the active consequential Stage 1 artifact."}</p>
         <h2>Model tree</h2>
         <nav className="model-tree" aria-label="Model tree">
-          <button onClick={() => setNavigationContext("Source-Part · L-bracket Part")}>▣ Source-Part · L-bracket Part</button>
-          <button onClick={() => setNavigationContext("Displayed occurrence · L-bracket:1")}>◇ Displayed occurrence · L-bracket:1</button>
+          {fixtureKind === "assembly" ? <>
+            <button onClick={() => setNavigationContext("Source-Part · Base Plate.part")}>▣ Source-Part · Base Plate.part</button>
+            <button onClick={() => setNavigationContext("Displayed occurrence · Base Plate:1")}>◇ Displayed occurrence · Base Plate:1</button>
+            {R14_ASSEMBLY.occurrences.map((occurrence) => <button
+              key={occurrence.id}
+              aria-pressed={currentSelection === occurrence.id}
+              onClick={() => setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, { selection: occurrence.id }))}
+            >◇ {occurrence.label}{occurrence.fixed ? " (Fixed)" : ""}</button>)}
+            {assemblyContextOccurrence ? <div className="assembly-tree-occurrence">
+              <button onClick={() => {
+                setNavigationContext(`Source-Part · ${fixtureDocument(assemblyContextOccurrence.sourceDocumentId).fileName} · from ${assemblyContextOccurrence.label}`);
+                setFixtureWorkspace((workspace) => openFixtureDocument(workspace, assemblyContextOccurrence.sourceDocumentId));
+              }}>Open source · {fixtureDocument(assemblyContextOccurrence.sourceDocumentId).fileName} · from {assemblyContextOccurrence.label}</button>
+              <button onClick={() => setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, {
+                selection: assemblyContextualFaceId(assemblyContextOccurrence.id, assemblyContextOccurrence.sourceDocumentId === "base-plate.part" ? "face:top" : assemblyContextOccurrence.sourceDocumentId === "clamp-jaw.part" ? "face:jaw-grip" : "face:pin-shaft"),
+              }))}>▱ Contextual review face · {assemblyContextOccurrence.label}</button>
+            </div> : null}
+            {R14_ASSEMBLY.relationships.map((relationship) => <button
+              key={relationship.id}
+              aria-pressed={currentSelection === relationship.id}
+              onClick={() => setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, { selection: relationship.id }))}
+            >⌁ {relationship.label} · {relationship.status}</button>)}
+          </> : <>
+            <button onClick={() => setNavigationContext("Source-Part · L-bracket Part")}>▣ Source-Part · L-bracket Part</button>
+            <button onClick={() => setNavigationContext("Displayed occurrence · L-bracket:1")}>◇ Displayed occurrence · L-bracket:1</button>
+          </>}
         </nav>
         <div className="navigation-context" data-testid="navigation-context">Navigation: {navigationContext}</div>
         <h2>Selection</h2>
@@ -330,11 +366,14 @@ export default function App({ application, geometryDisabled, startupMode = "open
         {portableError ? <p className="portable-error" data-testid="portable-custody-error" role="alert">Portable custody error: {portableError}</p> : null}
         <small className="identity-note">Portable custody is a closed browser-typescript/v1 derivative. It does not carry Manifold review meshes, exact B-rep, approval, release, fabrication, or machine actuation authority.</small>
       </aside>
-      <section className="canvas"><Viewport
+      <section className="canvas">{fixtureKind === "assembly" ? <AssemblyViewport
+        disabled={geometryDisabled}
+        selectedEntityId={currentSelection}
+      /> : <Viewport
         parameters={(previewParameters ?? current.parameters) as DesignRevision["parameters"]}
         authoritativeBase={current}
         disabled={geometryDisabled}
-        semanticSelection={currentSelection}
+        semanticSelection={isSemanticSelectionId(currentSelection) ? currentSelection : null}
         onGeometryAdmitted={(bounds) => setRenderedBounds(bounds)}
         onBuildStatus={(status) => {
           const durable = { ...status, projectId: project.id };
@@ -342,8 +381,12 @@ export default function App({ application, geometryDisabled, startupMode = "open
             setMessage(`Preview status persistence failed: ${error instanceof Error ? error.message : "unknown error"}`);
           });
         }}
-      />
-        <div className="bbox">{renderedBounds
+      />}
+        <div className="bbox">{!previewParameters
+          ? "BBOX awaiting admitted review geometry"
+          : fixtureKind === "assembly"
+          ? <>BBOX <b>static Assembly scene · CAD Z min 0 mm</b></>
+          : renderedBounds
           ? <>BBOX <b>{renderedBounds.size.map(formatMillimetres).join(" × ")} mm</b></>
           : "BBOX awaiting admitted review geometry"}</div>
         <div className="measurement-panel">
