@@ -47,6 +47,7 @@ export default function App({ application, geometryDisabled, startupMode = "open
   const [attachedContext, setAttachedContext] = useState<{ id: SemanticSelectionId; label: string; revisionId: string } | null>(null);
   const [portableBusy, setPortableBusy] = useState(false);
   const [portableError, setPortableError] = useState<string | null>(null);
+  const [openResponsivePanel, setOpenResponsivePanel] = useState<"model" | "custody" | null>(null);
   const portableFileInput = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => { void (async () => {
@@ -235,15 +236,17 @@ export default function App({ application, geometryDisabled, startupMode = "open
     <small>Fresh namespace only · review-only · unreleased · no machine actuation.</small>
   </main>;
   if (!project || !current || !accepted) return <main className="loading"><h1>Piton</h1><p>{message}</p></main>;
-  return <main>
-    <header><div><span className="eyebrow">PITON</span><h1>Piton Workbench</h1></div><div className="truth-badge">REVIEW ONLY · UNRELEASED</div></header>
-    <section className="truth-strip" aria-label="Safety truth">
-      <Truth label="review_state" value={current.reviewState} />
-      <Truth label="fabrication_release" value={String(current.fabricationRelease)} testId="fabrication-release" />
-      <Truth label="machine_actuation" value={String(current.machineActuation)} testId="machine-actuation" />
-      <Truth label="release_state" value={current.releaseState} />
-    </section>
-    <section className="fixture-documents" aria-label="Bench Clamp Fixture documents">
+  return <main className="workbench-shell" data-testid="workbench-shell">
+    <a className="skip-link" href="#model-workspace">Skip to model workspace</a>
+    <a className="skip-link" href="#revision-custody">Skip to revision custody</a>
+    <header><div><span className="eyebrow">PITON</span><h1>Piton Workbench</h1></div>
+      <div className="responsive-panel-actions" aria-label="Responsive workbench panels">
+        <button aria-label="Model panel" aria-controls="model-panel" aria-expanded={openResponsivePanel === "model"} onClick={() => setOpenResponsivePanel((open) => open === "model" ? null : "model")}>Model</button>
+        <button aria-label="Revision custody panel" aria-controls="revision-custody" aria-expanded={openResponsivePanel === "custody"} onClick={() => setOpenResponsivePanel((open) => open === "custody" ? null : "custody")}>Custody</button>
+      </div>
+      <div className="truth-badge">REVIEW ONLY · UNRELEASED</div>
+    </header>
+    <nav className="fixture-documents" aria-label="Document commands">
       <div className="fixture-project">
         <b>{R14_FIXTURE.name}</b>
         <span>Project container · review fixture metadata</span>
@@ -268,9 +271,10 @@ export default function App({ application, geometryDisabled, startupMode = "open
         })}
       </div>
       <small className="identity-note">{R14_FIXTURE.claimScope}</small>
-    </section>
-    <div className="workspace">
-      <aside className="panel model-panel">
+    </nav>
+    <div className="workspace" id="model-workspace" role="region" aria-label="Model workspace" tabIndex={-1}>
+      <aside id="model-panel" aria-label="Model and source controls" className={`panel model-panel${openResponsivePanel === "model" ? " open" : ""}`}>
+        <button className="panel-close" aria-label="Close model panel" onClick={() => setOpenResponsivePanel(null)}>×</button>
         <h2>Review fixture</h2>
         <div className="segmented" role="group" aria-label="Review fixture kind">
           <button aria-pressed={fixtureKind === "part"} onClick={() => setFixtureWorkspace((workspace) => openFixtureDocument(workspace, "base-plate.part"))}>Part fixture</button>
@@ -349,7 +353,9 @@ export default function App({ application, geometryDisabled, startupMode = "open
             : `Approx. review-mesh distance ${formatMillimetres(measurementMm)} mm · review-only, not exact B-rep`}</output>
         </div>
       </section>
-      <aside className="panel revision"><h2>Revision custody</h2><div className="state-card"><span>Accepted immutable revision</span><code>{accepted.id}</code><small>Retained unchanged</small></div>
+      <aside id="revision-custody" aria-label="Revision custody" tabIndex={-1} className={`panel revision${openResponsivePanel === "custody" ? " open" : ""}`}>
+        <button className="panel-close" aria-label="Close revision custody panel" onClick={() => setOpenResponsivePanel(null)}>×</button>
+        <h2>Revision custody</h2><div className="state-card"><span>Accepted immutable revision</span><code>{accepted.id}</code><small>Retained unchanged</small></div>
         <div className="state-card"><span>Current revision</span><code>{current.id}</code></div>
         {changed && previewParameters ? <div className="diff"><b>Parameter diff</b><span>{current.parameters.leg_length_mm} mm → {value} mm</span><strong>Preview only · not committed</strong></div> : <p className="muted">Change the selected parameter to create a preview.</p>}
         <button className="commit" disabled={!changed} onClick={() => void commit()}>Commit candidate</button>
@@ -363,6 +369,12 @@ export default function App({ application, geometryDisabled, startupMode = "open
         <div className="disclosure"><b>Claim scope</b><p>Browser Manifold mesh is review geometry, not exact B-rep or topology authority. Commit does not approve, export, release, or actuate.</p></div>
       </aside>
     </div>
+    <footer className="truth-strip" role="contentinfo" aria-label="Persistent safety truth">
+      <Truth label="review_state" value={current.reviewState} />
+      <Truth label="fabrication_release" value={String(current.fabricationRelease)} testId="fabrication-release" />
+      <Truth label="machine_actuation" value={String(current.machineActuation)} testId="machine-actuation" />
+      <Truth label="release_state" value={current.releaseState} />
+    </footer>
   </main>;
 }
 
