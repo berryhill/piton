@@ -15,6 +15,8 @@ const applicationSourceFiles = [
   "App.tsx",
   "agentAdapter.ts",
   "application.ts",
+  "assembly.ts",
+  "components/AssemblyViewport.tsx",
   "components/Viewport.tsx",
   "domain.ts",
   "fixture.ts",
