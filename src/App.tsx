@@ -1,23 +1,32 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import type { BrowserProject, DesignRevision } from "./domain";
 import type { BuildStatus, CadApplication } from "./application";
 import Viewport from "./components/Viewport";
 import AssemblyViewport from "./components/AssemblyViewport";
 import { R14_ASSEMBLY, assemblyContextualFaceId } from "./assembly";
 import type { MeshBounds } from "./geometry/view";
-import { reviewDistanceMm } from "./geometry/view";
+
 import { durableGeometryStatusLabel } from "./geometry/binding";
 import type { StartupMode } from "./startup";
 import {
   R14_FIXTURE,
   activateFixtureDocument,
+  clearFixtureReviewMeasurement,
   closeFixtureDocument,
   createFixtureSession,
+  dispatchFixtureReviewCommand,
+  fixtureCommandCategories,
   fixtureDocument,
+  fixtureModelTree,
+  fixtureOpenPartTarget,
+  flattenFixtureTree,
   openFixtureDocument,
-  updateActiveDocumentState,
+  setFixtureCommandCategory,
+  setFixtureTreeInteraction,
+  updateFixtureDocumentView,
 } from "./fixture";
-import type { FixtureSelectionMode, FixtureViewPreset } from "./fixture";
+import type { FixtureCommandCategory, FixtureSelectionMode, FixtureTreeNode, FixtureViewPreset } from "./fixture";
 import "./styles.css";
 
 interface Props { application: CadApplication; geometryDisabled?: boolean; startupMode?: StartupMode; }
@@ -35,6 +44,7 @@ const SEMANTIC_SELECTIONS: ReadonlyArray<{ id: SemanticSelectionId; label: strin
 function isSemanticSelectionId(value: string | null): value is SemanticSelectionId {
   return SEMANTIC_SELECTIONS.some(({ id }) => id === value);
 }
+
 
 function derivePortableCustodyFilename(name: string, fingerprint: string): string {
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "piton-project";
@@ -83,7 +93,14 @@ export default function App({ application, geometryDisabled, startupMode = "open
   const selectionMode = activeFixtureState.selectionMode;
   const currentSelection = activeFixtureState.selection;
   const measurementMm = activeFixtureState.reviewMeasurementMm;
-  const currentSelectionLabel = SEMANTIC_SELECTIONS.find((selection) => selection.id === currentSelection)?.label
+  const activeModelTree = useMemo(() => fixtureModelTree(activeFixtureDocument.id), [activeFixtureDocument.id]);
+  const activeTreeNodes = useMemo(() => flattenFixtureTree(activeModelTree), [activeModelTree]);
+  const admittedMeasurement = currentSelection && activeFixtureState.commandCategory === "inspect"
+    ? activeTreeNodes.find(({ id, kind }) => id === currentSelection && kind === "review-surface") ?? null
+    : null;
+  const currentSelectionLabel = currentSelection?.startsWith("contextual-face:") ? currentSelection
+    : activeTreeNodes.find(({ id }) => id === currentSelection)?.label
+    ?? SEMANTIC_SELECTIONS.find((selection) => selection.id === currentSelection)?.label
     ?? R14_ASSEMBLY.occurrences.find(({ id }) => id === currentSelection)?.label
     ?? R14_ASSEMBLY.relationships.find(({ id }) => id === currentSelection)?.label
     ?? R14_ASSEMBLY.contextualFaces.find(({ id }) => id === currentSelection)?.id
@@ -92,35 +109,107 @@ export default function App({ application, geometryDisabled, startupMode = "open
     ?? R14_ASSEMBLY.occurrences.find(({ id }) => currentSelection?.startsWith(`contextual-face:${id}:`));
 
   function selectSemantic(id: SemanticSelectionId) {
-    setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, { selection: id, reviewMeasurementMm: null }));
+    const expectedDocumentId = activeFixtureDocument.id;
+    if (activeFixtureState.commandCategory !== "inspect" || !activeTreeNodes.some((node) => node.id === id)) return;
+    setFixtureWorkspace((workspace) => setFixtureTreeInteraction(workspace, expectedDocumentId, { selectionId: id, focusId: id }));
   }
 
   function setSelectionMode(mode: FixtureSelectionMode) {
-    setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, { selectionMode: mode }));
+    const expectedDocumentId = activeFixtureDocument.id;
+    setFixtureWorkspace((workspace) => updateFixtureDocumentView(workspace, expectedDocumentId, { selectionMode: mode }));
   }
 
   function setFixtureView(viewPreset: FixtureViewPreset) {
-    setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, { viewPreset }));
+    const expectedDocumentId = activeFixtureDocument.id;
+    setFixtureWorkspace((workspace) => updateFixtureDocumentView(workspace, expectedDocumentId, { viewPreset }));
+  }
+
+  function selectTreeNode(id: string) {
+    const expectedDocumentId = activeFixtureDocument.id;
+    setFixtureWorkspace((workspace) => setFixtureTreeInteraction(workspace, expectedDocumentId, { selectionId: id, focusId: id }));
+  }
+
+  function toggleTreeNode(id: string, expand?: boolean) {
+    const expectedDocumentId = activeFixtureDocument.id;
+    setFixtureWorkspace((workspace) => {
+      if (workspace.activeDocumentId !== expectedDocumentId) throw new Error("stale or inactive fixture document context");
+      const state = workspace.documentStates[expectedDocumentId];
+      const expanded = new Set(state.treeExpandedIds);
+      const shouldExpand = expand ?? !expanded.has(id);
+      if (shouldExpand) expanded.add(id); else expanded.delete(id);
+      return setFixtureTreeInteraction(workspace, expectedDocumentId, { expandedIds: [...expanded], focusId: id });
+    });
+  }
+
+  function focusTreeNode(id: string) {
+    const expectedDocumentId = activeFixtureDocument.id;
+    setFixtureWorkspace((workspace) => setFixtureTreeInteraction(workspace, expectedDocumentId, { focusId: id }));
+    requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-tree-id="${id}"]`)?.focus());
+  }
+
+  function handleTreeKey(event: KeyboardEvent, id: string) {
+    const visible = visibleFixtureTreeNodes(activeModelTree, new Set(activeFixtureState.treeExpandedIds));
+    const index = visible.findIndex((node) => node.id === id);
+    const node = visible[index];
+    if (!node) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      const targetIndex = event.key === "Home" ? 0 : event.key === "End" ? visible.length - 1 : Math.max(0, Math.min(visible.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
+      focusTreeNode(visible[targetIndex].id);
+    } else if (event.key === "ArrowRight" && node.children.length > 0) {
+      event.preventDefault();
+      if (!activeFixtureState.treeExpandedIds.includes(id)) toggleTreeNode(id, true); else focusTreeNode(node.children[0].id);
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      if (activeFixtureState.treeExpandedIds.includes(id) && node.children.length > 0) toggleTreeNode(id, false);
+      else {
+        const parent = fixtureTreeParentId(activeModelTree, id);
+        if (parent) focusTreeNode(parent);
+      }
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      selectTreeNode(id);
+    }
+  }
+
+  function openSelectedPart(selectionId = currentSelection) {
+    if (activeFixtureState.commandCategory !== "inspect") return;
+    const target = fixtureOpenPartTarget(activeFixtureDocument.id, selectionId);
+    if (!target || !selectionId) return;
+    const sourceName = fixtureDocument(target).fileName;
+    const contextualOccurrence = R14_ASSEMBLY.occurrences.find(({ id }) => selectionId.startsWith(`contextual-face:${id}:`));
+    const sourceSelectionLabel = contextualOccurrence?.label
+      ?? activeTreeNodes.find(({ id }) => id === selectionId)?.label
+      ?? currentSelectionLabel;
+    const expectedDocumentId = activeFixtureDocument.id;
+    const category = activeFixtureState.commandCategory;
+    setFixtureWorkspace((workspace) => dispatchFixtureReviewCommand(workspace, {
+      expectedDocumentId,
+      category,
+      command: "open-part",
+      selectionId,
+    }));
+    setNavigationContext(`Source-Part · ${sourceName} · from ${sourceSelectionLabel}`);
   }
 
   function measureSelection() {
-    if (!previewParameters || !isSemanticSelectionId(currentSelection)) return;
-    const height = previewParameters.base_thickness_mm + previewParameters.leg_length_mm;
-    const endpointBySelection: Record<SemanticSelectionId, [number, number, number]> = {
-      "face:top": [0, 0, previewParameters.leg_length_mm],
-      "component:l-bracket:1": [previewParameters.base_length_mm, previewParameters.leg_width_mm, height],
-      origin: [0, 0, 0],
-      "plane:top": [previewParameters.base_length_mm, 0, 0],
-      "mate:review-only": [previewParameters.leg_thickness_mm, previewParameters.leg_width_mm, 0],
-    };
-    setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, {
-      reviewMeasurementMm: reviewDistanceMm([0, 0, 0], endpointBySelection[currentSelection]),
+    if (!admittedMeasurement || !currentSelection) return;
+    const expectedDocumentId = activeFixtureDocument.id;
+    const category = activeFixtureState.commandCategory;
+    const selectionId = currentSelection;
+    setFixtureWorkspace((workspace) => dispatchFixtureReviewCommand(workspace, {
+      expectedDocumentId,
+      category,
+      command: "measure",
+      selectionId,
     }));
   }
 
   useEffect(() => {
-    if (!previewParameters) setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, { reviewMeasurementMm: null }));
-  }, [previewParameters]);
+    if (previewParameters || activeFixtureState.reviewMeasurementMm == null) return;
+    const expectedDocumentId = activeFixtureDocument.id;
+    setFixtureWorkspace((workspace) => clearFixtureReviewMeasurement(workspace, expectedDocumentId));
+  }, [activeFixtureDocument.id, activeFixtureState.reviewMeasurementMm, previewParameters]);
 
   async function commit() {
     if (!project || !changed) return;
@@ -296,35 +385,56 @@ export default function App({ application, geometryDisabled, startupMode = "open
           ? "Assembly fixture is review-only interaction evidence. It cannot author occurrences, mates, transforms, or Assembly revisions."
           : "Part is the active consequential Stage 1 artifact."}</p>
         <h2>Model tree</h2>
-        <nav className="model-tree" aria-label="Model tree">
-          {fixtureKind === "assembly" ? <>
-            <button onClick={() => setNavigationContext("Source-Part · Base Plate.part")}>▣ Source-Part · Base Plate.part</button>
-            <button onClick={() => setNavigationContext("Displayed occurrence · Base Plate:1")}>◇ Displayed occurrence · Base Plate:1</button>
-            {R14_ASSEMBLY.occurrences.map((occurrence) => <button
-              key={occurrence.id}
-              aria-pressed={currentSelection === occurrence.id}
-              onClick={() => setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, { selection: occurrence.id }))}
-            >◇ {occurrence.label}{occurrence.fixed ? " (Fixed)" : ""}</button>)}
-            {assemblyContextOccurrence ? <div className="assembly-tree-occurrence">
-              <button onClick={() => {
-                setNavigationContext(`Source-Part · ${fixtureDocument(assemblyContextOccurrence.sourceDocumentId).fileName} · from ${assemblyContextOccurrence.label}`);
-                setFixtureWorkspace((workspace) => openFixtureDocument(workspace, assemblyContextOccurrence.sourceDocumentId));
-              }}>Open source · {fixtureDocument(assemblyContextOccurrence.sourceDocumentId).fileName} · from {assemblyContextOccurrence.label}</button>
-              <button onClick={() => setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, {
-                selection: assemblyContextualFaceId(assemblyContextOccurrence.id, assemblyContextOccurrence.sourceDocumentId === "base-plate.part" ? "face:top" : assemblyContextOccurrence.sourceDocumentId === "clamp-jaw.part" ? "face:jaw-grip" : "face:pin-shaft"),
-              }))}>▱ Contextual review face · {assemblyContextOccurrence.label}</button>
-            </div> : null}
-            {R14_ASSEMBLY.relationships.map((relationship) => <button
-              key={relationship.id}
-              aria-pressed={currentSelection === relationship.id}
-              onClick={() => setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, { selection: relationship.id }))}
-            >⌁ {relationship.label} · {relationship.status}</button>)}
-          </> : <>
-            <button onClick={() => setNavigationContext("Source-Part · L-bracket Part")}>▣ Source-Part · L-bracket Part</button>
-            <button onClick={() => setNavigationContext("Displayed occurrence · L-bracket:1")}>◇ Displayed occurrence · L-bracket:1</button>
-          </>}
-        </nav>
+        <div className="model-tree" role="tree" aria-label="Model tree">
+          <FixtureTree
+            nodes={activeModelTree}
+            expandedIds={activeFixtureState.treeExpandedIds}
+            focusId={activeFixtureState.treeFocusId}
+            selectionId={currentSelection}
+            onToggle={toggleTreeNode}
+            onSelect={selectTreeNode}
+            onKeyDown={handleTreeKey}
+            onOpenPart={openSelectedPart}
+          />
+        </div>
+        <div className="legacy-tree-navigation" aria-label="Source and occurrence navigation">
+          <button onClick={() => setNavigationContext(`Source-Part · ${activeFixtureDocument.fileName}`)}>▣ Source-Part · {activeFixtureDocument.fileName}</button>
+          <button onClick={() => setNavigationContext(`Displayed occurrence · ${fixtureKind === "assembly" ? "Base Plate:1" : activeFixtureDocument.fileName.replace(/\.part$/, ":1")}`)}>◇ Displayed occurrence · {fixtureKind === "assembly" ? "Base Plate:1" : activeFixtureDocument.fileName.replace(/\.part$/, ":1")}</button>
+        </div>
+        {fixtureKind === "assembly" && assemblyContextOccurrence ? <div className="assembly-tree-occurrence">
+          <button disabled={activeFixtureState.commandCategory !== "inspect"} onClick={() => openSelectedPart()}>Open source · {fixtureDocument(assemblyContextOccurrence.sourceDocumentId).fileName} · from {assemblyContextOccurrence.label}</button>
+          <button disabled={activeFixtureState.commandCategory !== "inspect"} onClick={() => {
+            const id = assemblyContextualFaceId(assemblyContextOccurrence.id, assemblyContextOccurrence.sourceDocumentId === "base-plate.part" ? "face:top" : assemblyContextOccurrence.sourceDocumentId === "clamp-jaw.part" ? "face:jaw-grip" : "face:pin-shaft");
+            selectTreeNode(id);
+          }}>▱ Contextual review face · {assemblyContextOccurrence.label}</button>
+        </div> : null}
         <div className="navigation-context" data-testid="navigation-context">Navigation: {navigationContext}</div>
+        <h2>Review commands</h2>
+        <div className="segmented" role="group" aria-label="Review command categories">
+          {fixtureCommandCategories(activeFixtureDocument.id).map((category) => <button
+            key={category}
+            aria-pressed={activeFixtureState.commandCategory === category}
+            onClick={() => {
+              const expectedDocumentId = activeFixtureDocument.id;
+              setFixtureWorkspace((workspace) => setFixtureCommandCategory(workspace, expectedDocumentId, category));
+            }}
+          >{category[0].toUpperCase() + category.slice(1)}</button>)}
+        </div>
+        <CommandControls
+          category={activeFixtureState.commandCategory}
+          measurementAvailable={activeFixtureState.reviewMeasurementMm != null || activeFixtureState.measurement.phase !== "idle"}
+          openPartAvailable={fixtureOpenPartTarget(activeFixtureDocument.id, currentSelection) != null}
+          measureAvailable={admittedMeasurement != null}
+          onMeasure={measureSelection}
+          onClearMeasurement={() => {
+            const expectedDocumentId = activeFixtureDocument.id;
+            const category = activeFixtureState.commandCategory;
+            setFixtureWorkspace((workspace) => dispatchFixtureReviewCommand(workspace, {
+              expectedDocumentId, category, command: "clear-measurement",
+            }));
+          }}
+          onOpenPart={() => openSelectedPart()}
+        />
         <h2>Selection</h2>
         <div className="segmented" role="group" aria-label="Selection mode">
           {(["smart", "face", "component"] as const).map((mode) => <button key={mode} disabled={fixtureKind === "part" && mode === "component"} aria-pressed={selectionMode === mode} onClick={() => setSelectionMode(mode)}>{mode[0].toUpperCase() + mode.slice(1)}</button>)}
@@ -334,7 +444,9 @@ export default function App({ application, geometryDisabled, startupMode = "open
           {(["iso", "front", "top"] as const).map((preset) => <button key={preset} aria-pressed={activeFixtureState.viewPreset === preset} onClick={() => setFixtureView(preset)}>{preset[0].toUpperCase() + preset.slice(1)}</button>)}
         </div>
         <div className="semantic-list" aria-label="Fixture-local semantic review selections">
-          {SEMANTIC_SELECTIONS.map((selection) => <button key={selection.id} aria-pressed={currentSelection === selection.id} onClick={() => selectSemantic(selection.id)}>{selection.label}</button>)}
+          {SEMANTIC_SELECTIONS.map((selection) => <button key={selection.id}
+            disabled={activeFixtureState.commandCategory !== "inspect" || !activeTreeNodes.some((node) => node.id === selection.id)}
+            aria-pressed={currentSelection === selection.id} onClick={() => selectSemantic(selection.id)}>{selection.label}</button>)}
         </div>
         <div className="context-card"><span>Current selection</span><b data-testid="current-selection">{currentSelectionLabel}</b></div>
         <div className="context-card"><span>Attached context</span><b data-testid="attached-context">{attachedContext ? `${attachedContext.label} · ${attachedContext.revisionId}` : "None"}</b></div>
@@ -343,7 +455,10 @@ export default function App({ application, geometryDisabled, startupMode = "open
             const selection = SEMANTIC_SELECTIONS.find((candidate) => candidate.id === currentSelection);
             if (selection && current) setAttachedContext({ ...selection, revisionId: current.id });
           }}>Attach current selection</button>
-          <button disabled={!currentSelection} onClick={() => setFixtureWorkspace((workspace) => updateActiveDocumentState(workspace, { selection: null, reviewMeasurementMm: null }))}>Clear current selection</button>
+          <button disabled={!currentSelection || activeFixtureState.commandCategory !== "inspect"} onClick={() => {
+            const expectedDocumentId = activeFixtureDocument.id;
+            setFixtureWorkspace((workspace) => setFixtureTreeInteraction(workspace, expectedDocumentId, { selectionId: null }));
+          }}>Clear current selection</button>
         </div>
         <small className="identity-note">Fixture-local review IDs · admitted artifact scope · not durable topology.</small>
         <h2>Fixture metadata · {activeFixtureDocument.fileName}</h2>
@@ -390,7 +505,7 @@ export default function App({ application, geometryDisabled, startupMode = "open
           ? <>BBOX <b>{renderedBounds.size.map(formatMillimetres).join(" × ")} mm</b></>
           : "BBOX awaiting admitted review geometry"}</div>
         <div className="measurement-panel">
-          <button disabled={!currentSelection || !previewParameters} onClick={measureSelection}>Measure selected review entity</button>
+          <button disabled={admittedMeasurement == null} onClick={measureSelection}>Measure selected review entity</button>
           <output data-testid="review-measurement">{measurementMm === null
             ? "Review-mesh distance · select an entity"
             : `Approx. review-mesh distance ${formatMillimetres(measurementMm)} mm · review-only, not exact B-rep`}</output>
@@ -419,6 +534,106 @@ export default function App({ application, geometryDisabled, startupMode = "open
       <Truth label="release_state" value={current.releaseState} />
     </footer>
   </main>;
+}
+
+function visibleFixtureTreeNodes(nodes: readonly FixtureTreeNode[], expandedIds: ReadonlySet<string>): FixtureTreeNode[] {
+  return nodes.flatMap((node) => [node, ...(expandedIds.has(node.id) ? visibleFixtureTreeNodes(node.children, expandedIds) : [])]);
+}
+
+function fixtureTreeParentId(nodes: readonly FixtureTreeNode[], childId: string, parentId: string | null = null): string | null {
+  for (const node of nodes) {
+    if (node.id === childId) return parentId;
+    const nested = fixtureTreeParentId(node.children, childId, node.id);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function treeNodeLabel(node: FixtureTreeNode): string {
+  if (node.kind === "occurrence") return `◇ ${node.label}`;
+  if (node.kind === "mate") return `⌁ ${node.label}`;
+  if (node.kind === "source-reference") return `▣ ${node.label}`;
+  if (node.kind === "review-surface") return `▱ ${node.label}`;
+  return node.label;
+}
+
+function FixtureTree({
+  nodes, expandedIds, focusId, selectionId, onToggle, onSelect, onKeyDown, onOpenPart,
+}: {
+  nodes: readonly FixtureTreeNode[];
+  expandedIds: readonly string[];
+  focusId: string | null;
+  selectionId: string | null;
+  onToggle: (id: string, expand?: boolean) => void;
+  onSelect: (id: string) => void;
+  onKeyDown: (event: KeyboardEvent, id: string) => void;
+  onOpenPart: (id: string) => void;
+}) {
+  const expanded = new Set(expandedIds);
+  return <>{nodes.map((node) => {
+    const hasChildren = node.children.length > 0;
+    const isExpanded = expanded.has(node.id);
+    return <div key={node.id} className="tree-node">
+      <div
+        role="treeitem"
+        aria-expanded={hasChildren ? isExpanded : undefined}
+        aria-selected={selectionId === node.id}
+        tabIndex={focusId === node.id ? 0 : -1}
+        data-tree-id={node.id}
+        onFocus={() => { /* focus is committed by the roving-key handler */ }}
+        onKeyDown={(event) => onKeyDown(event, node.id)}
+      >
+        {hasChildren ? <button className="tree-twisty" aria-label={`${isExpanded ? "Collapse" : "Expand"} ${node.label}`} onClick={() => onToggle(node.id)}>{isExpanded ? "▾" : "▸"}</button> : <span className="tree-spacer" aria-hidden="true">·</span>}
+        <button
+          tabIndex={-1}
+          aria-label={treeNodeLabel(node)}
+          aria-pressed={selectionId === node.id}
+          onClick={(event) => { if (event.detail <= 1) onSelect(node.id); }}
+          onDoubleClick={() => {
+            if (selectionId !== node.id) onSelect(node.id);
+            onOpenPart(node.id);
+          }}
+        >{treeNodeLabel(node)}</button>
+      </div>
+      {hasChildren && isExpanded ? <div role="group"><FixtureTree
+        nodes={node.children}
+        expandedIds={expandedIds}
+        focusId={focusId}
+        selectionId={selectionId}
+        onToggle={onToggle}
+        onSelect={onSelect}
+        onKeyDown={onKeyDown}
+        onOpenPart={onOpenPart}
+      /></div> : null}
+    </div>;
+  })}</>;
+}
+
+const UNAVAILABLE_COMMANDS: Readonly<Record<Exclude<FixtureCommandCategory, "inspect">, readonly string[]>> = {
+  features: ["New Sketch", "Extrude", "Revolve", "Hole", "Linear Pattern", "Fillet", "Chamfer"],
+  sketch: ["Line", "Rectangle", "Circle", "Dimension"],
+  assembly: ["Insert Component", "Move Component", "Fix/Float"],
+  mates: ["Distance", "Concentric", "Coincident"],
+};
+
+function CommandControls({ category, measurementAvailable, openPartAvailable, measureAvailable, onMeasure, onClearMeasurement, onOpenPart }: {
+  category: FixtureCommandCategory;
+  measurementAvailable: boolean;
+  openPartAvailable: boolean;
+  measureAvailable: boolean;
+  onMeasure: () => void;
+  onClearMeasurement: () => void;
+  onOpenPart: () => void;
+}) {
+  if (category !== "inspect") return <div className="command-controls" aria-label={`${category} commands`}>
+    {UNAVAILABLE_COMMANDS[category].map((command) => <button key={command} disabled title="Unavailable in the R14 review fixture">{command}</button>)}
+    <small>Displayed for vocabulary review only · unavailable · cannot execute.</small>
+  </div>;
+  return <div className="command-controls" aria-label="Inspect commands">
+    <button disabled={!measureAvailable} onClick={onMeasure}>Measure</button>
+    <button disabled={!measurementAvailable} onClick={onClearMeasurement}>Clear Measurement</button>
+    <button disabled={!openPartAvailable} onClick={onOpenPart}>Open Part</button>
+  </div>;
 }
 
 function Truth({ label, value, testId }: { label: string; value: string; testId?: string }) { return <div><span>{label}</span><b data-testid={testId}>{value}</b></div>; }

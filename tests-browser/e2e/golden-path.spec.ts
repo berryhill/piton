@@ -1,5 +1,28 @@
 import { expect, test } from "@playwright/test";
 
+test("measurement admission follows the active document tree and Inspect category", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText("Accepted immutable revision")).toBeVisible();
+
+  const persistentMeasure = page.getByRole("button", { name: "Measure selected review entity" });
+  await expect(page.getByRole("button", { name: "Top review face" })).toBeDisabled();
+  await expect(persistentMeasure).toBeDisabled();
+  await expect(page.getByTestId("review-measurement")).toContainText("select an entity");
+
+  await page.getByRole("button", { name: "Part fixture" }).click();
+  await page.getByRole("button", { name: "Top review face" }).click();
+  await expect(persistentMeasure).toBeEnabled();
+  await page.getByRole("button", { name: "Features" }).click();
+  await expect(persistentMeasure).toBeDisabled();
+  await expect(page.getByTestId("review-measurement")).toContainText("select an entity");
+
+  await page.getByRole("button", { name: "Inspect" }).click();
+  await persistentMeasure.click();
+  await expect(page.getByTestId("review-measurement")).toContainText("80 mm · review-only");
+  await expect(page.getByTestId("fabrication-release")).toHaveText("false");
+  await expect(page.getByTestId("machine-actuation")).toHaveText("false");
+});
+
 test("seeded edit preview commit and OPFS reload remain unreleased", async ({ page }) => {
   test.setTimeout(60_000);
   await page.goto("/");
@@ -25,7 +48,9 @@ test("seeded edit preview commit and OPFS reload remain unreleased", async ({ pa
   await page.getByRole("button", { name: "Top review face" }).click();
   await expect(page.getByTestId("viewport")).toHaveAttribute("data-selected-review-id", "face:top");
   await page.getByRole("button", { name: "Attach current selection" }).click();
-  await page.getByRole("button", { name: "Origin", exact: true }).click();
+  await page.getByRole("tree", { name: "Model tree" })
+    .getByRole("button", { name: "Origin", exact: true })
+    .click();
   await expect(page.getByTestId("attached-context")).toContainText("Top review face");
   await page.getByRole("button", { name: "Clear current selection" }).click();
   await expect(page.getByTestId("attached-context")).toContainText("Top review face");

@@ -39,4 +39,19 @@ With `Bench Clamp.assembly` active, complete this bounded review:
 
 This scene is static browser-local Three.js review geometry. It communicates explicit occurrence/source/relationship semantics, but it is not exact geometry, a solved Assembly, or fabrication evidence.
 
+## R14/D hierarchical model tree and review commands
+
+Review both Part and Assembly documents:
+
+1. Confirm each Part tree contains its document root, `Origin` with Front/Top/Right planes, exactly one `Body`, the declared feature sequence, and a `Review surfaces` branch. Base Plate must show Sketch 1, Extrude 1, Sketch 2, and Hole Pattern 1; Clamp Jaw must show Sketch 1 and Extrude 1; Guide Pin must show Sketch 1 and Revolve 1.
+2. Confirm the Assembly tree has `Components` and `Mates`. Components must contain the four canonical occurrences, explicit source-document references, and occurrence-qualified contextual review surfaces. Mates must contain only the Distance and Concentric relationships, each labeled `review-only`.
+3. Use twisties and Arrow Up/Down/Left/Right, Home, End, Enter, and Space. Confirm one roving tree item is tabbable, activating the selected item again clears selection, and expansion/focus state remains independent when switching documents.
+4. Confirm Part categories are Features/Sketch/Inspect and Assembly categories are Assembly/Mates/Inspect. Inspect must initially be active and each document must restore its own category after tab switching or reopening.
+5. Confirm every feature, sketch, Assembly, and mate-authoring control is visibly unavailable and disabled. These vocabulary controls must not author geometry, occurrences, transforms, mates, or revisions.
+6. In Inspect, confirm Measure requires a selection, Clear Measurement is enabled only when the active document has measurement state, and Open Part is enabled only for a canonical Assembly occurrence, source reference, or contextual review surface.
+7. Double-click canonical source-bearing Assembly selections and confirm navigation opens the exact in-fixture Part. Confirm a mate, unknown ID, missing reference, or inactive-document request cannot navigate or alter any document state.
+8. Switch among Part and Assembly tabs and confirm selection, expansion, focus, category, and measurement state do not leak. Confirm `review_state=needs_human_review`, `fabrication_release=false`, and `machine_actuation=false` remain unchanged.
+
+Tree identities are fixture-local semantic review IDs. Labels, indices, face ordinals, triangle IDs, and Three.js UUIDs are not presented as durable exact topology. Command admission affects only bounded per-document review interaction state; it creates no `DesignRevision`, build success, approval, export, release, or actuation consequence.
+
 The test gate is automated candidate evidence, not a substitute for this visual human review. The repository does not contain an exact-CAD adapter, disconnected packet generator, engineering-approval issuer, fabrication exporter, release path, or machine-control path.
