@@ -4,6 +4,12 @@ test("seeded edit preview commit and OPFS reload remain unreleased", async ({ pa
   test.setTimeout(60_000);
   await page.goto("/");
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Assembly fixture" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText(/Assembly fixture is review-only interaction evidence/)).toBeVisible();
+  await expect(page.getByTestId("assembly-viewport")).toHaveAttribute("data-occurrence-count", "4");
+  await expect(page.getByTestId("assembly-viewport")).toHaveAttribute("data-cad-z-min", "0");
+  await expect(page.getByTestId("assembly-viewport")).toHaveAttribute("data-build-plane-z", "0");
+  await page.getByRole("button", { name: "Part fixture" }).click();
   await expect(page.locator(".viewport-status")).toHaveText("Review mesh ready · CAD Z-min 0 on grid");
   await expect(page.getByTestId("viewport")).toHaveAttribute("data-cad-z-min", "0");
   await expect(page.getByTestId("viewport")).toHaveAttribute("data-build-plane-z", "0");
@@ -12,9 +18,6 @@ test("seeded edit preview commit and OPFS reload remain unreleased", async ({ pa
   await expect(page.getByTestId("viewport")).toHaveAttribute("data-rendered-bbox", /120 × 40 × 88/);
   expect(Number(await page.getByTestId("viewport").getAttribute("data-rendered-vertex-count"))).toBeGreaterThan(16);
 
-  await expect(page.getByRole("button", { name: "Assembly fixture" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByText(/Assembly fixture is review-only interaction evidence/)).toBeVisible();
-  await page.getByRole("button", { name: "Part fixture" }).click();
   await page.getByRole("button", { name: /Displayed occurrence/ }).click();
   await expect(page.getByTestId("navigation-context")).toContainText("Displayed occurrence");
   await page.getByRole("button", { name: "Face", exact: true }).click();

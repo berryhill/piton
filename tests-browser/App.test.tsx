@@ -183,6 +183,32 @@ describe("Piton workbench", () => {
     expect(screen.getByText(/fixture-local review IDs.*not durable topology/i)).toBeVisible();
   });
 
+  it("renders the static four-occurrence Assembly scene and exact source/relationship review semantics", async () => {
+    render(<App application={application()} geometryDisabled />);
+    await screen.findByText("Accepted immutable revision");
+
+    const viewport = screen.getByTestId("assembly-viewport");
+    expect(viewport).toHaveAttribute("data-scene-name", "Assembly scene · Bench Clamp");
+    expect(viewport).toHaveAttribute("data-occurrence-count", "4");
+    expect(viewport).toHaveAttribute("data-cad-z-min", "0");
+    expect(viewport).toHaveAttribute("data-build-plane-z", "0");
+    expect(viewport).toHaveAttribute("data-cad-world-mapping", "CAD Z=Three.js world Z");
+
+    for (const occurrence of ["Base Plate:1 (Fixed)", "Clamp Jaw:1", "Clamp Jaw:2", "Guide Pin:1"]) {
+      expect(screen.getByRole("button", { name: `◇ ${occurrence}` })).toBeVisible();
+    }
+    fireEvent.click(screen.getByRole("button", { name: /Distance Mate · Jaw spacing · review-only/ }));
+    expect(screen.getByTestId("current-selection")).toHaveTextContent("Distance Mate · Jaw spacing");
+    fireEvent.click(screen.getByRole("button", { name: "◇ Clamp Jaw:2" }));
+    expect(screen.getByTestId("current-selection")).toHaveTextContent("Clamp Jaw:2");
+    fireEvent.click(screen.getByRole("button", { name: "▱ Contextual review face · Clamp Jaw:2" }));
+    expect(screen.getByTestId("current-selection")).toHaveTextContent("contextual-face:component:clamp-jaw:2:jaw-grip");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open source · Clamp Jaw.part · from Clamp Jaw:2" }));
+    expect(screen.getByRole("tab", { name: /Clamp Jaw\.part/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("navigation-context")).toHaveTextContent("Clamp Jaw.part · from Clamp Jaw:2");
+  });
+
   it("renders exact fixture files and unique tab lifecycle with independent document controls", async () => {
     render(<App application={application()} geometryDisabled />);
     await screen.findByText("Accepted immutable revision");

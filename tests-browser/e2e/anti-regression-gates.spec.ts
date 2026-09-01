@@ -5,9 +5,20 @@ test("anti-regression gate 1: chromium defaults open with root safety truth and 
   await page.goto("/");
 
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
-  await expect(page.locator(".viewport-status")).toHaveText("Review mesh ready · CAD Z-min 0 on grid");
-  await expect(page.getByTestId("viewport")).toHaveAttribute("data-cad-z-min", "0");
-  await expect(page.getByTestId("viewport")).toHaveAttribute("data-build-plane-z", "0");
+  await expect(page.getByTestId("assembly-viewport")).toHaveAttribute("data-occurrence-count", "4");
+  await expect(page.getByTestId("assembly-viewport")).toHaveAttribute("data-cad-z-min", "0");
+  await expect(page.getByTestId("assembly-viewport")).toHaveAttribute("data-build-plane-z", "0");
+  const partFixture = page.getByRole("button", { name: "Part fixture" });
+  const partViewportStatus = page.locator(".viewport-status");
+  await expect(async () => {
+    if ((await partViewportStatus.textContent()) !== "Review mesh ready · CAD Z-min 0 on grid") {
+      await partFixture.click();
+    }
+    await expect(partFixture).toHaveAttribute("aria-pressed", "true");
+    await expect(partViewportStatus).toHaveText("Review mesh ready · CAD Z-min 0 on grid");
+    await expect(page.getByTestId("viewport")).toHaveAttribute("data-cad-z-min", "0");
+    await expect(page.getByTestId("viewport")).toHaveAttribute("data-build-plane-z", "0");
+  }).toPass({ timeout: 20_000 });
   await expect(page.getByTestId("viewport")).toHaveAttribute("data-controls", "orbit pan zoom");
   await expect(page.getByTestId("viewport")).toHaveAttribute("data-build-volume", "350 × 350 × 350 mm");
   await expect(page.getByTestId("fabrication-release")).toHaveText("false");
