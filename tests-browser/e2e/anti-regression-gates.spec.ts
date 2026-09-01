@@ -8,7 +8,11 @@ test("anti-regression gate 1: chromium defaults open with root safety truth and 
   await expect(page.getByTestId("assembly-viewport")).toHaveAttribute("data-occurrence-count", "4");
   await expect(page.getByTestId("assembly-viewport")).toHaveAttribute("data-cad-z-min", "0");
   await expect(page.getByTestId("assembly-viewport")).toHaveAttribute("data-build-plane-z", "0");
-  await page.getByRole("button", { name: "Part fixture" }).click();
+  const partFixture = page.getByRole("button", { name: "Part fixture" });
+  await expect(async () => {
+    if ((await partFixture.getAttribute("aria-pressed")) !== "true") await partFixture.click();
+    await expect(partFixture).toHaveAttribute("aria-pressed", "true");
+  }).toPass({ timeout: 15_000 });
   await expect(page.locator(".viewport-status")).toHaveText("Review mesh ready · CAD Z-min 0 on grid");
   await expect(page.getByTestId("viewport")).toHaveAttribute("data-cad-z-min", "0");
   await expect(page.getByTestId("viewport")).toHaveAttribute("data-build-plane-z", "0");
