@@ -10,6 +10,7 @@ import {
   openFixtureDocument,
   setFixtureCommandCategory,
   setFixtureTreeInteraction,
+  setFixtureViewportSelection,
   updateFixtureDocumentView,
 } from "../src/fixture";
 
@@ -221,5 +222,24 @@ describe("accepted R14 Bench Clamp fixture", () => {
       selectionId: "component:clamp-jaw:2",
     });
     expect(session.activeDocumentId).toBe("clamp-jaw.part");
+  });
+
+  it("admits canonical viewport picks into active-document review state without toggling repeated picks", () => {
+    let session = createFixtureSession();
+    session = setFixtureViewportSelection(session, "bench-clamp.assembly", "component:clamp-jaw:2");
+    session = setFixtureViewportSelection(session, "bench-clamp.assembly", "component:clamp-jaw:2");
+    expect(session.documentStates["bench-clamp.assembly"]).toMatchObject({
+      selection: "component:clamp-jaw:2",
+      treeFocusId: "component:clamp-jaw:2",
+      reviewMeasurementMm: null,
+    });
+
+    session = setFixtureViewportSelection(session, "bench-clamp.assembly", "contextual-face:component:clamp-jaw:2:jaw-grip");
+    expect(session.documentStates["bench-clamp.assembly"].selection).toBe("contextual-face:component:clamp-jaw:2:jaw-grip");
+    expect(() => setFixtureViewportSelection(session, "bench-clamp.assembly", "contextual-face:forged")).toThrow(/unknown viewport/);
+    expect(() => setFixtureViewportSelection(session, "base-plate.part", "face:top")).toThrow(/stale or inactive/);
+
+    session = setFixtureCommandCategory(session, "bench-clamp.assembly", "mates");
+    expect(() => setFixtureViewportSelection(session, "bench-clamp.assembly", "component:clamp-jaw:1")).toThrow(/requires Inspect/);
   });
 });

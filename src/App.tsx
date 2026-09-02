@@ -24,6 +24,7 @@ import {
   openFixtureDocument,
   setFixtureCommandCategory,
   setFixtureTreeInteraction,
+  setFixtureViewportSelection,
   updateFixtureDocumentView,
 } from "./fixture";
 import type { FixtureCommandCategory, FixtureSelectionMode, FixtureTreeNode, FixtureViewPreset } from "./fixture";
@@ -172,7 +173,7 @@ export default function App({ application, geometryDisabled, startupMode = "open
     }
   }
 
-  function openSelectedPart(selectionId = currentSelection) {
+  function openSelectedPart(selectionId = currentSelection, admitViewportSelection = false) {
     if (activeFixtureState.commandCategory !== "inspect") return;
     const target = fixtureOpenPartTarget(activeFixtureDocument.id, selectionId);
     if (!target || !selectionId) return;
@@ -183,12 +184,17 @@ export default function App({ application, geometryDisabled, startupMode = "open
       ?? currentSelectionLabel;
     const expectedDocumentId = activeFixtureDocument.id;
     const category = activeFixtureState.commandCategory;
-    setFixtureWorkspace((workspace) => dispatchFixtureReviewCommand(workspace, {
-      expectedDocumentId,
-      category,
-      command: "open-part",
-      selectionId,
-    }));
+    setFixtureWorkspace((workspace) => {
+      const selectedWorkspace = admitViewportSelection
+        ? setFixtureViewportSelection(workspace, expectedDocumentId, selectionId)
+        : workspace;
+      return dispatchFixtureReviewCommand(selectedWorkspace, {
+        expectedDocumentId,
+        category,
+        command: "open-part",
+        selectionId,
+      });
+    });
     setNavigationContext(`Source-Part · ${sourceName} · from ${sourceSelectionLabel}`);
   }
 
@@ -484,6 +490,13 @@ export default function App({ application, geometryDisabled, startupMode = "open
       <section className="canvas">{fixtureKind === "assembly" ? <AssemblyViewport
         disabled={geometryDisabled}
         selectedEntityId={currentSelection}
+        selectionMode={selectionMode}
+        onSelect={(id) => {
+          const expectedDocumentId = activeFixtureDocument.id;
+          if (activeFixtureState.commandCategory !== "inspect") return;
+          setFixtureWorkspace((workspace) => setFixtureViewportSelection(workspace, expectedDocumentId, id));
+        }}
+        onOpenSource={(id) => openSelectedPart(id, true)}
       /> : <Viewport
         parameters={(previewParameters ?? current.parameters) as DesignRevision["parameters"]}
         authoritativeBase={current}
