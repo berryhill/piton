@@ -54,4 +54,18 @@ Review both Part and Assembly documents:
 
 Tree identities are fixture-local semantic review IDs. Labels, indices, face ordinals, triangle IDs, and Three.js UUIDs are not presented as durable exact topology. Command admission affects only bounded per-document review interaction state; it creates no `DesignRevision`, build success, approval, export, release, or actuation consequence.
 
+## R14/E viewport selection and source navigation
+
+With `Bench Clamp.assembly` active and the Inspect category selected:
+
+1. In Smart mode, click each visible occurrence. Confirm the current selection and model-tree selection use its canonical occurrence ID; in particular, confirm `Clamp Jaw:1` and `Clamp Jaw:2` remain distinct.
+2. Repeat in Component mode. Confirm each pick resolves to an occurrence, not a source-document ID or Three.js object identity.
+3. Switch to Face mode and click mapped Base Plate, Clamp Jaw, and Guide Pin review primitives. Confirm each selection is an existing occurrence-qualified `contextual-face:component:…` tree identity. An unmapped primitive or background must not invent a face identity.
+4. Confirm occurrence, contextual-face, and mate selections produce visibly distinct cyan, amber, and magenta review highlights. Repeated Part occurrences must not highlight each other unless a selected review-only mate relates them.
+5. Double-click each Clamp Jaw occurrence in Smart or Component mode. Confirm the exact `Clamp Jaw.part` source opens and the navigation context retains the originating occurrence label.
+6. Switch out of Inspect and confirm viewport picks cannot alter selection or navigate. Return to Inspect and confirm the previous document-local mode and state remain bounded to the Assembly document.
+7. Confirm `review_state=needs_human_review`, `fabrication_release=false`, and `machine_actuation=false` remain unchanged.
+
+Ray hits translate only through the static fixture's predeclared artifact-local occurrence and contextual-face map. The map and highlights are review interaction evidence, not exact topology, authored Assembly authority, engineering approval, export, or fabrication evidence.
+
 The test gate is automated candidate evidence, not a substitute for this visual human review. The repository does not contain an exact-CAD adapter, disconnected packet generator, engineering-approval issuer, fabrication exporter, release path, or machine-control path.

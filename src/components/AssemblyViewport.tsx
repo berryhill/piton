@@ -1,11 +1,15 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { R14_ASSEMBLY, type AssemblyOccurrence } from "../assembly";
+import { R14_ASSEMBLY, assemblyContextualFaceId, type AssemblyOccurrence } from "../assembly";
+import type { FixtureSelectionMode } from "../fixture";
 
 interface Props {
   disabled?: boolean;
   selectedEntityId?: string | null;
+  selectionMode?: FixtureSelectionMode;
+  onSelect?: (id: string) => void;
+  onOpenSource?: (id: string) => void;
 }
 
 function reviewMaterial(color: number): THREE.MeshStandardMaterial {
@@ -28,6 +32,16 @@ function roundedRectangle(width: number, depth: number, radius: number): THREE.S
   return shape;
 }
 
+function mappedMesh(
+  geometry: THREE.BufferGeometry,
+  color: number,
+  sourceFaceId: `face:${string}`,
+): THREE.Mesh {
+  const mesh = new THREE.Mesh(geometry, reviewMaterial(color));
+  mesh.userData.sourceFaceId = sourceFaceId;
+  return mesh;
+}
+
 function basePlate(): THREE.Mesh {
   const shape = roundedRectangle(120, 80, 8);
   for (const [x, y] of [[-46, -26], [-46, 26], [46, -26], [46, 26]]) {
@@ -37,14 +51,14 @@ function basePlate(): THREE.Mesh {
   }
   const geometry = new THREE.ExtrudeGeometry(shape, { depth: 12, bevelEnabled: false, curveSegments: 24 });
   geometry.computeVertexNormals();
-  return new THREE.Mesh(geometry, reviewMaterial(0x477b9b));
+  return mappedMesh(geometry, 0x477b9b, "face:top");
 }
 
 function clampJaw(): THREE.Group {
   const group = new THREE.Group();
-  const foot = new THREE.Mesh(new THREE.BoxGeometry(46, 28, 8), reviewMaterial(0xf07832));
+  const foot = mappedMesh(new THREE.BoxGeometry(46, 28, 8), 0xf07832, "face:jaw-base");
   foot.position.z = 4;
-  const upright = new THREE.Mesh(new THREE.BoxGeometry(30, 28, 37), reviewMaterial(0xf07832));
+  const upright = mappedMesh(new THREE.BoxGeometry(30, 28, 37), 0xf07832, "face:jaw-grip");
   upright.position.z = 26.5;
   group.add(foot, upright);
   return group;
@@ -52,10 +66,10 @@ function clampJaw(): THREE.Group {
 
 function guidePin(): THREE.Group {
   const group = new THREE.Group();
-  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(5, 5, 43, 32), reviewMaterial(0x72d5df));
+  const shaft = mappedMesh(new THREE.CylinderGeometry(5, 5, 43, 32), 0x72d5df, "face:pin-shaft");
   shaft.rotation.x = Math.PI / 2;
   shaft.position.z = 21.5;
-  const head = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 5, 32), reviewMaterial(0x72d5df));
+  const head = mappedMesh(new THREE.CylinderGeometry(9, 9, 5, 32), 0x72d5df, "face:pin-top");
   head.rotation.x = Math.PI / 2;
   head.position.z = 45.5;
   group.add(shaft, head);
@@ -79,7 +93,12 @@ function createOccurrence(occurrence: AssemblyOccurrence): THREE.Group {
     suppressed: occurrence.suppressed,
   };
   const geometry = occurrenceGeometry(occurrence);
-  geometry.traverse((object) => Object.assign(object.userData, group.userData));
+  geometry.traverse((object) => {
+    Object.assign(object.userData, group.userData);
+    if (object.userData.sourceFaceId) {
+      object.userData.contextualFaceId = assemblyContextualFaceId(occurrence.id, object.userData.sourceFaceId as `face:${string}`);
+    }
+  });
   group.add(geometry);
   group.position.set(...occurrence.transform.translationMm);
   group.rotation.set(...occurrence.transform.rotationDeg.map(THREE.MathUtils.degToRad) as [number, number, number]);
@@ -115,6 +134,30 @@ export function inspectAssemblyReviewRoot(root: THREE.Object3D): {
   };
 }
 
+const CONTEXTUAL_FACE_IDS = new Set(R14_ASSEMBLY.contextualFaces.map(({ id }) => id));
+
+export function resolveAssemblyReviewPick(
+  intersections: readonly Readonly<{ object: THREE.Object3D }>[],
+  selectionMode: FixtureSelectionMode,
+): string | null {
+  for (const { object } of intersections) {
+    const occurrenceId = object.userData.occurrenceId as string | undefined;
+    if (!occurrenceId || !R14_ASSEMBLY.occurrences.some(({ id }) => id === occurrenceId)) continue;
+    if (selectionMode !== "face") return occurrenceId;
+    const contextualFaceId = object.userData.contextualFaceId as string | undefined;
+    if (contextualFaceId && CONTEXTUAL_FACE_IDS.has(contextualFaceId)) return contextualFaceId;
+  }
+  return null;
+}
+
+export function assemblySelectionOccurrenceIds(id: string | null): string[] {
+  if (!id) return [];
+  const occurrence = R14_ASSEMBLY.occurrences.find(({ id: occurrenceId }) => occurrenceId === id)
+    ?? R14_ASSEMBLY.occurrences.find(({ id: occurrenceId }) => id.startsWith(`contextual-face:${occurrenceId}:`));
+  if (occurrence && (id === occurrence.id || CONTEXTUAL_FACE_IDS.has(id))) return [occurrence.id];
+  return [...(R14_ASSEMBLY.relationships.find(({ id: relationshipId }) => relationshipId === id)?.relatedOccurrenceIds ?? [])];
+}
+
 function disposeObject(root: THREE.Object3D): void {
   root.traverse((object) => {
     const candidate = object as THREE.Object3D & { geometry?: THREE.BufferGeometry; material?: THREE.Material | THREE.Material[] };
@@ -123,9 +166,17 @@ function disposeObject(root: THREE.Object3D): void {
   });
 }
 
-export default function AssemblyViewport({ disabled = false, selectedEntityId = null }: Props) {
+export default function AssemblyViewport({
+  disabled = false,
+  selectedEntityId = null,
+  selectionMode = "smart",
+  onSelect,
+  onOpenSource,
+}: Props) {
   const host = useRef<HTMLDivElement>(null);
   const selection = useRef<(id: string | null) => void>(() => {});
+  const interaction = useRef({ selectionMode, onSelect, onOpenSource });
+  interaction.current = { selectionMode, onSelect, onOpenSource };
 
   useEffect(() => {
     if (disabled || !host.current) return;
@@ -167,14 +218,10 @@ export default function AssemblyViewport({ disabled = false, selectedEntityId = 
       }
       if (id) element.dataset.selectedReviewId = id;
       else delete element.dataset.selectedReviewId;
-      const occurrence = id ? occurrenceObjects.get(id) : undefined;
-      if (occurrence) highlight.add(new THREE.BoxHelper(occurrence, 0x59d8ff));
-      const relationship = R14_ASSEMBLY.relationships.find(({ id: relationshipId }) => relationshipId === id);
-      if (relationship) {
-        for (const occurrenceId of relationship.relatedOccurrenceIds) {
-          const related = occurrenceObjects.get(occurrenceId);
-          if (related) highlight.add(new THREE.BoxHelper(related, 0xf47ac3));
-        }
+      const color = id?.startsWith("contextual-face:") ? 0xffcf59 : id?.startsWith("mate:") ? 0xf47ac3 : 0x59d8ff;
+      for (const occurrenceId of assemblySelectionOccurrenceIds(id)) {
+        const related = occurrenceObjects.get(occurrenceId);
+        if (related) highlight.add(new THREE.BoxHelper(related, color));
       }
     };
     selection.current(selectedEntityId);
@@ -213,6 +260,36 @@ export default function AssemblyViewport({ disabled = false, selectedEntityId = 
     resize();
     const observer = new ResizeObserver(resize);
     observer.observe(element);
+
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    const pick = (event: MouseEvent): string | null => {
+      const bounds = renderer.domElement.getBoundingClientRect();
+      if (!(bounds.width > 0 && bounds.height > 0)) return null;
+      pointer.set(
+        ((event.clientX - bounds.left) / bounds.width) * 2 - 1,
+        -((event.clientY - bounds.top) / bounds.height) * 2 + 1,
+      );
+      raycaster.setFromCamera(pointer, camera);
+      return resolveAssemblyReviewPick(raycaster.intersectObject(root, true), interaction.current.selectionMode);
+    };
+    let pointerDown = { x: 0, y: 0 };
+    const handlePointerDown = (event: PointerEvent) => {
+      pointerDown = { x: event.clientX, y: event.clientY };
+    };
+    const handleClick = (event: MouseEvent) => {
+      if (Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) > 4) return;
+      const id = pick(event);
+      if (id) interaction.current.onSelect?.(id);
+    };
+    const handleDoubleClick = (event: MouseEvent) => {
+      const id = pick(event);
+      if (id) interaction.current.onOpenSource?.(id);
+    };
+    renderer.domElement.addEventListener("pointerdown", handlePointerDown);
+    renderer.domElement.addEventListener("click", handleClick);
+    renderer.domElement.addEventListener("dblclick", handleDoubleClick);
+
     let frame = 0;
     const draw = () => {
       controls.update();
@@ -228,6 +305,9 @@ export default function AssemblyViewport({ disabled = false, selectedEntityId = 
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
+      renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
+      renderer.domElement.removeEventListener("click", handleClick);
+      renderer.domElement.removeEventListener("dblclick", handleDoubleClick);
       controls.dispose();
       disposeObject(root);
       disposeObject(highlight);
@@ -248,8 +328,9 @@ export default function AssemblyViewport({ disabled = false, selectedEntityId = 
       data-cad-z-min={R14_ASSEMBLY.sceneEvidence.cadZMinMm}
       data-build-plane-z={R14_ASSEMBLY.sceneEvidence.gridWorldZMm}
       data-cad-world-mapping="CAD Z=Three.js world Z"
+      data-selection-mode={selectionMode}
     />
-    <div className="viewport-status">{disabled ? "Static Assembly review scene · geometry disabled in component test" : "Static Assembly review scene · CAD Z-min 0 on grid"}</div>
+    <div className="viewport-status">{disabled ? "Assembly review scene · geometry disabled in component test" : "Interactive Assembly review scene · CAD Z-min 0 on grid"}</div>
     <div className="view-actions" aria-label="Assembly review camera controls">
       {(["iso", "front", "top"] as const).map((preset) => <button key={preset} onClick={() => (host.current as HTMLDivElement & { setView?: (value: typeof preset) => void })?.setView?.(preset)}>{preset[0].toUpperCase() + preset.slice(1)}</button>)}
       <button onClick={() => (host.current as HTMLDivElement & { fitView?: () => void })?.fitView?.()}>Fit</button>

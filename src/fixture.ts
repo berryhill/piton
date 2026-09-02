@@ -333,6 +333,23 @@ export function setFixtureTreeInteraction(
   }));
 }
 
+export function setFixtureViewportSelection(
+  session: FixtureSession,
+  expectedDocumentId: FixtureDocumentId,
+  selectionId: string,
+): FixtureSession {
+  if (session.activeDocumentId !== expectedDocumentId) throw new Error("stale or inactive fixture document context");
+  if (session.documentStates[expectedDocumentId].commandCategory !== "inspect") throw new Error("viewport selection requires Inspect category");
+  const nodeIds = new Set(flattenFixtureTree(fixtureModelTree(expectedDocumentId)).map(({ id }) => id));
+  if (!nodeIds.has(selectionId)) throw new Error("unknown viewport selection identity");
+  return replaceActiveDocumentState(session, (state) => ({
+    ...state,
+    selection: selectionId,
+    treeFocusId: selectionId,
+    reviewMeasurementMm: null,
+  }));
+}
+
 function selectedTreeNode(documentId: FixtureDocumentId, selectionId: string | undefined): FixtureTreeNode {
   if (!selectionId) throw new Error("review command requires a selection");
   const matches = flattenFixtureTree(fixtureModelTree(documentId)).filter(({ id }) => id === selectionId);
