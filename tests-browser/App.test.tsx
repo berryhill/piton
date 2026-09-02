@@ -117,6 +117,7 @@ describe("Piton workbench", () => {
   it("does not display an invalid raw input as rendered bbox truth", async () => {
     render(<App application={application()} geometryDisabled />);
     await screen.findByText("Accepted immutable revision");
+    fireEvent.click(screen.getByRole("button", { name: "Part fixture" }));
     fireEvent.click(screen.getByRole("button", { name: "Top review face" }));
     fireEvent.click(screen.getByRole("button", { name: "Measure selected review entity" }));
     expect(screen.getByTestId("review-measurement")).toHaveTextContent("80 mm");
@@ -138,7 +139,7 @@ describe("Piton workbench", () => {
     expect(screen.getByText(/review-only interaction evidence/i)).toBeVisible();
     expect(screen.getByText(/cannot author occurrences, mates, transforms, or Assembly revisions/i)).toBeVisible();
 
-    expect(screen.getByRole("navigation", { name: "Model tree" })).toBeVisible();
+    expect(screen.getByRole("tree", { name: "Model tree" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: /Source-Part/ }));
     expect(screen.getByTestId("navigation-context")).toHaveTextContent("Source-Part");
     fireEvent.click(screen.getByRole("button", { name: /Displayed occurrence/ }));
@@ -156,12 +157,13 @@ describe("Piton workbench", () => {
     render(<App application={application()} geometryDisabled />);
     await screen.findByText("Accepted immutable revision");
 
+    fireEvent.click(screen.getByRole("button", { name: "Part fixture" }));
     fireEvent.click(screen.getByRole("button", { name: "Top review face" }));
     expect(screen.getByTestId("current-selection")).toHaveTextContent("Top review face");
     fireEvent.click(screen.getByRole("button", { name: "Attach current selection" }));
     expect(screen.getByTestId("attached-context")).toHaveTextContent("Top review face");
 
-    fireEvent.click(screen.getByRole("button", { name: "Origin" }));
+    fireEvent.click(within(screen.getByRole("tree", { name: "Model tree" })).getByRole("button", { name: "Origin" }));
     expect(screen.getByTestId("current-selection")).toHaveTextContent("Origin");
     expect(screen.getByTestId("attached-context")).toHaveTextContent("Top review face");
     fireEvent.click(screen.getByRole("button", { name: "Clear current selection" }));
@@ -176,6 +178,7 @@ describe("Piton workbench", () => {
     for (const selection of ["Top review face", "Component / reference", "Origin", "Top plane", "Review mate"]) {
       expect(screen.getByRole("button", { name: selection })).toBeVisible();
     }
+    fireEvent.click(screen.getByRole("button", { name: "Part fixture" }));
     fireEvent.click(screen.getByRole("button", { name: "Top review face" }));
     fireEvent.click(screen.getByRole("button", { name: "Measure selected review entity" }));
     expect(screen.getByTestId("review-measurement")).toHaveTextContent(/mm/);
@@ -232,9 +235,67 @@ describe("Piton workbench", () => {
     fireEvent.click(screen.getByRole("tab", { name: /Clamp Jaw\.part/ }));
     expect(screen.getByRole("button", { name: "Face" })).toHaveAttribute("aria-pressed", "true");
     expect(within(fixtureView).getByRole("button", { name: "Top" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByTestId("current-selection")).toHaveTextContent("Top review face");
+    expect(screen.getByTestId("current-selection")).toHaveTextContent("None");
     fireEvent.click(screen.getByRole("button", { name: "Close Clamp Jaw.part" }));
     expect(screen.queryByRole("tab", { name: /Clamp Jaw\.part/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /PRT · Clamp Jaw\.part/ })).toBeVisible();
+  });
+
+  it("supports hierarchical roving focus, selection toggle, and document-aware command controls", async () => {
+    render(<App application={application()} geometryDisabled />);
+    await screen.findByText("Accepted immutable revision");
+
+    const tree = screen.getByRole("tree", { name: "Model tree" });
+    const root = within(tree).getByRole("treeitem", { name: /Bench Clamp\.assembly/ });
+    expect(root).toHaveAttribute("tabindex", "0");
+    expect(root).toHaveAttribute("aria-expanded", "true");
+    fireEvent.keyDown(root, { key: "ArrowDown" });
+    expect(within(tree).getByRole("treeitem", { name: /Components/ })).toHaveAttribute("tabindex", "0");
+    fireEvent.keyDown(within(tree).getByRole("treeitem", { name: /Components/ }), { key: "End" });
+    expect(within(tree).getByRole("treeitem", { name: /Concentric Mate/ })).toHaveAttribute("tabindex", "0");
+
+    const jaw = within(tree).getByRole("button", { name: "◇ Clamp Jaw:1" });
+    fireEvent.click(jaw);
+    expect(screen.getByTestId("current-selection")).toHaveTextContent("Clamp Jaw:1");
+    expect(screen.getByRole("button", { name: "Open Part" })).toBeEnabled();
+    fireEvent.click(jaw);
+    expect(screen.getByTestId("current-selection")).toHaveTextContent("None");
+
+    const categories = screen.getByRole("group", { name: "Review command categories" });
+    expect(within(categories).getByRole("button", { name: "Inspect" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(within(categories).getByRole("button", { name: "Assembly" }));
+    for (const command of ["Insert Component", "Move Component", "Fix/Float"]) {
+      expect(screen.getByRole("button", { name: command })).toBeDisabled();
+    }
+    fireEvent.click(within(categories).getByRole("button", { name: "Inspect" }));
+    fireEvent.doubleClick(jaw);
+    expect(screen.getByRole("tab", { name: /Clamp Jaw\.part/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("navigation-context")).toHaveTextContent("Clamp Jaw.part · from Clamp Jaw:1");
+    expect(screen.getByTestId("fabrication-release")).toHaveTextContent("false");
+    expect(screen.getByTestId("machine-actuation")).toHaveTextContent("false");
+  });
+
+  it("admits measurement only for an exact active-document tree selection in Inspect", async () => {
+    render(<App application={application()} geometryDisabled />);
+    await screen.findByText("Accepted immutable revision");
+
+    const persistentMeasure = screen.getByRole("button", { name: "Measure selected review entity" });
+    fireEvent.click(screen.getByRole("button", { name: "Top review face" }));
+    expect(persistentMeasure).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Measure$/ })).toBeDisabled();
+    fireEvent.click(persistentMeasure);
+    expect(screen.getByTestId("review-measurement")).toHaveTextContent("select an entity");
+
+    fireEvent.click(screen.getByRole("button", { name: "Part fixture" }));
+    fireEvent.click(screen.getByRole("button", { name: "Top review face" }));
+    expect(persistentMeasure).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Features" }));
+    expect(persistentMeasure).toBeDisabled();
+    fireEvent.click(persistentMeasure);
+    expect(screen.getByTestId("review-measurement")).toHaveTextContent("select an entity");
+
+    fireEvent.click(screen.getByRole("button", { name: "Inspect" }));
+    fireEvent.click(persistentMeasure);
+    expect(screen.getByTestId("review-measurement")).toHaveTextContent(/review-mesh distance 80 mm/i);
   });
 });
