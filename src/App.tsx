@@ -21,6 +21,8 @@ import {
   fixtureModelTree,
   fixtureOpenPartTarget,
   flattenFixtureTree,
+  generateFixtureApproximateSource,
+  generateFixtureReviewMeshStl,
   openFixtureDocument,
   setFixtureCommandCategory,
   setFixtureTreeInteraction,
@@ -211,6 +213,46 @@ export default function App({ application, geometryDisabled, startupMode = "open
     }));
   }
 
+  function toggleApproximateSource() {
+    const expectedDocumentId = activeFixtureDocument.id;
+    const visible = !activeFixtureState.approximateSourceVisible;
+    setFixtureWorkspace((workspace) => updateFixtureDocumentView(workspace, expectedDocumentId, {
+      approximateSourceVisible: visible,
+    }));
+  }
+
+  function downloadFixtureReviewMeshStl() {
+    const expectedDocumentId = activeFixtureDocument.id;
+    setFixtureWorkspace((workspace) => updateFixtureDocumentView(workspace, expectedDocumentId, {
+      stl: { state: "building", message: `Generating ${fixtureDocument(expectedDocumentId).fileName} review mesh…` },
+    }));
+    try {
+      const artifact = generateFixtureReviewMeshStl(expectedDocumentId);
+      const url = URL.createObjectURL(new Blob([artifact.text], { type: "model/stl" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = artifact.filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setFixtureWorkspace((workspace) => updateFixtureDocumentView(workspace, expectedDocumentId, {
+        stl: {
+          state: "ready",
+          artifactId: `review-mesh:${expectedDocumentId}:${artifact.byteLength}:${artifact.facetCount}`,
+          filename: artifact.filename,
+          byteLength: artifact.byteLength,
+          facetCount: artifact.facetCount,
+          cadZMinMm: artifact.bounds.min[2],
+          message: "Ready · validated nonempty ASCII STL · Three.js review mesh only · not fabrication release",
+        },
+      }));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "unknown STL generation error";
+      setFixtureWorkspace((workspace) => updateFixtureDocumentView(workspace, expectedDocumentId, {
+        stl: { state: "failed", message: reason },
+      }));
+    }
+  }
+
   useEffect(() => {
     if (previewParameters || activeFixtureState.reviewMeasurementMm == null) return;
     const expectedDocumentId = activeFixtureDocument.id;
@@ -390,6 +432,22 @@ export default function App({ application, geometryDisabled, startupMode = "open
         <p className="boundary-note">{fixtureKind === "assembly"
           ? "Assembly fixture is review-only interaction evidence. It cannot author occurrences, mates, transforms, or Assembly revisions."
           : "Part is the active consequential Stage 1 artifact."}</p>
+        <h2>Review outputs</h2>
+        <p className="muted">Document-specific generated build123d disclosure and browser review mesh. Neither is exact geometry, approval, export authority, or fabrication release.</p>
+        <div className="context-actions">
+          <button aria-pressed={activeFixtureState.approximateSourceVisible} onClick={toggleApproximateSource}>
+            {activeFixtureState.approximateSourceVisible ? "Hide approximate source" : "View approximate source"}
+          </button>
+          <button disabled={activeFixtureState.stl.state === "building"} onClick={downloadFixtureReviewMeshStl}>Download review-mesh STL</button>
+        </div>
+        <output className="stl-status" data-testid="fixture-stl-status" aria-live="polite">{activeFixtureState.stl.state === "idle"
+          ? `Review-mesh STL not generated for ${activeFixtureDocument.fileName}.`
+          : `${activeFixtureState.stl.message ?? activeFixtureState.stl.state}${activeFixtureState.stl.state === "ready"
+            ? ` · ${activeFixtureState.stl.filename} · ${activeFixtureState.stl.byteLength} bytes · ${activeFixtureState.stl.facetCount} facets · CAD Z min ${activeFixtureState.stl.cadZMinMm} mm`
+            : ""}`}</output>
+        {activeFixtureState.approximateSourceVisible ? <pre className="approximate-source" data-testid="fixture-approximate-source">
+          <code>{generateFixtureApproximateSource(activeFixtureDocument.id)}</code>
+        </pre> : null}
         <h2>Model tree</h2>
         <div className="model-tree" role="tree" aria-label="Model tree">
           <FixtureTree

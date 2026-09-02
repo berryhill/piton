@@ -5,6 +5,8 @@ import {
   closeFixtureDocument,
   createFixtureSession,
   dispatchFixtureReviewCommand,
+  generateFixtureApproximateSource,
+  generateFixtureReviewMeshStl,
   fixtureCommandCategories,
   fixtureModelTree,
   openFixtureDocument,
@@ -96,6 +98,89 @@ describe("accepted R14 Bench Clamp fixture", () => {
       camera: { position: [8, 9, 10], target: [1, 2, 3], up: [0, 0, 1] },
     });
     expect(session.documentStates["base-plate.part"]).toMatchObject({ selection: "face:top", selectionMode: "face" });
+  });
+
+  it("retains document-local approximate-source visibility and STL status after close and reopen without leakage", () => {
+    let session = openFixtureDocument(createFixtureSession(), "guide-pin.part");
+    const guidePinArtifact = generateFixtureReviewMeshStl("guide-pin.part");
+    session = updateFixtureDocumentView(session, "guide-pin.part", {
+      approximateSourceVisible: true,
+      stl: {
+        state: "ready",
+        artifactId: "review-mesh:guide-pin.part",
+        filename: guidePinArtifact.filename,
+        byteLength: guidePinArtifact.byteLength,
+        facetCount: guidePinArtifact.facetCount,
+        cadZMinMm: guidePinArtifact.bounds.min[2],
+        message: "Ready · validated nonempty ASCII STL",
+      },
+    });
+
+    session = closeFixtureDocument(session, "guide-pin.part");
+    expect(session.openDocumentIds).not.toContain("guide-pin.part");
+    expect(session.documentStates["bench-clamp.assembly"]).toMatchObject({
+      approximateSourceVisible: false,
+      stl: { state: "idle" },
+    });
+
+    session = openFixtureDocument(session, "guide-pin.part");
+    expect(session.documentStates["guide-pin.part"]).toMatchObject({
+      approximateSourceVisible: true,
+      stl: {
+        state: "ready",
+        artifactId: "review-mesh:guide-pin.part",
+        filename: "guide-pin.part-review-mesh.stl",
+        byteLength: guidePinArtifact.byteLength,
+        facetCount: guidePinArtifact.facetCount,
+        cadZMinMm: 0,
+        message: "Ready · validated nonempty ASCII STL",
+      },
+    });
+    expect(generateFixtureApproximateSource(session.activeDocumentId)).toContain("Guide Pin.part");
+    expect(generateFixtureApproximateSource(session.activeDocumentId)).not.toContain("Clamp Jaw:2");
+  });
+
+  it("derives distinct approximate source from each document's declared fixture data", () => {
+    const sourceByDocument = Object.fromEntries(R14_FIXTURE.documents.map(({ id }) => [
+      id,
+      generateFixtureApproximateSource(id),
+    ]));
+
+    expect(new Set(Object.values(sourceByDocument)).size).toBe(4);
+    expect(sourceByDocument["base-plate.part"]).toMatch(/RectangleRounded\(120, 80, 8\)/);
+    expect(sourceByDocument["base-plate.part"]).toMatch(/GridLocations\(92, 52, 2, 2\)/);
+    expect(sourceByDocument["clamp-jaw.part"]).toMatch(/Box\(46, 28, 8\)/);
+    expect(sourceByDocument["guide-pin.part"]).toMatch(/Cylinder\(5, 43\)/);
+    expect(sourceByDocument["bench-clamp.assembly"]).toContain("('Clamp Jaw:2', 'clamp-jaw.part', (36, 0, 12), (0, 0, 180))");
+    for (const source of Object.values(sourceByDocument)) {
+      expect(source).toMatch(/document-specific approximate review source/);
+      expect(source).toMatch(/review_state=needs_human_review/);
+      expect(source).toMatch(/fabrication_release=false/);
+      expect(source).toMatch(/not exact B-rep or fabrication source/);
+    }
+  });
+
+  it("emits deterministic nonempty document-specific ASCII STL with CAD Z=0 on the build plane", () => {
+    const artifacts = R14_FIXTURE.documents.map(({ id }) => generateFixtureReviewMeshStl(id));
+
+    expect(new Set(artifacts.map(({ text }) => text)).size).toBe(4);
+    for (const [index, artifact] of artifacts.entries()) {
+      const document = R14_FIXTURE.documents[index];
+      expect(artifact.documentId).toBe(document.id);
+      expect(artifact.filename).toBe(`${document.id}-review-mesh.stl`);
+      expect(artifact.text).toMatch(/^solid piton_/);
+      expect(artifact.text).toMatch(/facet normal/);
+      expect(artifact.text).toMatch(/endsolid piton_/);
+      expect(artifact.text).toMatch(/^[\x00-\x7F]+$/);
+      expect(artifact.byteLength).toBeGreaterThan(0);
+      expect(artifact.facetCount).toBeGreaterThan(0);
+      expect(artifact.bounds.min[2]).toBe(0);
+      expect(artifact.validation).toEqual({ ascii: true, nonempty: true, finite: true, cadZMinOnBuildPlane: true });
+      expect(artifact.claimScope).toMatch(/review mesh only/i);
+      expect(artifact.claimScope).toMatch(/not fabrication release/i);
+    }
+    expect(generateFixtureReviewMeshStl("base-plate.part")).toEqual(artifacts[0]);
+    expect(artifacts[3].facetCount).toBeGreaterThan(artifacts[0].facetCount);
   });
 
   it("declares the exact deterministic Part and Assembly semantic hierarchies", () => {
