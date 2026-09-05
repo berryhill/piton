@@ -169,6 +169,30 @@ describe("Piton workbench", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear current selection" }));
     expect(screen.getByTestId("current-selection")).toHaveTextContent("None");
     expect(screen.getByTestId("attached-context")).toHaveTextContent("Top review face");
+
+    fireEvent.click(screen.getByRole("tab", { name: /Bench Clamp\.assembly/ }));
+    expect(screen.getByTestId("attached-context")).toHaveTextContent("Top review face");
+    fireEvent.click(screen.getByRole("button", { name: "Close Base Plate.part" }));
+    fireEvent.click(screen.getByRole("button", { name: /PRT · Base Plate\.part/ }));
+    expect(screen.getByTestId("attached-context")).toHaveTextContent("Top review face");
+
+    const prompt = "  Increase the selected leg by 5 mm.\nKeep the hole fixed.  ";
+    fireEvent.change(screen.getByLabelText("Change request prompt"), { target: { value: prompt } });
+    fireEvent.click(screen.getByRole("button", { name: "Prepare Change Request" }));
+    expect(screen.getByTestId("change-request-state")).toHaveTextContent("prepared-not-sent");
+    expect(screen.getByTestId("change-request-prompt").textContent).toBe(prompt.trim());
+    expect(screen.getByTestId("change-request-draft")).toHaveTextContent("Top review face");
+    expect(screen.getByTestId("change-request-draft")).toHaveTextContent("transport connected: false");
+
+    fireEvent.click(screen.getByRole("tab", { name: /Bench Clamp\.assembly/ }));
+    fireEvent.click(within(screen.getByRole("tree", { name: "Model tree" })).getByRole("button", { name: "◇ Clamp Jaw:1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Attach current selection" }));
+    expect(screen.getByTestId("attached-context")).toHaveTextContent("Clamp Jaw:1");
+    expect(screen.getByTestId("change-request-draft")).toHaveTextContent("Top review face");
+    fireEvent.click(screen.getByRole("button", { name: "Clear attached context" }));
+    expect(screen.getByTestId("attached-context")).toHaveTextContent("None");
+    expect(screen.getByTestId("change-request-draft")).toHaveTextContent("Top review face");
+    expect(screen.getByText(/Detached in-memory draft only.*not sent.*not a ChangeProposal/i)).toBeVisible();
   });
 
   it("labels all fixture-local highlight categories and measurement as review-only", async () => {

@@ -68,6 +68,21 @@ With `Bench Clamp.assembly` active and the Inspect category selected:
 
 Ray hits translate only through the static fixture's predeclared artifact-local occurrence and contextual-face map. The map and highlights are review interaction evidence, not exact topology, authored Assembly authority, engineering approval, export, or fabrication evidence.
 
+## R14/F detached context and prepared-not-sent Change Request
+
+Use the browser workbench to review the single global, in-memory request session:
+
+1. Open `Base Plate.part`, select `Top review face`, and choose **Attach current selection**. Confirm Attached context names that face and the current browser revision.
+2. Select a feature and attach it. In `Bench Clamp.assembly`, repeat for an occurrence/component, its source-document reference, and a mate. Confirm each replaces the attached snapshot. Review surfaces/faces, features, components, document references, and mates are the only admitted kinds.
+3. Select an Origin, plane, document root, body, group, unknown ID, or other unsupported item. Confirm **Attach current selection** is unavailable and no existing attached context changes. Stale, missing, forged, or ambiguous document/selection context must fail closed rather than choosing a nearby entity.
+4. Attach `Top review face`; then select another entity, clear the current selection, switch tabs, close the source tab, and reopen it. Confirm the attached snapshot remains `Top review face` throughout and is not rebound to current UI state.
+5. Enter a prompt with leading and trailing whitespace and choose **Prepare Change Request**. Confirm the displayed prompt is trimmed and the detached draft reports exactly `prepared-not-sent` with `transport connected: false` and its own copied context.
+6. After preparing the draft, attach a different supported entity. Confirm Attached context is replaced while the prepared draft keeps its original prompt and `Top review face` context.
+7. Choose **Clear attached context**. Confirm Attached context becomes `None` while the already prepared draft remains available and unchanged. A blank prompt or missing attached context must not prepare a draft.
+8. Confirm no network request occurs and no interaction creates or mutates a `DesignRevision`, `ChangeProposal`, review disposition, approval, export, channel, fabrication release, or machine actuation state. Root truth remains `review_state=needs_human_review`, `fabrication_release=false`, and `machine_actuation=false`.
+
+The attached context and prepared draft are detached review-communication objects, not durable topology or authored CAD authority. Closing/reopening tabs does not send them, and preparing a draft is not proposal acceptance, engineering approval, export, or release.
+
 ## R14/H document-specific approximate source and review-mesh STL
 
 Review each of `Base Plate.part`, `Clamp Jaw.part`, `Guide Pin.part`, and `Bench Clamp.assembly`:

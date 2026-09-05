@@ -12,6 +12,8 @@ import type { StartupMode } from "./startup";
 import {
   R14_FIXTURE,
   activateFixtureDocument,
+  attachCurrentFixtureSelection,
+  clearAttachedFixtureContext,
   clearFixtureReviewMeasurement,
   closeFixtureDocument,
   createFixtureSession,
@@ -24,6 +26,7 @@ import {
   generateFixtureApproximateSource,
   generateFixtureReviewMeshStl,
   openFixtureDocument,
+  prepareFixtureChangeRequest,
   setFixtureCommandCategory,
   setFixtureTreeInteraction,
   setFixtureViewportSelection,
@@ -63,7 +66,7 @@ export default function App({ application, geometryDisabled, startupMode = "open
   const [renderedBounds, setRenderedBounds] = useState<MeshBounds | null>(null);
   const [fixtureWorkspace, setFixtureWorkspace] = useState(createFixtureSession);
   const [navigationContext, setNavigationContext] = useState("Source-Part · L-bracket Part");
-  const [attachedContext, setAttachedContext] = useState<{ id: SemanticSelectionId; label: string; revisionId: string } | null>(null);
+  const [changeRequestPrompt, setChangeRequestPrompt] = useState("");
   const [portableBusy, setPortableBusy] = useState(false);
   const [portableError, setPortableError] = useState<string | null>(null);
   const [openResponsivePanel, setOpenResponsivePanel] = useState<"model" | "custody" | null>(null);
@@ -108,6 +111,11 @@ export default function App({ application, geometryDisabled, startupMode = "open
     ?? R14_ASSEMBLY.relationships.find(({ id }) => id === currentSelection)?.label
     ?? R14_ASSEMBLY.contextualFaces.find(({ id }) => id === currentSelection)?.id
     ?? "None";
+  const currentSelectionNode = activeTreeNodes.find(({ id }) => id === currentSelection) ?? null;
+  const currentSelectionIsAttachable = currentSelectionNode != null
+    && ["review-surface", "feature", "occurrence", "source-reference", "mate"].includes(currentSelectionNode.kind);
+  const attachedContext = fixtureWorkspace.requestSession.attachedContext;
+  const changeRequestDraft = fixtureWorkspace.requestSession.preparedDraft;
   const assemblyContextOccurrence = R14_ASSEMBLY.occurrences.find(({ id }) => id === currentSelection)
     ?? R14_ASSEMBLY.occurrences.find(({ id }) => currentSelection?.startsWith(`contextual-face:${id}:`));
 
@@ -329,7 +337,6 @@ export default function App({ application, geometryDisabled, startupMode = "open
       setDurableBuildStatus(snapshot.buildStatus);
       const authoritativeCurrent = snapshot.project.revisions.find((revision) => revision.id === snapshot.project.currentRevisionId)!;
       setValue(authoritativeCurrent.parameters.leg_length_mm);
-      setAttachedContext(null);
       setFixtureWorkspace(createFixtureSession());
       setMessage(`Reopened from portable custody · ${snapshot.project.name}`);
     } catch (error) {
@@ -513,18 +520,42 @@ export default function App({ application, geometryDisabled, startupMode = "open
             aria-pressed={currentSelection === selection.id} onClick={() => selectSemantic(selection.id)}>{selection.label}</button>)}
         </div>
         <div className="context-card"><span>Current selection</span><b data-testid="current-selection">{currentSelectionLabel}</b></div>
-        <div className="context-card"><span>Attached context</span><b data-testid="attached-context">{attachedContext ? `${attachedContext.label} · ${attachedContext.revisionId}` : "None"}</b></div>
+        <div className="context-card"><span>Attached context</span><b data-testid="attached-context">{attachedContext ? `${attachedContext.entityLabel} · ${attachedContext.revisionId}` : "None"}</b></div>
         <div className="context-actions">
-          <button disabled={!currentSelection || !current} onClick={() => {
-            const selection = SEMANTIC_SELECTIONS.find((candidate) => candidate.id === currentSelection);
-            if (selection && current) setAttachedContext({ ...selection, revisionId: current.id });
+          <button disabled={!currentSelectionIsAttachable || !current} onClick={() => {
+            if (current) {
+              const expectedDocumentId = activeFixtureDocument.id;
+              setFixtureWorkspace((workspace) => attachCurrentFixtureSelection(workspace, expectedDocumentId, current.id));
+            }
           }}>Attach current selection</button>
+          <button disabled={!attachedContext} onClick={() => {
+            setFixtureWorkspace((workspace) => clearAttachedFixtureContext(workspace));
+          }}>Clear attached context</button>
           <button disabled={!currentSelection || activeFixtureState.commandCategory !== "inspect"} onClick={() => {
             const expectedDocumentId = activeFixtureDocument.id;
             setFixtureWorkspace((workspace) => setFixtureTreeInteraction(workspace, expectedDocumentId, { selectionId: null }));
           }}>Clear current selection</button>
         </div>
         <small className="identity-note">Fixture-local review IDs · admitted artifact scope · not durable topology.</small>
+        <h2>Change Request</h2>
+        <label>Change request prompt<textarea
+          aria-label="Change request prompt"
+          value={changeRequestPrompt}
+          onChange={(event) => setChangeRequestPrompt(event.target.value)}
+        /></label>
+        <div className="context-actions">
+          <button
+            disabled={!attachedContext || changeRequestPrompt.trim().length === 0}
+            onClick={() => setFixtureWorkspace((workspace) => prepareFixtureChangeRequest(workspace, changeRequestPrompt))}
+          >Prepare Change Request</button>
+        </div>
+        {changeRequestDraft ? <div className="context-card change-request-draft" data-testid="change-request-draft">
+          <span>Local Change Request draft</span>
+          <b data-testid="change-request-state">{changeRequestDraft.status}</b>
+          <p data-testid="change-request-prompt">{changeRequestDraft.prompt}</p>
+          <small>{changeRequestDraft.context.entityLabel} · {changeRequestDraft.context.revisionId} · transport connected: {String(changeRequestDraft.transportConnected)}</small>
+        </div> : null}
+        <small className="identity-note">Detached in-memory draft only · not sent, not a ChangeProposal, and no revision, review, approval, export, release, or machine-actuation authority.</small>
         <h2>Fixture metadata · {activeFixtureDocument.fileName}</h2>
         {Object.entries(activeFixtureDocument.parameters).map(([name, parameterValue]) => <Parameter key={name} label={name} value={parameterValue} />)}
         <small className="identity-note">Static R14 values · not an exact-kernel realization claim.</small>
