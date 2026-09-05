@@ -13,6 +13,8 @@ import {
   R14_FIXTURE,
   activateFixtureDocument,
   attachCurrentFixtureSelection,
+  beginFixtureReviewMeasurement,
+  cancelFixtureReviewMeasurement,
   clearAttachedFixtureContext,
   clearFixtureReviewMeasurement,
   closeFixtureDocument,
@@ -27,12 +29,14 @@ import {
   generateFixtureReviewMeshStl,
   openFixtureDocument,
   prepareFixtureChangeRequest,
+  recordFixtureReviewMeasurementPoint,
   setFixtureCommandCategory,
   setFixtureTreeInteraction,
   setFixtureViewportSelection,
   updateFixtureDocumentView,
+  updateFixtureReviewMeasurementHover,
 } from "./fixture";
-import type { FixtureCommandCategory, FixtureSelectionMode, FixtureTreeNode, FixtureViewPreset } from "./fixture";
+import type { FixtureCommandCategory, FixtureReviewPoint, FixtureSelectionMode, FixtureTreeNode, FixtureViewPreset } from "./fixture";
 import "./styles.css";
 
 interface Props { application: CadApplication; geometryDisabled?: boolean; startupMode?: StartupMode; }
@@ -221,6 +225,26 @@ export default function App({ application, geometryDisabled, startupMode = "open
     }));
   }
 
+  function beginTwoPointMeasurement() {
+    const expectedDocumentId = activeFixtureDocument.id;
+    setFixtureWorkspace((workspace) => beginFixtureReviewMeasurement(workspace, expectedDocumentId));
+  }
+
+  function recordMeasurementPoint(point: FixtureReviewPoint) {
+    const expectedDocumentId = activeFixtureDocument.id;
+    setFixtureWorkspace((workspace) => recordFixtureReviewMeasurementPoint(workspace, expectedDocumentId, point));
+  }
+
+  function updateMeasurementHover(point: FixtureReviewPoint | null) {
+    const expectedDocumentId = activeFixtureDocument.id;
+    setFixtureWorkspace((workspace) => updateFixtureReviewMeasurementHover(workspace, expectedDocumentId, point));
+  }
+
+  function cancelMeasurement() {
+    const expectedDocumentId = activeFixtureDocument.id;
+    setFixtureWorkspace((workspace) => cancelFixtureReviewMeasurement(workspace, expectedDocumentId));
+  }
+
   function toggleApproximateSource() {
     const expectedDocumentId = activeFixtureDocument.id;
     const visible = !activeFixtureState.approximateSourceVisible;
@@ -262,10 +286,10 @@ export default function App({ application, geometryDisabled, startupMode = "open
   }
 
   useEffect(() => {
-    if (previewParameters || activeFixtureState.reviewMeasurementMm == null) return;
+    if (previewParameters || (activeFixtureState.reviewMeasurementMm == null && activeFixtureState.measurement.phase === "idle")) return;
     const expectedDocumentId = activeFixtureDocument.id;
     setFixtureWorkspace((workspace) => clearFixtureReviewMeasurement(workspace, expectedDocumentId));
-  }, [activeFixtureDocument.id, activeFixtureState.reviewMeasurementMm, previewParameters]);
+  }, [activeFixtureDocument.id, activeFixtureState.measurement.phase, activeFixtureState.reviewMeasurementMm, previewParameters]);
 
   async function commit() {
     if (!project || !changed) return;
@@ -586,11 +610,19 @@ export default function App({ application, geometryDisabled, startupMode = "open
           setFixtureWorkspace((workspace) => setFixtureViewportSelection(workspace, expectedDocumentId, id));
         }}
         onOpenSource={(id) => openSelectedPart(id, true)}
+        measurement={activeFixtureState.measurement}
+        onMeasurementPoint={recordMeasurementPoint}
+        onMeasurementHover={updateMeasurementHover}
+        onMeasurementCancel={cancelMeasurement}
       /> : <Viewport
         parameters={(previewParameters ?? current.parameters) as DesignRevision["parameters"]}
         authoritativeBase={current}
         disabled={geometryDisabled}
         semanticSelection={isSemanticSelectionId(currentSelection) ? currentSelection : null}
+        measurement={activeFixtureState.measurement}
+        onMeasurementPoint={recordMeasurementPoint}
+        onMeasurementHover={updateMeasurementHover}
+        onMeasurementCancel={cancelMeasurement}
         onGeometryAdmitted={(bounds) => setRenderedBounds(bounds)}
         onBuildStatus={(status) => {
           const durable = { ...status, projectId: project.id };
@@ -608,9 +640,21 @@ export default function App({ application, geometryDisabled, startupMode = "open
           : "BBOX awaiting admitted review geometry"}</div>
         <div className="measurement-panel">
           <button disabled={admittedMeasurement == null} onClick={measureSelection}>Measure selected review entity</button>
-          <output data-testid="review-measurement">{measurementMm === null
-            ? "Review-mesh distance · select an entity"
-            : `Approx. review-mesh distance ${formatMillimetres(measurementMm)} mm · review-only, not exact B-rep`}</output>
+          <button
+            disabled={activeFixtureState.commandCategory !== "inspect" || !previewParameters}
+            onClick={beginTwoPointMeasurement}
+          >Measure review-mesh distance</button>
+          <button
+            disabled={activeFixtureState.measurement.phase === "idle" && measurementMm == null}
+            onClick={cancelMeasurement}
+          >Clear</button>
+          <output data-testid="review-measurement" aria-live="polite">{measurementMm !== null
+            ? `Approx. review-mesh distance ${formatMillimetres(measurementMm)} mm · review-only, not exact B-rep`
+            : activeFixtureState.measurement.phase === "armed"
+            ? "Choose endpoint A on the review mesh · pointer click or focus viewport and press Enter"
+            : activeFixtureState.measurement.phase === "endpoint-a"
+            ? "Endpoint A set · Choose endpoint B · Escape cancels"
+            : "Review-mesh distance · Start a two-point measurement or select an entity"}</output>
         </div>
       </section>
       <aside id="revision-custody" aria-label="Revision custody" tabIndex={-1} className={`panel revision${openResponsivePanel === "custody" ? " open" : ""}`}>

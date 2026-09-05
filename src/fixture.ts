@@ -37,6 +37,15 @@ export interface FixtureReviewCommandRequest {
   readonly selectionId?: string;
 }
 
+export type FixtureReviewPoint = readonly [number, number, number];
+
+export interface FixtureReviewMeasurement {
+  readonly phase: "idle" | "armed" | "endpoint-a" | "complete";
+  readonly endpointA?: FixtureReviewPoint;
+  readonly endpointB?: FixtureReviewPoint;
+  readonly hoverEndpoint?: FixtureReviewPoint | null;
+}
+
 type Vector3 = [number, number, number];
 
 export interface FixtureDocument {
@@ -55,12 +64,7 @@ export interface FixtureDocumentState {
   readonly treeExpandedIds: readonly string[];
   readonly treeFocusId: string | null;
   readonly approximateSourceVisible: boolean;
-  readonly measurement: Readonly<{
-    phase: "idle" | "endpoint-a" | "complete";
-    endpointA?: Vector3;
-    endpointB?: Vector3;
-    hoverEndpoint?: Vector3 | null;
-  }>;
+  readonly measurement: FixtureReviewMeasurement;
   readonly reviewMeasurementMm: number | null;
   readonly stl: Readonly<{
     state: "idle" | "building" | "ready" | "failed";
@@ -239,6 +243,90 @@ export function clearFixtureReviewMeasurement(session: FixtureSession, expectedD
   return replaceActiveDocumentState(session, (state) => ({ ...state, reviewMeasurementMm: null, measurement: { phase: "idle" } }));
 }
 
+function requireActiveInspectDocument(session: FixtureSession, expectedDocumentId: FixtureDocumentId): void {
+  if (session.activeDocumentId !== expectedDocumentId) throw new Error("stale or inactive fixture document context");
+  if (session.documentStates[expectedDocumentId].commandCategory !== "inspect") {
+    throw new Error("review-mesh measurement requires Inspect category");
+  }
+}
+
+function admittedReviewPoint(point: FixtureReviewPoint): FixtureReviewPoint {
+  if (point.length !== 3 || point.some((coordinate) => !Number.isFinite(coordinate))) {
+    throw new Error("review-mesh measurement point must contain three finite millimetre coordinates");
+  }
+  return [point[0], point[1], point[2]];
+}
+
+export function beginFixtureReviewMeasurement(
+  session: FixtureSession,
+  expectedDocumentId: FixtureDocumentId,
+): FixtureSession {
+  requireActiveInspectDocument(session, expectedDocumentId);
+  return replaceActiveDocumentState(session, (state) => ({
+    ...state,
+    measurement: { phase: "armed" },
+    reviewMeasurementMm: null,
+  }));
+}
+
+export function recordFixtureReviewMeasurementPoint(
+  session: FixtureSession,
+  expectedDocumentId: FixtureDocumentId,
+  point: FixtureReviewPoint,
+): FixtureSession {
+  requireActiveInspectDocument(session, expectedDocumentId);
+  const admitted = admittedReviewPoint(point);
+  return replaceActiveDocumentState(session, (state) => {
+    if (state.measurement.phase === "armed") {
+      return {
+        ...state,
+        measurement: { phase: "endpoint-a", endpointA: admitted, hoverEndpoint: null },
+        reviewMeasurementMm: null,
+      };
+    }
+    if (state.measurement.phase === "endpoint-a" && state.measurement.endpointA) {
+      const [ax, ay, az] = state.measurement.endpointA;
+      const [bx, by, bz] = admitted;
+      return {
+        ...state,
+        measurement: { phase: "complete", endpointA: state.measurement.endpointA, endpointB: admitted },
+        reviewMeasurementMm: Math.hypot(bx - ax, by - ay, bz - az),
+      };
+    }
+    throw new Error("review-mesh measurement is not active");
+  });
+}
+
+export function updateFixtureReviewMeasurementHover(
+  session: FixtureSession,
+  expectedDocumentId: FixtureDocumentId,
+  point: FixtureReviewPoint | null,
+): FixtureSession {
+  requireActiveInspectDocument(session, expectedDocumentId);
+  return replaceActiveDocumentState(session, (state) => {
+    if (state.measurement.phase !== "endpoint-a") return state;
+    return {
+      ...state,
+      measurement: {
+        ...state.measurement,
+        hoverEndpoint: point == null ? null : admittedReviewPoint(point),
+      },
+    };
+  });
+}
+
+export function cancelFixtureReviewMeasurement(
+  session: FixtureSession,
+  expectedDocumentId: FixtureDocumentId,
+): FixtureSession {
+  if (session.activeDocumentId !== expectedDocumentId) throw new Error("stale or inactive fixture document context");
+  return replaceActiveDocumentState(session, (state) => ({
+    ...state,
+    measurement: { phase: "idle" },
+    reviewMeasurementMm: null,
+  }));
+}
+
 export function fixtureDocument(id: FixtureDocumentId): FixtureDocument {
   requireDocument(id);
   return DOCUMENTS.find((document) => document.id === id)!;
@@ -328,7 +416,11 @@ export function setFixtureCommandCategory(
 ): FixtureSession {
   if (session.activeDocumentId !== expectedDocumentId) throw new Error("stale or inactive fixture document context");
   if (!fixtureCommandCategories(expectedDocumentId).includes(category)) throw new Error(`command category ${category} is not admitted for ${fixtureDocument(expectedDocumentId).kind}`);
-  return replaceActiveDocumentState(session, (state) => ({ ...state, commandCategory: category }));
+  return replaceActiveDocumentState(session, (state) => ({
+    ...state,
+    commandCategory: category,
+    ...(category === "inspect" ? {} : { measurement: { phase: "idle" as const }, reviewMeasurementMm: null }),
+  }));
 }
 
 export function setFixtureTreeInteraction(
