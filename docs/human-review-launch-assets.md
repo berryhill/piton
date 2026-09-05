@@ -68,4 +68,18 @@ With `Bench Clamp.assembly` active and the Inspect category selected:
 
 Ray hits translate only through the static fixture's predeclared artifact-local occurrence and contextual-face map. The map and highlights are review interaction evidence, not exact topology, authored Assembly authority, engineering approval, export, or fabrication evidence.
 
+## R14/H document-specific approximate source and review-mesh STL
+
+Review each of `Base Plate.part`, `Clamp Jaw.part`, `Guide Pin.part`, and `Bench Clamp.assembly`:
+
+1. Select **View approximate source**. Confirm the disclosed program names the active document and is derived from that document's displayed parameters. For the Assembly, confirm all four canonical occurrences, source-document references, translations, and rotations are present.
+2. Switch among Part and Assembly tabs. Confirm source visibility and content remain document-local. Close and reopen a tab and confirm its prior source visibility is retained without leaking another document's program.
+3. Select **Download review-mesh STL**. Confirm the active document downloads as `<document-id>-review-mesh.stl`, retaining the document-kind suffix in the ID (for example, `base-plate.part-review-mesh.stl` or `bench-clamp.assembly-review-mesh.stl`), and reaches `Ready · validated nonempty ASCII STL` with a positive byte count and facet count.
+4. Confirm the status reports `CAD Z min 0 mm`. The STL coordinate frame uses CAD Z directly, so the model's physical bottom is on the build-plane/grid at Z=0.
+5. Open the downloaded file as text. Confirm it begins with `solid piton_`, contains at least one `facet normal`, ends with the matching `endsolid piton_` name, and contains ASCII only.
+6. Generate output for a second document, then return to the first. Confirm each tab retains only its own status, filename, counts, and source disclosure. A Part download must not silently contain the Assembly or another Part.
+7. Confirm the output panel continues to state that approximate source and STL are review derivatives, not exact B-rep, engineering approval, export authority, or fabrication release. Confirm `review_state=needs_human_review`, `fabrication_release=false`, and `machine_actuation=false` remain unchanged.
+
+Generation is browser-local and deterministic from the static R14 fixture parameters and occurrence transforms. The exported STL contains model review geometry only; grid, lights, cameras, highlights, labels, and other scene helpers are excluded. Output success creates no `DesignRevision`, build acceptance, approval, exact-geometry claim, release, or actuation consequence.
+
 The test gate is automated candidate evidence, not a substitute for this visual human review. The repository does not contain an exact-CAD adapter, disconnected packet generator, engineering-approval issuer, fabrication exporter, release path, or machine-control path.

@@ -1,4 +1,6 @@
 import { R14_ASSEMBLY } from "./assembly";
+import * as THREE from "three";
+import { STLExporter } from "three/examples/jsm/exporters/STLExporter.js";
 
 export type FixtureDocumentId =
   | "base-plate.part"
@@ -51,7 +53,15 @@ export interface FixtureDocumentState {
     hoverEndpoint?: Vector3 | null;
   }>;
   readonly reviewMeasurementMm: number | null;
-  readonly stl: Readonly<{ state: "idle" | "building" | "ready" | "failed"; artifactId?: string }>;
+  readonly stl: Readonly<{
+    state: "idle" | "building" | "ready" | "failed";
+    artifactId?: string;
+    filename?: string;
+    byteLength?: number;
+    facetCount?: number;
+    cadZMinMm?: number;
+    message?: string;
+  }>;
   readonly camera: Readonly<{ position: Vector3; target: Vector3; up: Vector3 }>;
 }
 
@@ -403,4 +413,198 @@ export function dispatchFixtureReviewCommand(session: FixtureSession, request: F
     return openFixtureDocument(session, target);
   }
   throw new Error("unsupported or unavailable review command");
+}
+
+const APPROXIMATE_SOURCE_HEADER = [
+  "# document-specific approximate review source",
+  "# review_state=needs_human_review; fabrication_release=false; machine_actuation=false",
+  "# generated disclosure only; not exact B-rep or fabrication source",
+  "from build123d import *",
+] as const;
+
+function sourceNumber(value: number): string {
+  if (!Number.isFinite(value)) throw new Error("fixture source contains a non-finite parameter");
+  return Number(value.toFixed(6)).toString();
+}
+
+export function generateFixtureApproximateSource(documentId: FixtureDocumentId): string {
+  const document = fixtureDocument(documentId);
+  const p = document.parameters;
+  let body: readonly string[];
+  if (documentId === "base-plate.part") {
+    const pitchX = p.width_mm - 2 * p.hole_inset_mm;
+    const pitchY = p.depth_mm - 2 * p.hole_inset_mm;
+    body = [
+      `# ${document.fileName}`,
+      "with BuildPart() as part:",
+      `    with BuildSketch(): RectangleRounded(${sourceNumber(p.width_mm)}, ${sourceNumber(p.depth_mm)}, ${sourceNumber(p.corner_radius_mm)})`,
+      `    extrude(amount=${sourceNumber(p.thickness_mm)})`,
+      "    with BuildSketch(part.faces().sort_by(Axis.Z)[-1]):",
+      `        with GridLocations(${sourceNumber(pitchX)}, ${sourceNumber(pitchY)}, 2, 2): Circle(${sourceNumber(p.hole_diameter_mm / 2)})`,
+      `    extrude(amount=-${sourceNumber(p.thickness_mm)}, mode=Mode.SUBTRACT)`,
+    ];
+  } else if (documentId === "clamp-jaw.part") {
+    body = [
+      `# ${document.fileName}`,
+      "with BuildPart() as part:",
+      `    Box(${sourceNumber(p.foot_width_mm)}, ${sourceNumber(p.depth_mm)}, ${sourceNumber(p.foot_height_mm)})`,
+      `    with Locations((0, 0, ${sourceNumber(p.foot_height_mm)})): Box(${sourceNumber(p.width_mm)}, ${sourceNumber(p.depth_mm)}, ${sourceNumber(p.height_mm - p.foot_height_mm)})`,
+    ];
+  } else if (documentId === "guide-pin.part") {
+    const shaftHeight = p.height_mm - p.head_height_mm;
+    body = [
+      `# ${document.fileName}`,
+      "with BuildPart() as part:",
+      `    Cylinder(${sourceNumber(p.diameter_mm / 2)}, ${sourceNumber(shaftHeight)})`,
+      `    with Locations((0, 0, ${sourceNumber(shaftHeight)})): Cylinder(${sourceNumber(p.head_diameter_mm / 2)}, ${sourceNumber(p.head_height_mm)})`,
+    ];
+  } else {
+    body = [
+      `# ${document.fileName}`,
+      "# source Parts remain separate; occurrence references and transforms are disclosed",
+      "components = [",
+      ...R14_ASSEMBLY.occurrences.map(({ label, sourceDocumentId, transform }) =>
+        `    ('${label}', '${sourceDocumentId}', (${transform.translationMm.join(", ")}), (${transform.rotationDeg.join(", ")})),`),
+      "]",
+    ];
+  }
+  return [...APPROXIMATE_SOURCE_HEADER, ...body].join("\n");
+}
+
+export interface FixtureReviewMeshStl {
+  readonly documentId: FixtureDocumentId;
+  readonly filename: string;
+  readonly text: string;
+  readonly byteLength: number;
+  readonly facetCount: number;
+  readonly bounds: Readonly<{ min: Vector3; max: Vector3 }>;
+  readonly validation: Readonly<{ ascii: true; nonempty: true; finite: true; cadZMinOnBuildPlane: true }>;
+  readonly claimScope: "Document-specific browser-generated review mesh only; not exact B-rep, engineering approval, or export authority; not fabrication release.";
+}
+
+function roundedRectangle(width: number, depth: number, radius: number): THREE.Shape {
+  const shape = new THREE.Shape();
+  const x = -width / 2;
+  const y = -depth / 2;
+  shape.moveTo(x + radius, y);
+  shape.lineTo(x + width - radius, y);
+  shape.absarc(x + width - radius, y + radius, radius, -Math.PI / 2, 0);
+  shape.lineTo(x + width, y + depth - radius);
+  shape.absarc(x + width - radius, y + depth - radius, radius, 0, Math.PI / 2);
+  shape.lineTo(x + radius, y + depth);
+  shape.absarc(x + radius, y + depth - radius, radius, Math.PI / 2, Math.PI);
+  shape.lineTo(x, y + radius);
+  shape.absarc(x + radius, y + radius, radius, Math.PI, Math.PI * 1.5);
+  return shape;
+}
+
+function basePlateReviewObject(): THREE.Mesh {
+  const document = fixtureDocument("base-plate.part");
+  const p = document.parameters;
+  const shape = roundedRectangle(p.width_mm, p.depth_mm, p.corner_radius_mm);
+  const centers = document.metadata?.hole_centers_mm as readonly (readonly [number, number])[];
+  for (const [x, y] of centers) {
+    const hole = new THREE.Path();
+    hole.absarc(x, y, p.hole_diameter_mm / 2, 0, Math.PI * 2);
+    shape.holes.push(hole);
+  }
+  return new THREE.Mesh(new THREE.ExtrudeGeometry(shape, {
+    depth: p.thickness_mm,
+    bevelEnabled: false,
+    curveSegments: 24,
+  }));
+}
+
+function clampJawReviewObject(): THREE.Group {
+  const p = fixtureDocument("clamp-jaw.part").parameters;
+  const root = new THREE.Group();
+  const foot = new THREE.Mesh(new THREE.BoxGeometry(p.foot_width_mm, p.depth_mm, p.foot_height_mm));
+  foot.position.z = p.foot_height_mm / 2;
+  const uprightHeight = p.height_mm - p.foot_height_mm;
+  const upright = new THREE.Mesh(new THREE.BoxGeometry(p.width_mm, p.depth_mm, uprightHeight));
+  upright.position.z = p.foot_height_mm + uprightHeight / 2;
+  root.add(foot, upright);
+  return root;
+}
+
+function guidePinReviewObject(): THREE.Group {
+  const p = fixtureDocument("guide-pin.part").parameters;
+  const root = new THREE.Group();
+  const shaftHeight = p.height_mm - p.head_height_mm;
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(p.diameter_mm / 2, p.diameter_mm / 2, shaftHeight, 32));
+  shaft.rotation.x = Math.PI / 2;
+  shaft.position.z = shaftHeight / 2;
+  const head = new THREE.Mesh(new THREE.CylinderGeometry(p.head_diameter_mm / 2, p.head_diameter_mm / 2, p.head_height_mm, 32));
+  head.rotation.x = Math.PI / 2;
+  head.position.z = shaftHeight + p.head_height_mm / 2;
+  root.add(shaft, head);
+  return root;
+}
+
+function fixturePartReviewObject(documentId: Exclude<FixtureDocumentId, "bench-clamp.assembly">): THREE.Object3D {
+  if (documentId === "base-plate.part") return basePlateReviewObject();
+  if (documentId === "clamp-jaw.part") return clampJawReviewObject();
+  return guidePinReviewObject();
+}
+
+function fixtureReviewRoot(documentId: FixtureDocumentId): THREE.Group {
+  requireDocument(documentId);
+  const root = new THREE.Group();
+  root.name = `piton_${documentId.replace(/[^a-z0-9]+/gi, "_")}`;
+  if (documentId !== "bench-clamp.assembly") {
+    root.add(fixturePartReviewObject(documentId));
+  } else {
+    for (const occurrence of R14_ASSEMBLY.occurrences) {
+      if (occurrence.suppressed) continue;
+      const instance = fixturePartReviewObject(occurrence.sourceDocumentId);
+      instance.position.set(...occurrence.transform.translationMm);
+      instance.rotation.set(...occurrence.transform.rotationDeg.map(THREE.MathUtils.degToRad) as [number, number, number]);
+      root.add(instance);
+    }
+  }
+  root.updateMatrixWorld(true);
+  return root;
+}
+
+function disposeReviewRoot(root: THREE.Object3D): void {
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    mesh.geometry?.dispose();
+  });
+}
+
+export function generateFixtureReviewMeshStl(documentId: FixtureDocumentId): FixtureReviewMeshStl {
+  const root = fixtureReviewRoot(documentId);
+  try {
+    const box = new THREE.Box3().setFromObject(root);
+    const min = box.min.toArray() as Vector3;
+    const max = box.max.toArray() as Vector3;
+    if (![...min, ...max].every(Number.isFinite)) throw new Error("review mesh bounds are not finite");
+    if (Math.abs(min[2]) > 1e-6) throw new Error(`review mesh CAD Z min ${min[2]} does not contact build plane Z=0`);
+    min[2] = 0;
+    const raw = new STLExporter().parse(root, { binary: false });
+    if (typeof raw !== "string") throw new Error("review mesh STL exporter returned a non-ASCII payload");
+    const solidName = root.name;
+    const text = raw.replace(/^solid exported/, `solid ${solidName}`).replace(/endsolid exported\s*$/, `endsolid ${solidName}\n`);
+    const facetCount = text.match(/facet normal/g)?.length ?? 0;
+    const ascii = /^[\x00-\x7F]+$/.test(text);
+    const finite = !/\b(?:NaN|Infinity)\b/.test(text);
+    const byteLength = new TextEncoder().encode(text).byteLength;
+    const hasEnvelope = /^solid\s/.test(text) && /endsolid\s+\S+\s*$/.test(text);
+    if (!ascii || !finite || byteLength === 0 || facetCount === 0 || !hasEnvelope) {
+      throw new Error(`generated STL failed nonempty ASCII facet validation (ascii=${ascii}, finite=${finite}, bytes=${byteLength}, facets=${facetCount}, envelope=${hasEnvelope})`);
+    }
+    return {
+      documentId,
+      filename: `${documentId}-review-mesh.stl`,
+      text,
+      byteLength,
+      facetCount,
+      bounds: { min, max },
+      validation: { ascii: true, nonempty: true, finite: true, cadZMinOnBuildPlane: true },
+      claimScope: "Document-specific browser-generated review mesh only; not exact B-rep, engineering approval, or export authority; not fabrication release.",
+    };
+  } finally {
+    disposeReviewRoot(root);
+  }
 }

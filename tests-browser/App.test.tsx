@@ -241,6 +241,39 @@ describe("Piton workbench", () => {
     expect(screen.getByRole("button", { name: /PRT · Clamp Jaw\.part/ })).toBeVisible();
   });
 
+  it("keeps approximate source and validated STL output local to the active document", async () => {
+    const createObjectURL = vi.fn(() => "blob:piton-review-mesh");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL, revokeObjectURL }));
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+
+    render(<App application={application()} geometryDisabled />);
+    await screen.findByText("Accepted immutable revision");
+
+    expect(screen.getByText(/Review-mesh STL not generated for Bench Clamp\.assembly/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "View approximate source" }));
+    expect(screen.getByTestId("fixture-approximate-source")).toHaveTextContent("Bench Clamp.assembly");
+    expect(screen.getByTestId("fixture-approximate-source")).toHaveTextContent("Clamp Jaw:2");
+    fireEvent.click(screen.getByRole("button", { name: "Download review-mesh STL" }));
+    expect(screen.getByText(/Ready · validated nonempty ASCII STL/)).toBeVisible();
+    expect(screen.getByTestId("fixture-stl-status")).toHaveTextContent(/CAD Z min 0 mm/);
+    expect(anchorClick).toHaveBeenCalledOnce();
+    expect(createObjectURL).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: /PRT · Guide Pin\.part/ }));
+    expect(screen.getByText(/Review-mesh STL not generated for Guide Pin\.part/)).toBeVisible();
+    expect(screen.queryByTestId("fixture-approximate-source")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View approximate source" }));
+    expect(screen.getByTestId("fixture-approximate-source")).toHaveTextContent("Cylinder(5, 43)");
+    expect(screen.getByTestId("fixture-approximate-source")).not.toHaveTextContent("Clamp Jaw:2");
+
+    fireEvent.click(screen.getByRole("tab", { name: /Bench Clamp\.assembly/ }));
+    expect(screen.getByTestId("fixture-approximate-source")).toHaveTextContent("Clamp Jaw:2");
+    expect(screen.getByText(/Ready · validated nonempty ASCII STL/)).toBeVisible();
+    expect(screen.getByTestId("fabrication-release")).toHaveTextContent("false");
+    expect(screen.getByTestId("machine-actuation")).toHaveTextContent("false");
+  });
+
   it("supports hierarchical roving focus, selection toggle, and document-aware command controls", async () => {
     render(<App application={application()} geometryDisabled />);
     await screen.findByText("Accepted immutable revision");
