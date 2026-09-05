@@ -18,6 +18,7 @@ const applicationSourceFiles = [
   "assembly.ts",
   "change-request.ts",
   "components/AssemblyViewport.tsx",
+  "components/reviewMeasurement.ts",
   "components/Viewport.tsx",
   "domain.ts",
   "fixture.ts",

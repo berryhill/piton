@@ -48,7 +48,7 @@ Review both Part and Assembly documents:
 3. Use twisties and Arrow Up/Down/Left/Right, Home, End, Enter, and Space. Confirm one roving tree item is tabbable, activating the selected item again clears selection, and expansion/focus state remains independent when switching documents.
 4. Confirm Part categories are Features/Sketch/Inspect and Assembly categories are Assembly/Mates/Inspect. Inspect must initially be active and each document must restore its own category after tab switching or reopening.
 5. Confirm every feature, sketch, Assembly, and mate-authoring control is visibly unavailable and disabled. These vocabulary controls must not author geometry, occurrences, transforms, mates, or revisions.
-6. In Inspect, confirm Measure requires a selection, Clear Measurement is enabled only when the active document has measurement state, and Open Part is enabled only for a canonical Assembly occurrence, source reference, or contextual review surface.
+6. In Inspect, confirm **Measure selected review entity** requires a selection, **Clear** is enabled only when the active document has measurement state, and Open Part is enabled only for a canonical Assembly occurrence, source reference, or contextual review surface. This selection prerequisite applies only to the legacy selected-entity measurement, not the R14/G two-point review-mesh measurement.
 7. Double-click canonical source-bearing Assembly selections and confirm navigation opens the exact in-fixture Part. Confirm a mate, unknown ID, missing reference, or inactive-document request cannot navigate or alter any document state.
 8. Switch among Part and Assembly tabs and confirm selection, expansion, focus, category, and measurement state do not leak. Confirm `review_state=needs_human_review`, `fabrication_release=false`, and `machine_actuation=false` remain unchanged.
 
@@ -82,6 +82,21 @@ Use the browser workbench to review the single global, in-memory request session
 8. Confirm no network request occurs and no interaction creates or mutates a `DesignRevision`, `ChangeProposal`, review disposition, approval, export, channel, fabrication release, or machine actuation state. Root truth remains `review_state=needs_human_review`, `fabrication_release=false`, and `machine_actuation=false`.
 
 The attached context and prepared draft are detached review-communication objects, not durable topology or authored CAD authority. Closing/reopening tabs does not send them, and preparing a draft is not proposal acceptance, engineering approval, export, or release.
+
+## R14/G two-point pointer and keyboard review-mesh measurement
+
+Review the interaction in both a Part viewport and the `Bench Clamp.assembly` viewport:
+
+1. Complete a measurement, then choose **Measure review-mesh distance** again. Confirm starting or restarting resets both endpoints and the prior result, enters `Choose endpoint A`, and disables orbit controls while measurement is active. This command does not require a selected review entity.
+2. Click a valid review-mesh point to set endpoint A. Move over another valid point and confirm a dashed hover-preview line follows the pointer from A. Move over empty background and confirm only the hover preview clears. Click empty background and confirm the miss does not complete or discard endpoint A; A remains available for the next valid hit.
+3. Click a second valid review-mesh point. Confirm endpoint B is retained, the overlay becomes a solid completed line, the result reports the three-dimensional Euclidean distance in millimetres as `Approx. review-mesh distance … mm`, and orbit controls are restored.
+4. Restart, focus the viewport, and use Enter for one endpoint and Space for the other. Confirm each key raycasts the viewport's keyboard measurement target and follows the same valid-hit, miss-preservation, completed-overlay, and millimetre-result rules as pointer operation.
+5. During an armed or endpoint-A measurement, press Escape. Confirm both endpoints, hover preview, and result are cancelled and orbit controls are restored. Repeat with **Clear** after a completed measurement and confirm it returns to the same idle, cleared state.
+6. After cancellation, clearing, or completion, choose **Measure review-mesh distance** again. Confirm it starts a new clean measurement rather than extending or reusing the old endpoints.
+7. Give two open documents different measurement states, then switch, close, and reopen their tabs. Confirm endpoints, previews, completed results, and active/idle state remain document-local and do not leak between Part and Assembly documents.
+8. Confirm `review_state=needs_human_review`, `fabrication_release=false`, and `machine_actuation=false` remain unchanged throughout.
+
+The points, overlay, and Euclidean millimetre result are approximate review-mesh evidence only. They do not mutate authored state or create an exact B-rep, durable topology reference, engineering approval, export authority, fabrication release, or machine actuation consequence.
 
 ## R14/H document-specific approximate source and review-mesh STL
 

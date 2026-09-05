@@ -3,6 +3,8 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { DesignRevision, LBracketParameters } from "../domain";
 import type { SemanticSelectionId } from "../App";
+import type { FixtureReviewMeasurement, FixtureReviewPoint } from "../fixture";
+import { clearReviewMeasurementOverlay, updateReviewMeasurementOverlay } from "./reviewMeasurement";
 import { deriveGeometryBinding, type GeometryAuthorityBinding } from "../geometry/binding";
 import { GeometryResultGate, installReplacement, type GeometryRequestIdentity, type GeometryResult } from "../geometry/gate";
 import { cameraPresetDirection, fitCameraToBounds, meshBounds, rolledCameraUp, selectedLegZone, type CameraPreset, type MeshBounds } from "../geometry/view";
@@ -32,6 +34,10 @@ interface Props {
   semanticSelection?: SemanticSelectionId | null;
   onBuildStatus?: (status: PreviewBuildStatus) => void;
   onGeometryAdmitted?: (bounds: MeshBounds, binding: GeometryAuthorityBinding) => void;
+  measurement?: FixtureReviewMeasurement;
+  onMeasurementPoint?: (point: FixtureReviewPoint) => void;
+  onMeasurementHover?: (point: FixtureReviewPoint | null) => void;
+  onMeasurementCancel?: () => void;
 }
 
 export default function Viewport({
@@ -41,6 +47,10 @@ export default function Viewport({
   semanticSelection = null,
   onBuildStatus,
   onGeometryAdmitted,
+  measurement = { phase: "idle" },
+  onMeasurementPoint,
+  onMeasurementHover,
+  onMeasurementCancel,
 }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const worker = useRef<GeometryWorkerSurface | null>(null);
@@ -49,6 +59,9 @@ export default function Viewport({
   const updateMesh = useRef<(result: GeometryResult) => MeshBounds>(() => { throw new Error("viewport is not initialized"); });
   const updateZone = useRef<(next: LBracketParameters) => void>(() => {});
   const updateSemantic = useRef<(selection: SemanticSelectionId | null, next: LBracketParameters) => void>(() => {});
+  const updateMeasurement = useRef<(value: FixtureReviewMeasurement) => void>(() => {});
+  const measurementInteraction = useRef({ measurement, onMeasurementPoint, onMeasurementHover, onMeasurementCancel });
+  measurementInteraction.current = { measurement, onMeasurementPoint, onMeasurementHover, onMeasurementCancel };
   const statusSink = useRef(onBuildStatus);
   const geometrySink = useRef(onGeometryAdmitted);
   const [status, setStatus] = useState(disabled ? "Geometry disabled in component test" : "Initializing Manifold WASM…");
@@ -154,6 +167,17 @@ export default function Viewport({
     buildVolume.name = "build-volume-350mm";
     scene.add(buildVolume);
     element.dataset.buildVolume = "350 × 350 × 350 mm";
+    const measurementOverlay = new THREE.Group();
+    measurementOverlay.name = "review-mesh-measurement-overlay";
+    scene.add(measurementOverlay);
+    updateMeasurement.current = (value) => {
+      const active = value.phase === "armed" || value.phase === "endpoint-a";
+      controls.enabled = !active;
+      element.dataset.controlsEnabled = String(!active);
+      element.dataset.measurementPhase = value.phase;
+      element.dataset.measurementOverlay = updateReviewMeasurementOverlay(measurementOverlay, value);
+    };
+    updateMeasurement.current(measurement);
 
     interface InstalledReviewMesh {
       mesh: THREE.Mesh;
@@ -212,6 +236,63 @@ export default function Viewport({
       element.dataset.renderedVertexCount = String(result.vertices.length / 3);
       return replacement.bounds;
     };
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    const measurementPointAt = (clientX: number, clientY: number): FixtureReviewPoint | null => {
+      if (!part) return null;
+      const bounds = renderer.domElement.getBoundingClientRect();
+      if (!(bounds.width > 0 && bounds.height > 0)) return null;
+      pointer.set(
+        ((clientX - bounds.left) / bounds.width) * 2 - 1,
+        -((clientY - bounds.top) / bounds.height) * 2 + 1,
+      );
+      raycaster.setFromCamera(pointer, camera);
+      const hit = raycaster.intersectObject(part.mesh, false)[0];
+      return hit ? [hit.point.x, hit.point.y, hit.point.z] : null;
+    };
+    const keyboardMeasurementPoint = (): FixtureReviewPoint | null => {
+      const bounds = renderer.domElement.getBoundingClientRect();
+      for (const y of [0.5, 0.4, 0.6, 0.3, 0.7]) {
+        for (const x of [0.5, 0.4, 0.6, 0.3, 0.7]) {
+          const point = measurementPointAt(bounds.left + bounds.width * x, bounds.top + bounds.height * y);
+          if (point) return point;
+        }
+      }
+      return null;
+    };
+    let pointerDown = { x: 0, y: 0 };
+    const handlePointerDown = (event: PointerEvent) => {
+      pointerDown = { x: event.clientX, y: event.clientY };
+      if (measurementInteraction.current.measurement.phase !== "idle") element.focus();
+    };
+    const handleClick = (event: MouseEvent) => {
+      if (Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) > 4) return;
+      const phase = measurementInteraction.current.measurement.phase;
+      if (phase !== "armed" && phase !== "endpoint-a") return;
+      const point = measurementPointAt(event.clientX, event.clientY);
+      if (point) measurementInteraction.current.onMeasurementPoint?.(point);
+    };
+    const handlePointerMove = (event: PointerEvent) => {
+      if (measurementInteraction.current.measurement.phase !== "endpoint-a") return;
+      measurementInteraction.current.onMeasurementHover?.(measurementPointAt(event.clientX, event.clientY));
+    };
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      const phase = measurementInteraction.current.measurement.phase;
+      if (event.key === "Escape" && phase !== "idle") {
+        event.preventDefault();
+        measurementInteraction.current.onMeasurementCancel?.();
+        return;
+      }
+      if ((event.key === "Enter" || event.key === " ") && (phase === "armed" || phase === "endpoint-a")) {
+        event.preventDefault();
+        const point = keyboardMeasurementPoint();
+        if (point) measurementInteraction.current.onMeasurementPoint?.(point);
+      }
+    };
+    renderer.domElement.addEventListener("pointerdown", handlePointerDown);
+    renderer.domElement.addEventListener("pointermove", handlePointerMove);
+    renderer.domElement.addEventListener("click", handleClick);
+    element.addEventListener("keydown", handleKeyDown);
     const resize = () => {
       const { clientWidth: width, clientHeight: height } = element;
       if (!(width > 0 && height > 0)) return;
@@ -253,8 +334,13 @@ export default function Viewport({
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
+      renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
+      renderer.domElement.removeEventListener("pointermove", handlePointerMove);
+      renderer.domElement.removeEventListener("click", handleClick);
+      element.removeEventListener("keydown", handleKeyDown);
       controls.dispose();
       disposeSemanticOverlay();
+      clearReviewMeasurementOverlay(measurementOverlay);
       if (part) disposePart(part);
       renderer.dispose();
       element.replaceChildren();
@@ -265,6 +351,8 @@ export default function Viewport({
     if (disabled) return;
     updateSemantic.current(semanticSelection, parameters);
   }, [disabled, parameters, semanticSelection]);
+
+  useEffect(() => updateMeasurement.current(measurement), [measurement]);
 
   useEffect(() => {
     if (disabled) return;
@@ -351,7 +439,15 @@ export default function Viewport({
   }, []);
 
   return <div className="viewport-shell">
-    <div ref={host} className="viewport" data-testid="viewport" />
+    <div
+      ref={host}
+      className="viewport"
+      data-testid="viewport"
+      data-measurement-phase={measurement.phase}
+      tabIndex={0}
+      role="application"
+      aria-label="Part review viewport"
+    />
     <div className="viewport-status">{status}</div>
     <div className="view-actions" aria-label="Review camera controls">
       {(["iso", "front", "top"] as const).map((preset) => <button key={preset} onClick={() => (host.current as HTMLDivElement & { setView?: (value: CameraPreset) => void })?.setView?.(preset)}>{preset[0].toUpperCase() + preset.slice(1)}</button>)}

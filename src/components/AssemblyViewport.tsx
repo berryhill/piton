@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { R14_ASSEMBLY, assemblyContextualFaceId, type AssemblyOccurrence } from "../assembly";
-import type { FixtureSelectionMode } from "../fixture";
+import type { FixtureReviewMeasurement, FixtureReviewPoint, FixtureSelectionMode } from "../fixture";
+import { clearReviewMeasurementOverlay, updateReviewMeasurementOverlay } from "./reviewMeasurement";
 
 interface Props {
   disabled?: boolean;
@@ -10,6 +11,10 @@ interface Props {
   selectionMode?: FixtureSelectionMode;
   onSelect?: (id: string) => void;
   onOpenSource?: (id: string) => void;
+  measurement?: FixtureReviewMeasurement;
+  onMeasurementPoint?: (point: FixtureReviewPoint) => void;
+  onMeasurementHover?: (point: FixtureReviewPoint | null) => void;
+  onMeasurementCancel?: () => void;
 }
 
 function reviewMaterial(color: number): THREE.MeshStandardMaterial {
@@ -172,11 +177,16 @@ export default function AssemblyViewport({
   selectionMode = "smart",
   onSelect,
   onOpenSource,
+  measurement = { phase: "idle" },
+  onMeasurementPoint,
+  onMeasurementHover,
+  onMeasurementCancel,
 }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const selection = useRef<(id: string | null) => void>(() => {});
-  const interaction = useRef({ selectionMode, onSelect, onOpenSource });
-  interaction.current = { selectionMode, onSelect, onOpenSource };
+  const updateMeasurement = useRef<(value: FixtureReviewMeasurement) => void>(() => {});
+  const interaction = useRef({ selectionMode, onSelect, onOpenSource, measurement, onMeasurementPoint, onMeasurementHover, onMeasurementCancel });
+  interaction.current = { selectionMode, onSelect, onOpenSource, measurement, onMeasurementPoint, onMeasurementHover, onMeasurementCancel };
 
   useEffect(() => {
     if (disabled || !host.current) return;
@@ -206,6 +216,17 @@ export default function AssemblyViewport({
     const root = createAssemblyReviewRoot();
     const occurrenceObjects = new Map<string, THREE.Group>(root.children.map((object) => [object.userData.occurrenceId as string, object as THREE.Group]));
     scene.add(root);
+    const measurementOverlay = new THREE.Group();
+    measurementOverlay.name = "review-mesh-measurement-overlay";
+    scene.add(measurementOverlay);
+    updateMeasurement.current = (value) => {
+      const active = value.phase === "armed" || value.phase === "endpoint-a";
+      controls.enabled = !active;
+      element.dataset.controlsEnabled = String(!active);
+      element.dataset.measurementPhase = value.phase;
+      element.dataset.measurementOverlay = updateReviewMeasurementOverlay(measurementOverlay, value);
+    };
+    updateMeasurement.current(measurement);
     const evidence = inspectAssemblyReviewRoot(root);
     const { size, center } = evidence;
     const highlight = new THREE.Group();
@@ -263,15 +284,22 @@ export default function AssemblyViewport({
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
-    const pick = (event: MouseEvent): string | null => {
+    const intersectionsAt = (clientX: number, clientY: number): THREE.Intersection[] => {
       const bounds = renderer.domElement.getBoundingClientRect();
-      if (!(bounds.width > 0 && bounds.height > 0)) return null;
+      if (!(bounds.width > 0 && bounds.height > 0)) return [];
       pointer.set(
-        ((event.clientX - bounds.left) / bounds.width) * 2 - 1,
-        -((event.clientY - bounds.top) / bounds.height) * 2 + 1,
+        ((clientX - bounds.left) / bounds.width) * 2 - 1,
+        -((clientY - bounds.top) / bounds.height) * 2 + 1,
       );
       raycaster.setFromCamera(pointer, camera);
-      return resolveAssemblyReviewPick(raycaster.intersectObject(root, true), interaction.current.selectionMode);
+      return raycaster.intersectObject(root, true);
+    };
+    const pick = (event: MouseEvent): string | null => {
+      return resolveAssemblyReviewPick(intersectionsAt(event.clientX, event.clientY), interaction.current.selectionMode);
+    };
+    const measurementPointAt = (clientX: number, clientY: number): FixtureReviewPoint | null => {
+      const hit = intersectionsAt(clientX, clientY)[0];
+      return hit ? [hit.point.x, hit.point.y, hit.point.z] : null;
     };
     let pointerDown = { x: 0, y: 0 };
     const handlePointerDown = (event: PointerEvent) => {
@@ -279,16 +307,43 @@ export default function AssemblyViewport({
     };
     const handleClick = (event: MouseEvent) => {
       if (Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) > 4) return;
+      const measuring = interaction.current.measurement.phase === "armed" || interaction.current.measurement.phase === "endpoint-a";
+      if (measuring) {
+        const point = measurementPointAt(event.clientX, event.clientY);
+        if (point) interaction.current.onMeasurementPoint?.(point);
+        return;
+      }
       const id = pick(event);
       if (id) interaction.current.onSelect?.(id);
     };
+    const handlePointerMove = (event: PointerEvent) => {
+      if (interaction.current.measurement.phase !== "endpoint-a") return;
+      interaction.current.onMeasurementHover?.(measurementPointAt(event.clientX, event.clientY));
+    };
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape" && interaction.current.measurement.phase !== "idle") {
+        event.preventDefault();
+        interaction.current.onMeasurementCancel?.();
+        return;
+      }
+      if ((event.key === "Enter" || event.key === " ")
+        && (interaction.current.measurement.phase === "armed" || interaction.current.measurement.phase === "endpoint-a")) {
+        event.preventDefault();
+        const bounds = renderer.domElement.getBoundingClientRect();
+        const point = measurementPointAt(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+        if (point) interaction.current.onMeasurementPoint?.(point);
+      }
+    };
     const handleDoubleClick = (event: MouseEvent) => {
+      if (interaction.current.measurement.phase !== "idle") return;
       const id = pick(event);
       if (id) interaction.current.onOpenSource?.(id);
     };
     renderer.domElement.addEventListener("pointerdown", handlePointerDown);
+    renderer.domElement.addEventListener("pointermove", handlePointerMove);
     renderer.domElement.addEventListener("click", handleClick);
     renderer.domElement.addEventListener("dblclick", handleDoubleClick);
+    element.addEventListener("keydown", handleKeyDown);
 
     let frame = 0;
     const draw = () => {
@@ -306,17 +361,21 @@ export default function AssemblyViewport({
       cancelAnimationFrame(frame);
       observer.disconnect();
       renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
+      renderer.domElement.removeEventListener("pointermove", handlePointerMove);
       renderer.domElement.removeEventListener("click", handleClick);
       renderer.domElement.removeEventListener("dblclick", handleDoubleClick);
+      element.removeEventListener("keydown", handleKeyDown);
       controls.dispose();
       disposeObject(root);
       disposeObject(highlight);
+      clearReviewMeasurementOverlay(measurementOverlay);
       renderer.dispose();
       element.replaceChildren();
     };
   }, [disabled]);
 
   useEffect(() => selection.current(selectedEntityId), [selectedEntityId]);
+  useEffect(() => updateMeasurement.current(measurement), [measurement]);
 
   return <div className="viewport-shell assembly-viewport-shell">
     <div
@@ -329,6 +388,10 @@ export default function AssemblyViewport({
       data-build-plane-z={R14_ASSEMBLY.sceneEvidence.gridWorldZMm}
       data-cad-world-mapping="CAD Z=Three.js world Z"
       data-selection-mode={selectionMode}
+      data-measurement-phase={measurement.phase}
+      tabIndex={0}
+      role="application"
+      aria-label="Assembly review viewport"
     />
     <div className="viewport-status">{disabled ? "Assembly review scene · geometry disabled in component test" : "Interactive Assembly review scene · CAD Z-min 0 on grid"}</div>
     <div className="view-actions" aria-label="Assembly review camera controls">
