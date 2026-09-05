@@ -1,6 +1,15 @@
 import { R14_ASSEMBLY } from "./assembly";
 import * as THREE from "three";
 import { STLExporter } from "three/examples/jsm/exporters/STLExporter.js";
+import {
+  createFixtureRequestSession,
+  detachFixtureReviewContext,
+  prepareLocalChangeRequestDraft,
+} from "./change-request";
+import type {
+  FixtureContextEntityKind,
+  FixtureRequestSession,
+} from "./change-request";
 
 export type FixtureDocumentId =
   | "base-plate.part"
@@ -69,6 +78,7 @@ export interface FixtureSession {
   readonly openDocumentIds: readonly FixtureDocumentId[];
   readonly activeDocumentId: FixtureDocumentId;
   readonly documentStates: Readonly<Record<FixtureDocumentId, FixtureDocumentState>>;
+  readonly requestSession: FixtureRequestSession;
 }
 
 const DOCUMENTS: readonly FixtureDocument[] = [
@@ -145,6 +155,7 @@ export function createFixtureSession(): FixtureSession {
     openDocumentIds: [...INITIAL_OPEN_DOCUMENT_IDS],
     activeDocumentId: INITIAL_ACTIVE_DOCUMENT_ID,
     documentStates: allDocumentStates(),
+    requestSession: createFixtureRequestSession(),
   };
 }
 
@@ -184,7 +195,7 @@ export function closeFixtureDocument(session: FixtureSession, id: FixtureDocumen
   const closingIndex = session.openDocumentIds.indexOf(id);
   if (closingIndex < 0) return session;
   const remaining = session.openDocumentIds.filter((documentId) => documentId !== id);
-  if (remaining.length === 0) return createFixtureSession();
+  if (remaining.length === 0) return { ...createFixtureSession(), requestSession: session.requestSession };
   if (session.activeDocumentId !== id) return { ...session, openDocumentIds: remaining };
   const neighborIndex = Math.min(closingIndex, remaining.length - 1);
   return { ...session, openDocumentIds: remaining, activeDocumentId: remaining[neighborIndex] };
@@ -365,6 +376,56 @@ function selectedTreeNode(documentId: FixtureDocumentId, selectionId: string | u
   const matches = flattenFixtureTree(fixtureModelTree(documentId)).filter(({ id }) => id === selectionId);
   if (matches.length !== 1) throw new Error(matches.length === 0 ? "missing or forged selection identity" : "ambiguous selection identity");
   return matches[0];
+}
+
+const ATTACHABLE_NODE_KINDS: Readonly<Partial<Record<FixtureTreeNodeKind, FixtureContextEntityKind>>> = Object.freeze({
+  "review-surface": "face",
+  feature: "feature",
+  occurrence: "component",
+  "source-reference": "document_reference",
+  mate: "mate",
+});
+
+export function attachCurrentFixtureSelection(
+  session: FixtureSession,
+  expectedDocumentId: FixtureDocumentId,
+  revisionId: string,
+): FixtureSession {
+  if (session.activeDocumentId !== expectedDocumentId) throw new Error("stale or inactive fixture document context");
+  const selectionId = session.documentStates[expectedDocumentId].selection;
+  if (!selectionId) throw new Error("current selection required");
+  const node = selectedTreeNode(expectedDocumentId, selectionId);
+  const entityKind = ATTACHABLE_NODE_KINDS[node.kind];
+  if (!entityKind) throw new Error("selection kind is not attachable");
+  if (revisionId.trim().length === 0) throw new Error("revision identity required");
+
+  const attachedContext = detachFixtureReviewContext({
+    documentId: expectedDocumentId,
+    entityId: node.id,
+    entityKind,
+    entityLabel: node.label,
+    revisionId,
+  });
+  return {
+    ...session,
+    requestSession: { ...session.requestSession, attachedContext },
+  };
+}
+
+export function clearAttachedFixtureContext(session: FixtureSession): FixtureSession {
+  if (session.requestSession.attachedContext == null) return session;
+  return {
+    ...session,
+    requestSession: { ...session.requestSession, attachedContext: null },
+  };
+}
+
+export function prepareFixtureChangeRequest(session: FixtureSession, prompt: string): FixtureSession {
+  const preparedDraft = prepareLocalChangeRequestDraft(prompt, session.requestSession.attachedContext);
+  return {
+    ...session,
+    requestSession: { ...session.requestSession, preparedDraft },
+  };
 }
 
 export function fixtureOpenPartTarget(documentId: FixtureDocumentId, selectionId: string | null): Exclude<FixtureDocumentId, "bench-clamp.assembly"> | null {

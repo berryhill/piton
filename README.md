@@ -52,6 +52,7 @@ Open the URL printed by Vite (normally `http://127.0.0.1:5173`). The server supp
 11. Complete the [R14/B fixture-document and tab-lifecycle review](docs/human-review-launch-assets.md#r14b-fixture-documents-and-tabs), including ordered documents, initial tabs, duplicate-open prevention, bounded active-tab close behavior, deterministic final-tab recovery, and independent selection/view state across switching, closing, and reopening.
 12. Complete the [R14/E viewport selection and source-navigation review](docs/human-review-launch-assets.md#r14e-viewport-selection-and-source-navigation), including Smart/Face/Component raycast picks, repeated-Part identity, semantic highlights, and double-click source navigation.
 13. Complete the [R14/H document-specific review-output review](docs/human-review-launch-assets.md#r14h-document-specific-approximate-source-and-review-mesh-stl), including per-document approximate source, validated nonempty ASCII STL, CAD Z-min 0 build-plane contact, and document-local output state.
+14. Complete the [R14/F detached-context and prepared-not-sent Change Request review](docs/human-review-launch-assets.md#r14f-detached-context-and-prepared-not-sent-change-request), including supported and unsupported attachments, replacement and clearing, tab lifecycle, trimmed prompts, retained old draft context, and confirmation that no transport or authored-state mutation occurs.
 
 ## Verification
 
