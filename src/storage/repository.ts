@@ -1,7 +1,8 @@
 import { sqlite3Worker1Promiser, type Worker1Promiser } from "@sqlite.org/sqlite-wasm";
 import type { BrowserProject, CadCommandReceipt, CadCommandRequest, CandidateCommand, DesignRevision, PortableCustodyEnvelope, PortableCustodyPacket } from "../domain";
 import { SAFETY_TRUTH, assertPortableCustodyPacket, assertProjectIntegrity, canonicalPortableCustodyJson, deriveCandidateFromCommand, seedProject, sha256Hex } from "../domain";
-import { CURRENT_SCHEMA_VERSION, migrationStatements } from "./schema";
+import { CURRENT_SCHEMA_VERSION, migrationStatements, WORKSPACE_SCHEMA } from "./schema";
+import { assertWorkspaceState, assertWorkspaceTransition, type WorkspaceState } from "../workspace";
 import type { GeometryAuthorityBinding } from "../geometry/binding";
 import type { BuildAttempt, ChangeProposal, ChannelPointer, LifecycleRecord, ProposalDisposition } from "../lifecycle";
 import { assertLifecycleRecord } from "../lifecycle";
@@ -327,7 +328,14 @@ export function waitForSqliteWorker(
 }
 
 export function startSqliteWorker(): Promise<Worker1Promiser> {
-  return waitForSqliteWorker(({ onready, onerror }) => sqlite3Worker1Promiser({ onready, onerror }));
+  return waitForSqliteWorker(({ onready, onerror }) => {
+    const worker = new Worker(new URL("./sqlite.worker.ts", import.meta.url), { type: "module" });
+    worker.addEventListener("error", (event) => {
+      worker.terminate();
+      onerror(new Error(event.message || "SQLite worker initialization failed"));
+    });
+    sqlite3Worker1Promiser({ worker, onready, onerror });
+  });
 }
 
 export async function migrateSqliteDatabase(promiser: Worker1Promiser, dbId: string): Promise<void> {
@@ -370,7 +378,97 @@ export class SqliteOpfsProjectRepository implements ProjectRepository {
     const opened = await repository.promiser("open", { filename: `file:${namespace}.sqlite3?vfs=opfs` });
     repository.dbId = opened.result.dbId;
     await migrateSqliteDatabase(repository.promiser, repository.dbId);
+    await repository.migrateWorkspace();
     return repository;
+  }
+
+  // Queue whole workspace transactions, not individual statements. Helpers called
+  // inside the callback must use exec directly rather than re-enter this queue.
+  private workspaceQueue: Promise<void> = Promise.resolve();
+
+  private workspaceTransaction<T>(begin: "BEGIN" | "BEGIN IMMEDIATE", operation: () => Promise<T>): Promise<T> {
+    const result = this.workspaceQueue.then(async () => {
+      await this.exec(begin);
+      try {
+        const value = await operation();
+        await this.exec("COMMIT");
+        return value;
+      } catch (error) {
+        await this.exec("ROLLBACK");
+        throw error;
+      }
+    });
+    // A rejected operation still rejects its caller, but cannot poison the queue.
+    this.workspaceQueue = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  async migrateWorkspace(): Promise<void> {
+    return this.workspaceTransaction("BEGIN IMMEDIATE", async () => {
+      for(const sql of WORKSPACE_SCHEMA) await this.exec(sql);
+      const old=(await this.exec("SELECT name FROM sqlite_schema WHERE type='table' AND name='workspace_registry'")).result.resultRows as Row[];
+      if(old.length) {
+        const row=((await this.exec("SELECT version,json FROM workspace_registry WHERE id=1")).result.resultRows as Row[])[0];
+        if(row) {
+          const state=JSON.parse(String(row.json)); assertWorkspaceState(state);
+          if(!Number.isSafeInteger(row.version) || Number(row.version)<1) throw new Error("Invalid workspace version");
+          if(((await this.exec("SELECT id FROM workspace_meta")).result.resultRows as Row[]).length) throw new Error("Conflicting workspace migration authority");
+          await this.persistWorkspace(state);
+          await this.exec("INSERT INTO workspace_meta VALUES (1,1,?)",[Number(row.version)]);
+        }
+        await this.exec("DROP TABLE workspace_registry");
+      }
+      await this.exec("INSERT OR IGNORE INTO workspace_meta VALUES (1,1,0)");
+    });
+  }
+  private async workspaceSnapshot(): Promise<{version:number;state:WorkspaceState}> {
+    const rows=async(table:string)=>(await this.exec(`SELECT * FROM ${table} ORDER BY rowid`)).result.resultRows as Row[];
+    const meta=(await rows("workspace_meta"))[0];
+    if(!meta || meta.schema_version!==1 || !Number.isSafeInteger(meta.version) || Number(meta.version)<0) throw new Error("Invalid workspace schema/version");
+    const state:WorkspaceState={projects:[],imports:{},receipts:{}};
+    for(const p of await rows("workspace_projects")) state.projects.push({id:String(p.id),name:String(p.name),archived:p.archived===1,updatedAt:String(p.updated_at),documents:[]});
+    for(const d of await rows("workspace_documents")) {
+      const p=state.projects.find(p=>p.id===d.project_id); if(!p) throw new Error("Orphan workspace document");
+      p.documents.push({id:String(d.id),name:String(d.name),part:{id:String(d.source_id),name:String(d.name),acceptedRevisionId:String(d.accepted_revision_id),currentRevisionId:String(d.current_revision_id),revisions:[]},revisionIds:{},...(d.legacy_json===null?{}:{legacyCustody:JSON.parse(String(d.legacy_json))})});
+    }
+    for(const r of await rows("workspace_revisions")) {
+      const d=state.projects.flatMap(p=>p.documents).find(d=>d.id===r.document_id); if(!d) throw new Error("Orphan workspace revision");
+      const revision=JSON.parse(String(r.revision_json)); if(revision.id!==r.revision_id) throw new Error("Revision row mismatch");
+      d.part.revisions.push(revision); d.revisionIds[String(r.id)]=String(r.revision_id);
+    }
+    for(const r of await rows("workspace_imports")) state.imports[String(r.digest)]=String(r.project_id);
+    for(const r of await rows("workspace_receipts")) state.receipts[String(r.id)]={digest:String(r.digest),revisionId:String(r.revision_id)};
+    assertWorkspaceState(state); return {version:Number(meta.version),state};
+  }
+  async readWorkspace(): Promise<{version:number;json:string}|null> {
+    return this.workspaceTransaction("BEGIN", async () => {
+      const {version,state}=await this.workspaceSnapshot();
+      return version===0?null:{version,json:JSON.stringify(state)};
+    });
+  }
+  private async persistWorkspace(state:WorkspaceState):Promise<void> {
+    for(const p of state.projects) {
+      await this.exec("INSERT INTO workspace_projects VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,archived=excluded.archived,updated_at=excluded.updated_at",[p.id,p.name,Number(p.archived),p.updatedAt]);
+      for(const d of p.documents) {
+        await this.exec("INSERT INTO workspace_documents VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,current_revision_id=excluded.current_revision_id",[d.id,p.id,d.name,d.part.id,d.part.acceptedRevisionId,d.part.currentRevisionId,d.legacyCustody?JSON.stringify(d.legacyCustody):null]);
+        for(const [id,rid] of Object.entries(d.revisionIds)) await this.exec("INSERT OR IGNORE INTO workspace_revisions VALUES (?,?,?,?)",[id,d.id,rid,JSON.stringify(d.part.revisions.find(r=>r.id===rid))]);
+      }
+    }
+    for(const [digest,id] of Object.entries(state.imports)) await this.exec("INSERT OR IGNORE INTO workspace_imports VALUES (?,?)",[digest,id]);
+    for(const [id,r] of Object.entries(state.receipts)) await this.exec("INSERT OR IGNORE INTO workspace_receipts VALUES (?,?,?)",[id,r.digest,r.revisionId]);
+  }
+  async writeWorkspace(version:number,json:string):Promise<void> {
+    const next=JSON.parse(json); assertWorkspaceState(next);
+    if(!Number.isSafeInteger(version) || version<0) throw new Error("Invalid workspace version");
+    return this.workspaceTransaction("BEGIN IMMEDIATE", async () => {
+      const before=await this.workspaceSnapshot();
+      if(before.version!==version) throw new Error("stale workspace; reload and retry");
+      assertWorkspaceTransition(before.state,next);
+      await this.persistWorkspace(next);
+      await this.exec("UPDATE workspace_meta SET version=version+1 WHERE id=1 AND version=?",[version]);
+      const changed=((await this.exec("SELECT changes() AS changed")).result.resultRows as Row[])[0];
+      if(changed?.changed!==1) throw new Error("stale workspace; reload and retry");
+    });
   }
 
   private async exec(sql: string, bind?: (string | number | null)[]) {

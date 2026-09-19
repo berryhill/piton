@@ -17,17 +17,21 @@ Open the Vite URL printed by the launcher, normally `http://127.0.0.1:5173`. The
 
 ## Startup modes
 
-`src/startup.ts` admits three modes:
+The default `/` redirects to `/projects`, a persistent local registry with project creation, Part authoring and stable project/document/revision routes. See [Project workspaces](project-workspaces.md) for the default workflow and identity-preserving project backups.
+
+For the optional `/demo` and existing legacy import/reopen links, `src/startup.ts` admits three modes:
 
 | mode | URL shape | custody behavior |
 | --- | --- | --- |
-| `open-or-seed` | default URL | Opens namespace `piton`; seeds one project only when empty |
+| `open-or-seed` | `/demo` | Opens namespace `piton`; seeds one legacy project only when empty |
 | `import-fresh` | `?mode=import` | Allocates a UUID-derived namespace and waits for a validated packet |
 | `reopen-existing` | `?mode=reopen&ns=<uuid>` | Reopens that exact imported namespace; missing custody fails visibly |
 
 Keep the full reopen URL when working with imported custody. Browser origin changes, profile deletion, site-data deletion, or storage eviction can make OPFS custody unavailable.
 
-## Operator smoke check
+## Legacy fixture operator smoke check
+
+Open `/demo` before performing these checks. For new project authoring use the project-workspace guide.
 
 1. Confirm the persistence label reads `SQLite WASM · OPFS`.
 2. Confirm the seeded/current Part, accepted revision, and current revision are visible.

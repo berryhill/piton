@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("two-point review-mesh measurement supports pointer and keyboard lifecycle", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/demo");
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
 
   const viewport = page.getByTestId("assembly-viewport");

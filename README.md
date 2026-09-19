@@ -37,7 +37,15 @@ pnpm start
 
 Open the URL printed by Vite (normally `http://127.0.0.1:5173`). The server supplies the cross-origin-isolation headers required by SQLite WASM OPFS. The app fails visibly rather than falling back to transient writable state when OPFS is unavailable.
 
-## Manual smoke
+## Create a project and Part
+
+Open `/projects`, enter a project name, and choose **Create project**. Inside the project, create a named Part, edit the L-bracket's six dimensional parameters, then **Propose and preview** and **Commit revision**. The project list, document links and read-only revision history survive reload. Project backups preserve bookmark identities across explicit import into another browser.
+
+See [Project workspaces](docs/project-workspaces.md) for canonical URLs, local-storage boundaries, backup/recovery, structured change requests and automation commands. There is no implicit cross-device synchronization or connected LLM/MCP service.
+
+## Legacy/R14 manual smoke
+
+Open `/demo` for the preserved interaction fixture and legacy single-parameter workflow below. It is optional, not the new-project home.
 
 1. Confirm the seeded L-bracket and accepted immutable revision appear.
 2. Orbit, pan, zoom, and use Reset / fit. Confirm CAD Z=0 sits on the physical grid.
@@ -67,7 +75,7 @@ The canonical gate runs TypeScript checking, unit/component tests, the productio
 
 ## Current limitations
 
-- One seeded single Part and one writable bounded parameter (`leg_length_mm`).
+- New projects support named parametric L-bracket Parts with six editable dimensions. General sketch/feature authoring and additional Part recipes are not implemented. The optional `/demo` keeps its original single-parameter fixture workflow.
 - Manifold output is review mesh geometry, not exact B-rep or durable topology authority.
 - No exact-CAD adapter or exact-geometry export is included in this repository.
 - No engineering approval issuance, fabrication release, machine actuation, printer, CNC, slicer, G-code, CAM, or deployment capability exists.

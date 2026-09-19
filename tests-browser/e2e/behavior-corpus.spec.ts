@@ -24,7 +24,7 @@ const productSource = [
 ].map((path) => readFileSync(new URL(path, import.meta.url), "utf8")).join("\n--piton-source-boundary--\n");
 
 test("executes the closed 25-scenario corpus and 1,000-replay campaign in Chromium", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/demo");
   const evidence = await page.evaluate(async (sourceBinding) => {
     const moduleUrl = "/tests-browser/support/browserBehaviorCorpus.ts";
     const campaign = await import(/* @vite-ignore */ moduleUrl) as {

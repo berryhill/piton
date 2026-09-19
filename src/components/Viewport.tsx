@@ -34,6 +34,7 @@ interface Props {
   semanticSelection?: SemanticSelectionId | null;
   onBuildStatus?: (status: PreviewBuildStatus) => void;
   onGeometryAdmitted?: (bounds: MeshBounds, binding: GeometryAuthorityBinding) => void;
+  onReviewMesh?: (result: GeometryResult) => void;
   measurement?: FixtureReviewMeasurement;
   onMeasurementPoint?: (point: FixtureReviewPoint) => void;
   onMeasurementHover?: (point: FixtureReviewPoint | null) => void;
@@ -47,6 +48,7 @@ export default function Viewport({
   semanticSelection = null,
   onBuildStatus,
   onGeometryAdmitted,
+  onReviewMesh,
   measurement = { phase: "idle" },
   onMeasurementPoint,
   onMeasurementHover,
@@ -64,6 +66,8 @@ export default function Viewport({
   measurementInteraction.current = { measurement, onMeasurementPoint, onMeasurementHover, onMeasurementCancel };
   const statusSink = useRef(onBuildStatus);
   const geometrySink = useRef(onGeometryAdmitted);
+  const meshSink = useRef(onReviewMesh);
+  meshSink.current = onReviewMesh;
   const [status, setStatus] = useState(disabled ? "Geometry disabled in component test" : "Initializing Manifold WASM…");
 
   useEffect(() => { statusSink.current = onBuildStatus; }, [onBuildStatus]);
@@ -406,6 +410,7 @@ export default function Viewport({
           }
           gate.current.commit(result);
           geometrySink.current?.(bounds, result.binding);
+          meshSink.current?.(structuredClone(result));
           const message = "Review mesh ready · CAD Z-min 0 on grid";
           setStatus(message);
           statusSink.current?.({

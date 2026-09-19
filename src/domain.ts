@@ -200,7 +200,7 @@ function revisionId(revision: Omit<DesignRevision, "id">): string {
   return `rev-${sha256Hex(canonicalRevisionBody(revision))}`;
 }
 
-function makeRevision(parentRevisionId: string | null, parameters: LBracketParameters, createdAt: string): DesignRevision {
+export function makeRevision(parentRevisionId: string | null, parameters: LBracketParameters, createdAt: string): DesignRevision {
   const body = {
     parentRevisionId,
     createdAt,

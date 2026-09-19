@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const VERIFY_CHAIN = "pnpm typecheck && pnpm test && pnpm build && pnpm test:e2e";
+const VERIFY_CHAIN = "pnpm typecheck && pnpm test && pnpm build && pnpm test:e2e && pnpm test:production";
 
 function read(path: string): string {
   return readFileSync(path, "utf8");
@@ -20,6 +20,7 @@ describe("Piton product identity", () => {
     expect(pkg.scripts.start).toBe("./launch-piton.sh");
     expect(pkg.scripts.dev).toBe("vite --host 127.0.0.1");
     expect(pkg.scripts.verify).toBe(VERIFY_CHAIN);
+    expect(pkg.scripts["test:production"]).toBe("playwright test --config playwright.production.config.ts");
     expect(pkg.scripts).not.toHaveProperty("launch:mvi");
     expect(pkg.scripts).not.toHaveProperty("verify:mvi");
     expect(existsSync("launch-piton.sh")).toBe(true);

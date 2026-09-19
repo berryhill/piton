@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test("R14 shell is bounded at desktop, drawer, compact, and narrow widths", async ({ page }) => {
   for (const width of [1100, 570, 420, 360]) {
     await page.setViewportSize({ width, height: 800 });
-    await page.goto("/");
+    await page.goto("/demo");
     await expect(page.getByText("Accepted immutable revision")).toBeAttached();
     await expect(page.getByRole("contentinfo", { name: "Persistent safety truth" })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
@@ -13,7 +13,7 @@ test("R14 shell is bounded at desktop, drawer, compact, and narrow widths", asyn
 
 test("responsive drawers and keyboard skip paths reach their named regions", async ({ page }) => {
   await page.setViewportSize({ width: 570, height: 800 });
-  await page.goto("/");
+  await page.goto("/demo");
   await expect(page.getByText("Accepted immutable revision")).toBeAttached();
 
   await page.keyboard.press("Tab");

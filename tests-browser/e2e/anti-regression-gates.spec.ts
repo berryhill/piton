@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 import { expect, test } from "@playwright/test";
 
 test("anti-regression gate 1: chromium defaults open with root safety truth and no enabling control", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/demo");
 
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
   await expect(page.getByTestId("assembly-viewport")).toHaveAttribute("data-occurrence-count", "4");
@@ -10,15 +10,11 @@ test("anti-regression gate 1: chromium defaults open with root safety truth and 
   await expect(page.getByTestId("assembly-viewport")).toHaveAttribute("data-build-plane-z", "0");
   const partFixture = page.getByRole("button", { name: "Part fixture" });
   const partViewportStatus = page.locator(".viewport-status");
-  await expect(async () => {
-    if ((await partViewportStatus.textContent()) !== "Review mesh ready · CAD Z-min 0 on grid") {
-      await partFixture.click();
-    }
-    await expect(partFixture).toHaveAttribute("aria-pressed", "true");
-    await expect(partViewportStatus).toHaveText("Review mesh ready · CAD Z-min 0 on grid");
-    await expect(page.getByTestId("viewport")).toHaveAttribute("data-cad-z-min", "0");
-    await expect(page.getByTestId("viewport")).toHaveAttribute("data-build-plane-z", "0");
-  }).toPass({ timeout: 20_000 });
+  await partFixture.click();
+  await expect(partFixture).toHaveAttribute("aria-pressed", "true");
+  await expect(partViewportStatus).toHaveText("Review mesh ready · CAD Z-min 0 on grid");
+  await expect(page.getByTestId("viewport")).toHaveAttribute("data-cad-z-min", "0");
+  await expect(page.getByTestId("viewport")).toHaveAttribute("data-build-plane-z", "0");
   await expect(page.getByTestId("viewport")).toHaveAttribute("data-controls", "orbit pan zoom");
   await expect(page.getByTestId("viewport")).toHaveAttribute("data-build-volume", "350 × 350 × 350 mm");
   await expect(page.getByTestId("fabrication-release")).toHaveText("false");
@@ -39,7 +35,7 @@ test("anti-regression gate 1: chromium defaults open with root safety truth and 
 });
 
 test("anti-regression gate 2: commit then reload keeps the accepted revision immutable and root safety truth", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/demo");
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
 
   const acceptedId = await page.locator(".state-card code").first().textContent();
@@ -60,7 +56,7 @@ test("anti-regression gate 2: commit then reload keeps the accepted revision imm
 });
 
 test("anti-regression gate 3: forged fabrication_release envelope is rejected at the import boundary", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/demo");
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
 
   const exportedEnvelope = await page.evaluate(async () => {
@@ -108,7 +104,7 @@ test("anti-regression gate 3: forged fabrication_release envelope is rejected at
 });
 
 test("anti-regression gate 4: worker output is request- and revision-bound and never displaces last-good", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/demo");
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
 
   const gate = await page.evaluate(async () => {
@@ -142,7 +138,7 @@ test("anti-regression gate 4: worker output is request- and revision-bound and n
 });
 
 test("anti-regression gate 5: durable SQLite row readback and unchanged UI defaults after reopen", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/demo");
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
 
   const initial = await page.evaluate(async () => {
@@ -183,7 +179,7 @@ test("anti-regression gate 5: durable SQLite row readback and unchanged UI defau
 });
 
 test("anti-regression gate 6: no UI control enables fabrication release, machine actuation, approval, or exact export", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/demo");
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
 
   const html = await page.content();

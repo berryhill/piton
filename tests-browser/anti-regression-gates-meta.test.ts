@@ -16,7 +16,7 @@ const EXPECTED_GATE_TITLES = [
   /anti-regression gate 6: no UI control enables fabrication release, machine actuation, approval, or exact export/,
 ] as const;
 
-const EXPECTED_VERIFY = "pnpm typecheck && pnpm test && pnpm build && pnpm test:e2e";
+const EXPECTED_VERIFY = "pnpm typecheck && pnpm test && pnpm build && pnpm test:e2e && pnpm test:production";
 
 describe("anti-regression gates permanence", () => {
   it("keeps the gate spec tracked at tests-browser/e2e/anti-regression-gates.spec.ts with all six expected gate titles", () => {
@@ -34,11 +34,12 @@ describe("anti-regression gates permanence", () => {
     expect(source).not.toMatch(/\.skip\(\s*$/m);
   });
 
-  it("keeps the canonical pnpm verify chain unchanged", () => {
+  it("keeps all canonical gates plus production WASM verification mandatory", () => {
     const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
       scripts: Record<string, string>;
     };
     expect(pkg.scripts.verify).toBe(EXPECTED_VERIFY);
+    expect(pkg.scripts["test:production"]).toBe("playwright test --config playwright.production.config.ts");
   });
 
   it("forbids retries, grep, and filter overrides inside playwright.config.ts", () => {
