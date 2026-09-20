@@ -2,9 +2,9 @@ export const CURRENT_SCHEMA_VERSION = 4;
 
 // Workspace schema is independent of the v4 portable-custody schema.
 export const WORKSPACE_SCHEMA = [
-  `CREATE TABLE IF NOT EXISTS workspace_meta (id INTEGER PRIMARY KEY CHECK(id=1), schema_version INTEGER NOT NULL CHECK(schema_version=1), version INTEGER NOT NULL CHECK(version>=0)) STRICT`,
+  `CREATE TABLE IF NOT EXISTS workspace_meta (id INTEGER PRIMARY KEY CHECK(id=1), schema_version INTEGER NOT NULL CHECK(schema_version=2), version INTEGER NOT NULL CHECK(version>=0)) STRICT`,
   `CREATE TABLE IF NOT EXISTS workspace_projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, archived INTEGER NOT NULL CHECK(archived IN (0,1)), updated_at TEXT NOT NULL) STRICT`,
-  `CREATE TABLE IF NOT EXISTS workspace_documents (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES workspace_projects(id), name TEXT NOT NULL, source_id TEXT NOT NULL, accepted_revision_id TEXT NOT NULL, current_revision_id TEXT NOT NULL, legacy_json TEXT) STRICT`,
+  `CREATE TABLE IF NOT EXISTS workspace_documents (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES workspace_projects(id), name TEXT NOT NULL, source_id TEXT NOT NULL, accepted_revision_id TEXT, current_revision_id TEXT, legacy_json TEXT, CHECK ((accepted_revision_id IS NULL) = (current_revision_id IS NULL)), CHECK (accepted_revision_id IS NOT NULL OR legacy_json IS NULL)) STRICT`,
   `CREATE TABLE IF NOT EXISTS workspace_revisions (id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES workspace_documents(id), revision_id TEXT NOT NULL, revision_json TEXT NOT NULL, UNIQUE(document_id,revision_id)) STRICT`,
   `CREATE TABLE IF NOT EXISTS workspace_imports (digest TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES workspace_projects(id)) STRICT`,
   `CREATE TABLE IF NOT EXISTS workspace_receipts (id TEXT PRIMARY KEY, digest TEXT NOT NULL, revision_id TEXT NOT NULL REFERENCES workspace_revisions(id)) STRICT`,

@@ -2,7 +2,7 @@ import { sqlite3Worker1Promiser, type Worker1Promiser } from "@sqlite.org/sqlite
 import type { BrowserProject, CadCommandReceipt, CadCommandRequest, CandidateCommand, DesignRevision, PortableCustodyEnvelope, PortableCustodyPacket } from "../domain";
 import { SAFETY_TRUTH, assertPortableCustodyPacket, assertProjectIntegrity, canonicalPortableCustodyJson, deriveCandidateFromCommand, seedProject, sha256Hex } from "../domain";
 import { CURRENT_SCHEMA_VERSION, migrationStatements, WORKSPACE_SCHEMA } from "./schema";
-import { assertWorkspaceState, assertWorkspaceTransition, type WorkspaceState } from "../workspace";
+import { assertWorkspaceState, assertWorkspaceTransition, canonicalWorkspaceJson, isAuthoredPart, type WorkspaceState } from "../workspace";
 import type { GeometryAuthorityBinding } from "../geometry/binding";
 import type { BuildAttempt, ChangeProposal, ChannelPointer, LifecycleRecord, ProposalDisposition } from "../lifecycle";
 import { assertLifecycleRecord } from "../lifecycle";
@@ -406,34 +406,90 @@ export class SqliteOpfsProjectRepository implements ProjectRepository {
   async migrateWorkspace(): Promise<void> {
     return this.workspaceTransaction("BEGIN IMMEDIATE", async () => {
       for(const sql of WORKSPACE_SCHEMA) await this.exec(sql);
+      const meta=((await this.exec("SELECT schema_version FROM workspace_meta WHERE id=1")).result.resultRows as Row[])[0];
+      if (meta?.schema_version === 1) await this.migrateEmptyWorkspaceParts();
+      else if (meta && meta.schema_version !== 2) throw new Error("Unsupported workspace schema");
       const old=(await this.exec("SELECT name FROM sqlite_schema WHERE type='table' AND name='workspace_registry'")).result.resultRows as Row[];
       if(old.length) {
-        const row=((await this.exec("SELECT version,json FROM workspace_registry WHERE id=1")).result.resultRows as Row[])[0];
+        const legacyRows=(await this.exec("SELECT id,version,json FROM workspace_registry")).result.resultRows as Row[];
+        if(legacyRows.length>1 || (legacyRows[0] && legacyRows[0].id!==1)) throw new Error("Invalid legacy workspace registry; existing data retained");
+        const row=legacyRows[0];
         if(row) {
           const state=JSON.parse(String(row.json)); assertWorkspaceState(state);
           if(!Number.isSafeInteger(row.version) || Number(row.version)<1) throw new Error("Invalid workspace version");
           if(((await this.exec("SELECT id FROM workspace_meta")).result.resultRows as Row[]).length) throw new Error("Conflicting workspace migration authority");
           await this.persistWorkspace(state);
-          await this.exec("INSERT INTO workspace_meta VALUES (1,1,?)",[Number(row.version)]);
+          await this.exec("INSERT INTO workspace_meta VALUES (1,2,?)",[Number(row.version)]);
+          const copied=await this.workspaceSnapshot();
+          if(copied.version!==row.version || canonicalWorkspaceJson(copied.state)!==canonicalWorkspaceJson(state)) throw new Error("Legacy workspace migration copy verification failed");
         }
         await this.exec("DROP TABLE workspace_registry");
       }
-      await this.exec("INSERT OR IGNORE INTO workspace_meta VALUES (1,1,0)");
+      await this.exec("INSERT OR IGNORE INTO workspace_meta VALUES (1,2,0)");
     });
   }
-  private async workspaceSnapshot(): Promise<{version:number;state:WorkspaceState}> {
+  /** Rebuild the FK chain with verified copies, without disabling foreign keys.
+   * Child tables must be copied too: dropping just documents would invalidate
+   * revision/receipt custody. SQLite DDL and every copy are in the caller's
+   * BEGIN IMMEDIATE transaction, including version publication and readback.
+   */
+  private async migrateEmptyWorkspaceParts(): Promise<void> {
+    const before=await this.workspaceSnapshot(1);
+    const tables=["workspace_meta","workspace_documents","workspace_revisions","workspace_receipts"];
+    // Unknown inbound CASCADE dependencies could silently delete unrelated data
+    // during DROP TABLE even when the final foreign_key_check is clean.
+    const allTables=(await this.exec("SELECT name FROM sqlite_schema WHERE type='table'")).result.resultRows as Row[];
+    for(const {name} of allTables) {
+      const quoted=String(name).replaceAll('"','""');
+      const foreignKeys=(await this.exec(`PRAGMA foreign_key_list("${quoted}")`)).result.resultRows as Row[];
+      for(const fk of foreignKeys) if(tables.includes(String(fk.table))) {
+        const known=(name==="workspace_revisions" && fk.table==="workspace_documents" && fk.from==="document_id" && fk.to==="id") || (name==="workspace_receipts" && fk.table==="workspace_revisions" && fk.from==="revision_id" && fk.to==="id");
+        if(!known || fk.on_delete!=="NO ACTION" || fk.on_update!=="NO ACTION") throw new Error("Unsupported workspace migration foreign key; existing data retained");
+      }
+    }
+    for (const table of tables) {
+      const extras=(await this.exec("SELECT name FROM sqlite_schema WHERE tbl_name=? AND type IN ('trigger','index') AND sql IS NOT NULL",[table])).result.resultRows as Row[];
+      if(extras.length) throw new Error("Unsupported workspace migration indexes/triggers; existing data retained");
+      const definition=WORKSPACE_SCHEMA.find(sql=>sql.startsWith(`CREATE TABLE IF NOT EXISTS ${table} (`))!;
+      const copiedDefinition=definition.replace(/workspace_(meta|documents|revisions|receipts)\b/g, "$&_v2").replace("IF NOT EXISTS ", "");
+      await this.exec(copiedDefinition);
+      const projection=table === "workspace_meta" ? "id,2,version" : "rowid,*";
+      const columns=(await this.exec(`PRAGMA table_info(${table})`)).result.resultRows as Row[];
+      const destination=table === "workspace_meta" ? "" : `(rowid,${columns.map(c=>`"${String(c.name).replaceAll('"','""')}"`).join(",")})`;
+      await this.exec(`INSERT INTO ${table}_v2 ${destination} SELECT ${projection} FROM ${table} ORDER BY rowid`);
+      const copiedProjection=table === "workspace_meta" ? "id,schema_version,version" : "rowid,*";
+      // Compare both directions before any original table is dropped; include
+      // rowid to preserve chronological revision ordering and exact JSON bytes.
+      for(const [left,right] of [[`SELECT ${projection} FROM ${table}`,`SELECT ${copiedProjection} FROM ${table}_v2`],[`SELECT ${copiedProjection} FROM ${table}_v2`,`SELECT ${projection} FROM ${table}`]]) {
+        if(((await this.exec(`${left} EXCEPT ${right}`)).result.resultRows as Row[]).length) throw new Error("Workspace migration copy verification failed");
+      }
+    }
+    for(const table of [...tables].reverse()) await this.exec(`DROP TABLE ${table}`);
+    for(const table of tables) await this.exec(`ALTER TABLE ${table}_v2 RENAME TO ${table}`);
+    if(((await this.exec("PRAGMA foreign_key_check")).result.resultRows as Row[]).length) throw new Error("Workspace migration foreign key verification failed");
+    const after=await this.workspaceSnapshot();
+    if(canonicalWorkspaceJson(before)!==canonicalWorkspaceJson(after)) throw new Error("Workspace migration custody readback mismatch");
+  }
+
+  private async workspaceSnapshot(schemaVersion = 2): Promise<{version:number;state:WorkspaceState}> {
     const rows=async(table:string)=>(await this.exec(`SELECT * FROM ${table} ORDER BY rowid`)).result.resultRows as Row[];
     const meta=(await rows("workspace_meta"))[0];
-    if(!meta || meta.schema_version!==1 || !Number.isSafeInteger(meta.version) || Number(meta.version)<0) throw new Error("Invalid workspace schema/version");
+    if(!meta || meta.schema_version!==schemaVersion || !Number.isSafeInteger(meta.version) || Number(meta.version)<0) throw new Error("Invalid workspace schema/version");
     const state:WorkspaceState={projects:[],imports:{},receipts:{}};
     for(const p of await rows("workspace_projects")) state.projects.push({id:String(p.id),name:String(p.name),archived:p.archived===1,updatedAt:String(p.updated_at),documents:[]});
     for(const d of await rows("workspace_documents")) {
       const p=state.projects.find(p=>p.id===d.project_id); if(!p) throw new Error("Orphan workspace document");
-      p.documents.push({id:String(d.id),name:String(d.name),part:{id:String(d.source_id),name:String(d.name),acceptedRevisionId:String(d.accepted_revision_id),currentRevisionId:String(d.current_revision_id),revisions:[]},revisionIds:{},...(d.legacy_json===null?{}:{legacyCustody:JSON.parse(String(d.legacy_json))})});
+      const identity={id:String(d.source_id),name:String(d.name)};
+      if ((d.accepted_revision_id === null) !== (d.current_revision_id === null)) throw new Error("Invalid mixed Part revision pointers");
+      const part = d.accepted_revision_id === null
+        ? {...identity,acceptedRevisionId:null,currentRevisionId:null,revisions:[] as []}
+        : {...identity,acceptedRevisionId:String(d.accepted_revision_id),currentRevisionId:String(d.current_revision_id),revisions:[] as DesignRevision[]};
+      p.documents.push({id:String(d.id),name:String(d.name),part,revisionIds:{},...(d.legacy_json===null?{}:{legacyCustody:JSON.parse(String(d.legacy_json))})});
     }
     for(const r of await rows("workspace_revisions")) {
       const d=state.projects.flatMap(p=>p.documents).find(d=>d.id===r.document_id); if(!d) throw new Error("Orphan workspace revision");
       const revision=JSON.parse(String(r.revision_json)); if(revision.id!==r.revision_id) throw new Error("Revision row mismatch");
+      if(!isAuthoredPart(d.part)) throw new Error("Empty Part has stored revisions");
       d.part.revisions.push(revision); d.revisionIds[String(r.id)]=String(r.revision_id);
     }
     for(const r of await rows("workspace_imports")) state.imports[String(r.digest)]=String(r.project_id);

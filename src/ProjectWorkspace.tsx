@@ -1,39 +1,52 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import Viewport from "./components/Viewport";
 import { CadApplication } from "./application";
 import { openProjectRepository } from "./storage/repository";
-import { WorkspaceApplication, parseWorkspaceRoute, resolvePart, type PartProposal, type WorkspaceState, type PartDocument } from "./workspace";
-import type { DesignRevision, LBracketParameters } from "./domain";
+import { WorkspaceApplication, isAuthoredPart, parseWorkspaceRoute, resolvePart, type WorkspaceProject, type PartProposal, type WorkspaceState, type PartDocument } from "./workspace";
+import type { BrowserProject, DesignRevision, LBracketParameters } from "./domain";
 import "./styles.css";
 import "./workspace.css";
 import type { GeometryResult } from "./geometry/gate";
 import { downloadPartFile, reviewPartStl } from "./partExport";
+import { ConversationPanel } from "./chat/ConversationPanel";
+import type { SelectionReference } from "./chat/context";
 
 declare global { interface Window { pitonWorkspace: WorkspaceApplication; } }
 export default function ProjectWorkspace({application}: {application: WorkspaceApplication}) {
   const [state,setState]=useState<WorkspaceState>(); const [path,setPath]=useState(location.pathname); const [error,setError]=useState(""); const [label,setLabel]=useState("");
   const mounted=useRef(false), readGeneration=useRef(0), pageGeneration=useRef(0), actionPending=useRef(false);
   const [pending,setPending]=useState(false);
+  const [createOpen,setCreateOpen]=useState(false), [createError,setCreateError]=useState("");
+  const createDialog=useRef<HTMLDialogElement>(null), createOpener=useRef<HTMLButtonElement>(null);
+  const closeCreate=()=>{
+    pageGeneration.current++;
+    createDialog.current?.close();setCreateOpen(false);setLabel("");setCreateError("");
+    createOpener.current?.focus();
+  };
+  const openCreate=()=>{
+    setLabel("");setCreateError("");setCreateOpen(true);createDialog.current?.showModal();
+  };
   const refresh=async()=>{
     const generation=++readGeneration.current;
     try { const next=await application.read(); if(mounted.current && generation===readGeneration.current) {setState(next);setError("");} }
     catch(e) { if(mounted.current && generation===readGeneration.current) setError(String(e)); }
   };
-  const navigate=(url:string)=>{if(!mounted.current)return;pageGeneration.current++;history.pushState(null,"",url);setPath(url);setError("");setLabel("");};
+  const navigate=(url:string)=>{if(!mounted.current)return;createDialog.current?.close();setCreateOpen(false);pageGeneration.current++;history.pushState(null,"",url);setPath(url);setError("");setLabel("");};
   useEffect(()=>{
     mounted.current=true; window.pitonWorkspace=application;
     const unsubscribe=application.subscribe(()=>{void refresh();});
-    const back=()=>{pageGeneration.current++;setPath(location.pathname);setError("");setLabel("");void refresh();};
+    const back=()=>{createDialog.current?.close();setCreateOpen(false);pageGeneration.current++;setPath(location.pathname);setError("");setLabel("");void refresh();};
     window.addEventListener("popstate",back); void refresh();
     return()=>{mounted.current=false;readGeneration.current++;pageGeneration.current++;unsubscribe();window.removeEventListener("popstate",back);};
   },[application]);
-  const act=async(fn:(go:(url:string)=>void)=>Promise<unknown>)=>{
+  const act=async(fn:(go:(url:string)=>void)=>Promise<unknown>, onError=setError)=>{
     if(actionPending.current)return;
     actionPending.current=true;setPending(true);
     const page=pageGeneration.current;
     const current=()=>mounted.current && page===pageGeneration.current;
     try {setError("");await fn(url=>{if(current())navigate(url);});}
-    catch(e){if(current())setError(e instanceof Error?e.message:String(e));}
+    catch(e){if(current())onError(e instanceof Error?e.message:String(e));}
     finally {actionPending.current=false;if(mounted.current)setPending(false);}
   };
   let route: ReturnType<typeof parseWorkspaceRoute> | undefined; let routeError=""; try {route=parseWorkspaceRoute(path);} catch(e){routeError=String(e);}
@@ -49,6 +62,31 @@ export default function ProjectWorkspace({application}: {application: WorkspaceA
     const id=packet?.format==="piton-workspace-project/v1" ? await application.importProject(packet) : await application.importCustody(packet);
     if(route?.projectId!==id)go(`/projects/${id}`);
   };
+  if(state && project && !routeError) return <ProjectWorkbench key={project.id} application={application} project={project} document={document} revisionId={route?.revisionId} path={path} navigate={navigate} refresh={refresh} act={act} pending={pending} error={error}/>;
+  if(state&&!routeError&&!route?.projectId) return <main className="project-workspace projects-home">
+    <div className="projects-brand">PITON <span>Design workspace</span></div>
+    <div className="projects-content"><header className="projects-heading"><div><h1>Projects</h1><p>Create a project or open one to continue designing.</p></div>
+      <button ref={createOpener} className="workspace-primary" onClick={openCreate}>Create project</button>
+    </header>
+    <dialog ref={createDialog} className="project-create-dialog" aria-labelledby="create-project-title" aria-describedby="create-project-description" onCancel={e=>{e.preventDefault();closeCreate();}}>
+      <h2 id="create-project-title">Create project</h2>
+      <p id="create-project-description">Start with an empty workbench. Add Parts when you’re ready.</p>
+      <form className="project-create" onSubmit={e=>{e.preventDefault();if(!createOpen)return;setCreateError("");void act(async go=>go(`/projects/${await application.createProject(label)}`),setCreateError);}}>
+        <label>Project name<input autoFocus placeholder="Name your project" value={label} onChange={e=>setLabel(e.target.value)} required maxLength={100} disabled={pending}/></label>
+        {createError&&<p role="alert">{createError}</p>}
+        <div className="project-create-actions"><button type="button" onClick={closeCreate}>Cancel</button><button className="workspace-primary" disabled={pending}>{pending?"Creating…":"Create project"}</button></div>
+      </form>
+    </dialog>
+    {error&&!createOpen&&<p role="alert">{error}</p>}
+    <section className="projects-list" aria-label="Project list"><h2>Recent projects <span>{state.projects.length}</span></h2>
+      <div className="projects-table-wrap"><table><thead><tr><th>Project</th><th>Documents</th><th>Status</th><th>Last updated</th></tr></thead><tbody>
+        {[...state.projects].sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).map(p=><tr key={p.id}><td><a href={`/projects/${p.id}`} onClick={e=>{if(e.button===0&&!e.metaKey&&!e.ctrlKey&&!e.shiftKey&&!e.altKey){e.preventDefault();navigate(`/projects/${p.id}`);}}}>{p.name}</a></td><td>{p.documents.length}</td><td>{p.archived?"Archived":"Active"}</td><td><time dateTime={p.updatedAt}>{new Date(p.updatedAt).toLocaleDateString()}</time></td></tr>)}
+      </tbody></table></div>
+      {!state.projects.length&&<div className="projects-empty"><span aria-hidden="true">▱</span><h3>No projects yet.</h3><p>Choose Create project to name your first project.</p><p>You’ll start with an empty workbench. No sample Parts or assemblies.</p></div>}
+    </section>
+    <details className="projects-recovery"><summary>Import or recover a project</summary><p>Projects are saved in this browser. Import a backup to recover work from another browser.</p><button onClick={()=>void act(go=>recover("piton",go))}>Discover legacy default project</button><label>Legacy import namespace UUID<input id="legacy-namespace"/></label><button onClick={()=>void act(go=>recover(`piton-import-${(globalThis.document.getElementById("legacy-namespace") as HTMLInputElement).value}`,go))}>Recover legacy namespace</button><label>Import custody JSON<input type="file" accept="application/json,.json" onChange={e=>{const file=e.target.files?.[0];if(file)void act(go=>importFile(file,go));}}/></label></details>
+    <footer className="projects-footer">Stored on this browser · Review-only · Not released for fabrication</footer></div>
+  </main>;
   return <main className="project-workspace"><header><div><span className="eyebrow">PITON · BROWSER-LOCAL CAD</span><h1>{document?.name??project?.name??"Projects"}</h1></div><button onClick={()=>navigate("/projects")}>All projects</button></header>
     <p>Saved in this browser’s SQLite / OPFS storage. No account or cross-device sync. Keep custody backups before clearing browser data.</p>
     <p className="safety">needs_human_review · fabrication_release=false · machine_actuation=false · Review mesh, not exact geometry</p>
@@ -56,22 +94,159 @@ export default function ProjectWorkspace({application}: {application: WorkspaceA
     {routeError&&state&&<label>Recover project backup<input type="file" accept="application/json,.json" onChange={e=>{const file=e.target.files?.[0];if(file)void act(go=>importFile(file,go));}}/></label>}
     {state&&!routeError&&route?.projectId&&<p>Local bookmark: <a href={path}>{location.origin}{path}</a> <button onClick={()=>void act(()=>navigator.clipboard.writeText(location.origin+path))}>Copy link</button></p>}
     {!state && <p>Opening local storage…</p>}
-    {state&&!routeError&&!route?.projectId&&<><h2>Recent projects</h2><form onSubmit={e=>{e.preventDefault();void act(async go=>go(`/projects/${await application.createProject(label)}`));}}><label>Project name <input value={label} onChange={e=>setLabel(e.target.value)} required maxLength={100}/></label><button disabled={pending}>Create project</button></form>
-      {[...state.projects].sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).map(p=><article key={p.id}><button onClick={()=>navigate(`/projects/${p.id}`)}>{p.name}</button><span>{p.archived?"Archived":"Active"} · {p.documents.length} Parts</span></article>)}
-      {!state.projects.length&&<p>No projects yet. Create your first project, or recover existing work below.</p>}
-      <h2>Recover / import existing work</h2><button onClick={()=>void act(go=>recover("piton",go))}>Discover legacy default project</button>
-      <label>Legacy import namespace UUID <input id="legacy-namespace"/></label><button onClick={()=>void act(go=>recover(`piton-import-${(globalThis.document.getElementById("legacy-namespace") as HTMLInputElement).value}`,go))}>Recover legacy namespace</button>
-      <label>Import custody JSON <input type="file" accept="application/json,.json" onChange={e=>{const file=e.target.files?.[0];if(file)void act(go=>importFile(file,go));}}/></label>
-      <a href="/demo">Open optional R14 review fixture / legacy workspace</a></>}
-    {state&&project&&!routeError&&!document&&<><form onSubmit={e=>{e.preventDefault();void act(()=>application.renameProject(project.id,label));}}><label>Project name <input value={label} placeholder={project.name} onChange={e=>setLabel(e.target.value)} required/></label><button disabled={pending}>Rename project</button></form>
-      <button onClick={()=>void act(()=>application.archiveProject(project.id,!project.archived))}>{project.archived?"Restore project":"Archive project"}</button>
-      <button onClick={()=>void act(async()=>downloadPartFile(`${project.id}-project.json`,JSON.stringify(await application.exportProject(project.id),null,2),"application/json"))}>Export project backup</button>
-      {!project.archived&&<form onSubmit={e=>{e.preventDefault();void act(async go=>go(`/projects/${project.id}/documents/${await application.createPart(project.id,label)}`));}}><label>Part name <input value={label} onChange={e=>setLabel(e.target.value)} required/></label><button disabled={pending}>Create Part</button></form>}
-      <h2>Part documents</h2>{project.documents.map(d=><article key={d.id}><button onClick={()=>navigate(`/projects/${project.id}/documents/${d.id}`)}>{d.name}</button></article>)}</>}
-    {project&&document&&!routeError&&<PartEditor key={`${document.id}:${route?.revisionId??"current"}`} application={application} projectId={project.id} document={document} revisionId={route?.revisionId} archived={project.archived} refresh={refresh} navigate={navigate}/>}
+
   </main>;
 }
-function PartEditor({application,projectId,document,revisionId,archived,refresh,navigate}:{application:WorkspaceApplication;projectId:string;document:PartDocument;revisionId?:string;archived:boolean;refresh:()=>Promise<void>;navigate:(url:string)=>void}) {
+type WorkbenchTargets = {left:HTMLDivElement;center:HTMLDivElement;right:HTMLDivElement};
+type DraftStatus = {dirty:boolean;busy:boolean;preview?:boolean};
+function ProjectWorkbench({application,project,document,revisionId,path,navigate,refresh,act,pending,error}:{application:WorkspaceApplication;project:WorkspaceProject;document?:PartDocument;revisionId?:string;path:string;navigate:(url:string)=>void;refresh:()=>Promise<void>;act:(fn:(go:(url:string)=>void)=>Promise<unknown>)=>Promise<void>;pending:boolean;error:string}) {
+  // Open tabs are UI state, never authored revisions or stored document membership.
+  const [openIds,setOpenIds]=useState<string[]>(()=>document?[document.id]:[]);
+  const [label,setLabel]=useState("");
+  const [panel,setPanel]=useState<"project"|"change"|null>(null);
+  const [tabError,setTabError]=useState("");
+  const [leftTarget,setLeftTarget]=useState<HTMLDivElement|null>(null),[centerTarget,setCenterTarget]=useState<HTMLDivElement|null>(null),[rightTarget,setRightTarget]=useState<HTMLDivElement|null>(null);
+  const drafts=useRef(new Map<string,DraftStatus>());
+  const [draftStatuses,setDraftStatuses]=useState<Record<string,DraftStatus>>({});
+  const [selections,setSelections]=useState<Record<string,SelectionReference>>({});
+  const reportSelection=useCallback((ref:SelectionReference)=>{setSelections(current=>({...current,[ref.documentId]:ref}));},[]);
+  const reportDraft=useCallback((id:string,status:DraftStatus)=>{drafts.current.set(id,status);setDraftStatuses(current=>({...current,[id]:status}));},[]);
+  useEffect(()=>{if(document)setOpenIds(ids=>ids.includes(document.id)?ids:[...ids,document.id]);setLabel("");setTabError("");},[document?.id]);
+  const ids=document&&!openIds.includes(document.id)?[...openIds,document.id]:openIds;
+  const tabs=ids.flatMap(id=>{const d=project.documents.find(d=>d.id===id);return d?[d]:[];});
+  const openDocument=(id:string)=>{setOpenIds(ids=>ids.includes(id)?ids:[...ids,id]);setPanel(null);navigate(`/projects/${project.id}/documents/${id}`);};
+  const closeDocument=(id:string)=>{
+    const draft=drafts.current.get(id);
+    if(draft?.busy){setTabError("Wait for this Part’s operation to finish before closing its tab.");return;}
+    if(draft?.dirty&&!window.confirm("Discard unsaved changes and close this Part tab? The saved document will not be deleted."))return;
+    const index=tabs.findIndex(d=>d.id===id),remaining=tabs.filter(d=>d.id!==id);
+    setOpenIds(remaining.map(d=>d.id));drafts.current.delete(id);setTabError("");
+    if(document?.id===id){const next=remaining[Math.min(index,remaining.length-1)];navigate(next?`/projects/${project.id}/documents/${next.id}`:`/projects/${project.id}`);
+      if(next)globalThis.document.getElementById(`tab-${next.id}`)?.focus();
+      else globalThis.document.getElementById(`file-${id}`)?.focus();}
+  };
+  const targets=leftTarget&&centerTarget&&rightTarget?{left:leftTarget,center:centerTarget,right:rightTarget}:null;
+  return <main className="project-workspace r7-workbench">
+    <header className="r7-header"><span className="r7-dot"/><strong>Piton</strong><span className="r7-container-label">Project container</span><h1>{project.name}</h1><span className="r7-execution">Browser local · Project conversation</span><button onClick={()=>navigate("/projects")}>All projects</button></header>
+    <div className="r7-workspace">
+      <aside className={`r7-left ${panel==="project"?"is-open":""}`} aria-label="Project documents and model"><button className="r7-drawer-close" onClick={()=>setPanel(null)}>Close Project panel</button>
+        {tabs.map(d=>d.part.currentRevisionId===null&&<div key={d.id} hidden={document?.id!==d.id}><EmptyPartModelTree document={d} onSelect={reportSelection}/></div>)}
+        <h2 className="r7-panel-head">Files · Part / Assembly</h2>
+        <section className="r7-section"><h3>Documents</h3><nav aria-label="Project Files" className="r7-files">{project.documents.map(d=><button id={`file-${d.id}`} aria-label={d.name} aria-current={document?.id===d.id?"page":undefined} key={d.id} onClick={()=>openDocument(d.id)}><span className="r7-file-icon" aria-hidden="true">PRT</span>{d.name}</button>)}</nav>
+          {!project.documents.length&&<p>No documents yet. This project is empty.</p>}
+          {!project.archived&&<form onSubmit={e=>{e.preventDefault();void act(async go=>{const id=await application.createPart(project.id,label);await refresh();go(`/projects/${project.id}/documents/${id}`);});}}><label>{document?"New Part name":"Part name"} <input value={label} onChange={e=>setLabel(e.target.value)} required maxLength={100}/></label><button disabled={pending}>Create Part</button><p>Creates an empty Part. No sample geometry or revisions are added.</p></form>}
+          <button disabled title="Assembly authoring is not implemented">New Assembly</button>
+        </section>
+        <div ref={setLeftTarget}/>
+        {(!document || document.part.currentRevisionId===null)&&<><h2 className="r7-panel-head">Outputs · active document</h2><section className="r7-section"><p>{document?"Empty Part — use Export project backup to preserve this document.":"Open a Part to access its outputs."} No exact B-rep or fabrication release.</p><button disabled>Generated source</button><button disabled>Generate STL</button></section>
+        {!document&&<><h2 className="r7-panel-head">Model tree</h2><section className="r7-section"><p>No active document. Open or create a Part to inspect its model.</p></section></>}</>}
+        <details className="r7-section"><summary>Project settings &amp; recovery</summary><form onSubmit={e=>{e.preventDefault();void act(()=>application.renameProject(project.id,label));}}><label>Project name <input value={label} placeholder={project.name} onChange={e=>setLabel(e.target.value)} required maxLength={100}/></label><button disabled={pending}>Rename project</button></form>
+          <button disabled={pending} onClick={()=>void act(()=>application.archiveProject(project.id,!project.archived))}>{project.archived?"Restore project":"Archive project"}</button>
+          <button disabled={pending} onClick={()=>void act(async()=>downloadPartFile(`${project.id}-project.json`,JSON.stringify(await application.exportProject(project.id),null,2),"application/json"))}>Export project backup</button>
+          <p>Local bookmark: <a href={path}>{location.origin}{path}</a></p><button onClick={()=>void act(()=>navigator.clipboard.writeText(location.origin+path))}>Copy link</button><p>Saved in this browser’s SQLite / OPFS storage. No account or cross-device sync. Keep custody backups before clearing browser data.</p>
+        </details>
+      </aside>
+      <section className="r7-center" aria-label="CAD workbench">
+        <div className="r7-tabstrip"><div className="r7-tabs" role="tablist" aria-label="Open documents">{tabs.map((d,index)=><button key={d.id} id={`tab-${d.id}`} role="tab" aria-selected={document?.id===d.id} aria-controls={`panel-${project.id}`} aria-keyshortcuts="Delete" tabIndex={document?.id===d.id || (!document&&index===0)?0:-1} onClick={()=>openDocument(d.id)} onKeyDown={e=>{
+          if(e.key==="Delete"){e.preventDefault();closeDocument(d.id);return;}
+          if(!["ArrowLeft","ArrowRight","Home","End"].includes(e.key))return;
+          e.preventDefault();const next=e.key==="Home"?0:e.key==="End"?tabs.length-1:(index+(e.key==="ArrowRight"?1:-1)+tabs.length)%tabs.length;
+          openDocument(tabs[next].id);globalThis.document.getElementById(`tab-${tabs[next].id}`)?.focus();
+        }}>{d.name}</button>)}</div>{!tabs.length&&<span>No open document</span>}
+        {document&&<button className="r7-close-tab" aria-label={`Close ${document.name}`} onClick={()=>closeDocument(document.id)}>×</button>}</div>
+        <div className="r7-document-panel" id={`panel-${project.id}`} role={document?"tabpanel":undefined} aria-labelledby={document?`tab-${document.id}`:undefined} tabIndex={document?0:undefined}>
+          <div className={`r7-mobile-tools ${document&&isAuthoredPart(document.part)?"has-authored-part":""}`}><button className="r7-drawer-toggle" aria-expanded={panel==="project"} onClick={()=>setPanel(panel==="project"?null:"project")}>☰ Project</button><button className="r7-drawer-toggle" aria-expanded={panel==="change"} onClick={()=>setPanel(panel==="change"?null:"change")}>Change Request</button></div>
+          <div className="r7-editor-target" ref={setCenterTarget}/>
+          {(!document || document.part.currentRevisionId===null)&&<EmptyProjectViewport empty={!project.documents.length} partName={document?.name} panel={panel} togglePanel={value=>setPanel(panel===value?null:value)}/>}
+        </div>{(error||tabError)&&<p className="r7-error" role="alert">{error||tabError}</p>}
+      </section>
+      <aside className={`r7-right ${panel==="change"?"is-open":""}`} aria-label="Change request"><button className="r7-drawer-close" onClick={()=>setPanel(null)}>Close Change Request</button><h2 className="r7-panel-head">Change Request</h2><ConversationPanel project={project} documentId={document?.id} revisionId={revisionId} selection={document&&selections[document.id]?[selections[document.id]]:[]} draft={!revisionId&&!!(document&&draftStatuses[document.id]?.dirty)} preview={!revisionId&&!!(document&&draftStatuses[document.id]?.preview)}/><div ref={setRightTarget}/></aside>
+      {targets&&tabs.map(d=>isAuthoredPart(d.part)?<PartEditor key={d.id} application={application} projectId={project.id} document={{...d,part:d.part}} archived={project.archived} refresh={refresh} navigate={navigate} active={document?.id===d.id&&!revisionId} targets={targets} reportDraft={reportDraft}/>:null)}
+      {targets&&document&&isAuthoredPart(document.part)&&revisionId&&<PartEditor key={`${document.id}:${revisionId}`} application={application} projectId={project.id} document={{...document,part:document.part}} revisionId={revisionId} archived={project.archived} refresh={refresh} navigate={navigate} active targets={targets}/>}
+    </div><footer className="r7-status"><span>{project.archived?"Archived project · read-only":"Browser-local project"} · {project.documents.length} Parts</span><span>needs_human_review · fabrication_release=false · machine_actuation=false</span></footer>
+  </main>;
+}
+type EmptyTreeNode = {id:string;label:string;detail:string;children?:EmptyTreeNode[]};
+function EmptyPartModelTree({document,onSelect}:{document:PartDocument;onSelect:(ref:SelectionReference)=>void}) {
+  // R14 documentTree / initialExpandedTreeNodeIds: root open, Origin collapsed.
+  // These reference axes are UI context, never authored datum records or revisions.
+  const [expanded,setExpanded]=useState<string[]>(["document"]);
+  const [selected,setSelected]=useState("document"),[focused,setFocused]=useState("document");
+  const rows=useRef(new Map<string,HTMLDivElement>());
+  useEffect(()=>{onSelect({documentId:document.id,revisionId:null,nodeId:selected,label:`${document.name} · ${selected}`,representation:["origin","front","top","right"].includes(selected)?"coordinate-reference":"document-summary"});},[document.id,document.name,selected,onSelect]);
+  const nodes:EmptyTreeNode[]=[{id:"document",label:`${document.name} · Part`,detail:"Empty Part document. No authored geometry, parameters or revisions.",children:[
+    {id:"origin",label:"Origin · reference",detail:"CAD origin (0, 0, 0) mm. Coordinate reference only; not an authored feature.",children:[
+      {id:"front",label:"Front Plane · reference",detail:"CAD XZ plane (Y=0). Coordinate reference only; not an authored feature."},
+      {id:"top",label:"Top Plane · reference",detail:"CAD XY plane (Z=0), the physical grid plane. Coordinate reference only; not an authored feature."},
+      {id:"right",label:"Right Plane · reference",detail:"CAD YZ plane (X=0). Coordinate reference only; not an authored feature."}]},
+    {id:"features",label:"Features (0)",detail:"No authored features or sketches. Feature authoring, suppression and history editing are not implemented."},
+    {id:"bodies",label:"Solid Bodies (0)",detail:"No solid bodies. This Part has no authored geometry or review mesh."}]}];
+  const visible:EmptyTreeNode[]=[],all=new Map<string,EmptyTreeNode>(),parents=new Map<string,string>();
+  const collect=(list:EmptyTreeNode[],parent?:string,shown=true)=>{for(const node of list){all.set(node.id,node);if(parent)parents.set(node.id,parent);if(shown)visible.push(node);if(node.children)collect(node.children,node.id,shown&&expanded.includes(node.id));}};
+  collect(nodes);
+  const focus=(id:string)=>{setFocused(id);rows.current.get(id)?.focus();};
+  const toggle=(id:string)=>setExpanded(current=>current.includes(id)?current.filter(value=>value!==id):[...current,id]);
+  const renderNodes=(list:EmptyTreeNode[]):ReactNode=>list.map(node=><div key={node.id} onClick={event=>{event.stopPropagation();focus(node.id);setSelected(node.id);}} role="treeitem" aria-label={node.label} aria-selected={selected===node.id} aria-expanded={node.children?expanded.includes(node.id):undefined} tabIndex={focused===node.id?0:-1} ref={element=>{if(element)rows.current.set(node.id,element);else rows.current.delete(node.id);}} onFocus={event=>{event.stopPropagation();setFocused(node.id);}} onKeyDown={event=>{
+    event.stopPropagation();const index=visible.findIndex(row=>row.id===node.id);
+    if(!["ArrowDown","ArrowUp","ArrowLeft","ArrowRight","Home","End","Enter"," "].includes(event.key))return;
+    event.preventDefault();
+    if(event.key==="ArrowDown"||event.key==="ArrowUp")focus(visible[Math.max(0,Math.min(visible.length-1,index+(event.key==="ArrowDown"?1:-1)))].id);
+    else if(event.key==="Home"||event.key==="End")focus(visible[event.key==="Home"?0:visible.length-1].id);
+    else if(event.key==="ArrowRight"&&node.children){if(!expanded.includes(node.id))toggle(node.id);else focus(node.children[0].id);}
+    else if(event.key==="ArrowLeft"){if(node.children&&expanded.includes(node.id))toggle(node.id);else if(parents.has(node.id))focus(parents.get(node.id)!);}
+    else if(event.key==="Enter"||event.key===" ")setSelected(node.id);
+  }}><div className="r7-tree-row"><span className="r7-tree-disclosure" aria-hidden="true" onClick={event=>{if(node.children){event.stopPropagation();focus(node.id);toggle(node.id);}}}>{node.children?(expanded.includes(node.id)?"▾":"▸"):"·"}</span><span>{node.label}</span></div>{node.children&&expanded.includes(node.id)&&<div role="group">{renderNodes(node.children)}</div>}</div>);
+  return <section className="r7-model-tree"><h2 className="r7-panel-head">Model tree</h2><div role="tree" aria-label={`${document.name} model tree`}>{renderNodes(nodes)}</div><section className="r7-tree-details" aria-label="Model selection details"><h3>{document.name} · {all.get(selected)?.label}</h3><p>{all.get(selected)?.detail}</p></section><div className="r7-tree-commands"><button disabled title="Sketch authoring is not implemented">New Sketch</button><button disabled title="Extrusion authoring is not implemented">Extrude</button></div></section>;
+}
+function EmptyProjectViewport({empty,partName,panel,togglePanel}:{empty:boolean;partName?:string;panel:"project"|"change"|null;togglePanel:(panel:"project"|"change")=>void}) {
+  const host=useRef<HTMLDivElement>(null);
+  const command=useRef<(view:string)=>void>(()=>{});
+  const [available,setAvailable]=useState(false);
+  const [failure,setFailure]=useState("");
+  useEffect(()=>{
+    let disposed=false, cleanup=()=>{};
+    void (async()=>{
+      // No document, geometry worker or authored revision is created here.
+      if(!window.WebGLRenderingContext) {setFailure("3D viewport unavailable in this browser.");return;}
+      try {
+        const THREE=await import("three");
+        const {OrbitControls}=await import("three/addons/controls/OrbitControls.js");
+        if(disposed||!host.current)return;
+        const element=host.current, scene=new THREE.Scene();
+        const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+        element.appendChild(renderer.domElement);
+        const camera=new THREE.PerspectiveCamera(40,1,.1,2000);
+        const controls=new OrbitControls(camera,renderer.domElement);
+        // CAD Z=0 maps to Three.js Y=0, matching the existing Part viewport.
+        const grid=new THREE.GridHelper(240,24,0x42647d,0x243c4e);
+        scene.add(grid);
+        const render=()=>renderer.render(scene,camera);
+        const view=(name:string)=>{
+          if(name.includes("Roll")) {
+            const axis=new THREE.Vector3();camera.getWorldDirection(axis);
+            camera.up.applyAxisAngle(axis,(name.startsWith("↶")?-1:1)*Math.PI/12);
+          } else {
+            controls.target.set(0,0,0);camera.up.set(0,1,0);
+            if(name==="Front")camera.position.set(0,0,280);
+            else if(name==="Top"){camera.position.set(0,280,0);camera.up.set(0,0,-1);}
+            else camera.position.set(180,150,200);
+          }
+          camera.lookAt(controls.target);controls.update();render();
+        };
+        const resize=()=>{const width=element.clientWidth,height=element.clientHeight;if(!width||!height)return;camera.aspect=width/height;camera.updateProjectionMatrix();renderer.setSize(width,height);render();};
+        const observer=new ResizeObserver(resize);observer.observe(element);
+        controls.addEventListener("change",render);command.current=view;resize();view("Iso");setAvailable(true);
+        cleanup=()=>{observer.disconnect();controls.dispose();grid.geometry.dispose();(grid.material as import("three").Material).dispose();renderer.dispose();renderer.domElement.remove();command.current=()=>{};};
+      }catch(e){if(!disposed)setFailure(`3D viewport unavailable: ${e instanceof Error?e.message:String(e)}`);}
+    })();
+    return()=>{disposed=true;cleanup();};
+  },[]);
+  return <><div className="r7-toolbar" aria-label="View controls"><button className="r7-drawer-toggle" aria-expanded={panel==="project"} onClick={()=>togglePanel("project")}>☰ Project</button>{["Iso","Front","Top","Fit"].map(name=><button key={name} disabled={!available} onClick={()=>command.current(name)}>{name}</button>)}<button disabled title="Open a document with review geometry to measure">Measure</button><button disabled>Clear measurement</button>{["↶ Roll","Roll ↷"].map(name=><button key={name} disabled={!available} onClick={()=>command.current(name)}>{name}</button>)}<button className="r7-drawer-toggle" aria-expanded={panel==="change"} onClick={()=>togglePanel("change")}>Agent</button></div>
+    <div className="r7-empty-viewport" data-testid="empty-project-viewport" aria-label="Empty CAD viewport"><div className="r7-three" ref={host}/><div className="r7-empty-message"><strong>{partName?"Empty Part":empty?"Empty project":"No open document"}</strong><p>{partName?`${partName} has no authored geometry or revisions. Sketch and feature authoring are not implemented.`:empty?"Create a Part from the project panel to begin.":"Open a document from the project panel to continue."}</p>{failure&&<p role="status">{failure}</p>}</div><div className="r7-axis">CAD Z ↑<br/><span>grid = physical CAD Z=0 · mm</span></div></div>
+  </>;
+}
+function PartEditor({application,projectId,document,revisionId,archived,refresh,navigate,active,targets,reportDraft}:{application:WorkspaceApplication;projectId:string;document:PartDocument & {part:BrowserProject};revisionId?:string;archived:boolean;refresh:()=>Promise<void>;navigate:(url:string)=>void;active:boolean;targets:WorkbenchTargets;reportDraft?:(id:string,status:DraftStatus)=>void}) {
   const selected=revisionId?document.revisionIds[revisionId]:document.part.currentRevisionId;
   const revision=document.part.revisions.find(r=>r.id===selected)!;
   const [parameters,setParameters]=useState<LBracketParameters>({...revision.parameters}); const [preview,setPreview]=useState<{proposal:PartProposal;candidate:DesignRevision}|null>(null); const [message,setMessage]=useState(""); const [json,setJson]=useState(""); const [ready,setReady]=useState(false); const [newName,setNewName]=useState(document.name);
@@ -82,6 +257,7 @@ function PartEditor({application,projectId,document,revisionId,archived,refresh,
   const [base,setBase]=useState({revision,name:document.name,archived});
   const [conflict,setConflict]=useState(false);
   const dirty=!!preview || !!json || newName!==base.name || Object.entries(parameters).some(([key,value])=>value!==base.revision.parameters[key as keyof LBracketParameters]);
+  useEffect(()=>{reportDraft?.(document.id,{dirty,busy,preview:!!preview});},[document.id,dirty,busy,!!preview,reportDraft]);
   const changed=base.revision.id!==revision.id || base.name!==document.name || base.archived!==archived;
   const blocked=conflict || (changed && dirty && ownCommit.current!==revision.id);
   const reload=()=>{
@@ -114,13 +290,19 @@ function PartEditor({application,projectId,document,revisionId,archived,refresh,
     setPreview(p);setParameters(p.proposal.parameters);
   };
   const shown=preview?.candidate??revision;
-  return <><nav><button onClick={()=>navigate(`/projects/${projectId}`)}>Project overview</button>{readonly&&<button onClick={()=>navigate(url)}>Open current revision</button>}</nav><p>{readonly?"Historical / archived document — read-only":"Editable Part · L-bracket"}</p><div className="part-layout"><section><h2>Parameters (mm)</h2>
+  return <>
+    {active&&createPortal(<div>    <h2 className="r7-panel-head">FeatureManager · Model</h2><section className="r7-section"><h3>{document.name}</h3><nav><button onClick={()=>navigate(`/projects/${projectId}`)}>Project overview</button>{readonly&&<button onClick={()=>navigate(url)}>Open current revision</button>}</nav><p>{readonly?"Historical / archived document — read-only":"Editable Part · L-bracket"}</p><h2>Parameters (mm)</h2>
     {blocked&&<p role="alert">Document changed outside this draft. Reload the latest revision before authoring; your unsaved draft has been preserved.</p>}{blocked&&<button disabled={busy} onClick={reload}>Reload latest revision</button>}
     <fieldset disabled={readonly || busy || blocked}>{Object.entries(parameters).map(([key,value])=><label key={key}>{key}<input aria-label={key} type="number" step="0.1" value={Number.isFinite(value) ? value : ""} onChange={e=>{proposalGeneration.current += 1;setParameters({...parameters,[key]:e.target.valueAsNumber});setPreview(null);setReady(false);}}/></label>)}
       <button onClick={()=>void run(()=>propose(proposal()))}>Propose and preview</button><button disabled={!preview||!ready||mesh?.sourceRevisionId!==preview.candidate.id} onClick={()=>void run(async()=>{if(blocked||readonly||!preview||!ready||mesh?.sourceRevisionId!==preview.candidate.id)return;ownCommit.current=preview.candidate.id;try {await application.commit(preview.proposal);if(!mounted.current)return;await refresh();if(mounted.current)setMessage("Revision committed; engineering approval not granted.");} catch(e) {ownCommit.current=null;throw e;}})}>Commit revision</button>
       {preview && <section aria-label="Proposed parameter changes"><h2>Preview only · not committed</h2><ul>{Object.entries(preview.proposal.parameters).filter(([key, value]) => value !== revision.parameters[key as keyof LBracketParameters]).map(([key, value]) => <li key={key}>{key}: {revision.parameters[key as keyof LBracketParameters]} → {value} mm</li>)}</ul><button onClick={() => {proposalGeneration.current += 1;setPreview(null);setParameters({...revision.parameters});setReady(false);}}>Discard preview</button></section>}
-      <h2>Structured change request</h2><p>Local typed proposal, no LLM backend. Supply the six parameter values as JSON; project, document and base revision are attached automatically.</p><textarea aria-label="Structured change request" value={json} onChange={e=>{proposalGeneration.current+=1;setJson(e.target.value);setPreview(null);setReady(false);}} placeholder={JSON.stringify(parameters,null,2)}/><button onClick={()=>void run(async()=>{setPreview(null);setReady(false);await propose({...proposal(),parameters:JSON.parse(json)});})}>Prepare change proposal</button>
-      <label>Part name<input value={newName} onChange={e=>setNewName(e.target.value)}/></label><button onClick={()=>void run(async()=>{if(blocked||readonly)return;await application.renamePart(projectId,document.id,newName);if(!mounted.current)return;setBase(previous=>({...previous,name:newName}));await refresh();})}>Rename Part</button>
-    </fieldset><button disabled={!!revisionId} onClick={()=>void run(async()=>downloadPartFile(`${document.id}-custody.json`,JSON.stringify(await application.exportPart(projectId,document.id),null,2),"application/json"))}>Export Part custody</button><button disabled={!mesh||mesh.sourceRevisionId!==shown.id} onClick={()=>void run(async()=>downloadPartFile(`${document.id}-review-unreleased.stl`,reviewPartStl(mesh!,shown.id),"model/stl"))}>Download Part review STL (unreleased)</button><p role="status">{message}</p><h2>Revision history</h2>{Object.entries(document.revisionIds).reverse().map(([id,content],index)=><button key={id} onClick={()=>navigate(`${url}/revisions/${id}`)}>Revision {document.part.revisions.length-index}{content===document.part.currentRevisionId?" · current":""}</button>)}
-    </section><section className="canvas part-canvas" data-document-id={document.id} data-revision-id={shown.id}><Viewport onReviewMesh={setMesh} parameters={shown.parameters} authoritativeBase={shown} onBuildStatus={status=>setReady(status.state==="ready")} /></section></div></>;
+    </fieldset><fieldset disabled={readonly||busy||blocked}>      <label>Part name<input value={newName} onChange={e=>setNewName(e.target.value)}/></label><button onClick={()=>void run(async()=>{if(blocked||readonly)return;await application.renamePart(projectId,document.id,newName);if(!mounted.current)return;setBase(previous=>({...previous,name:newName}));await refresh();})}>Rename Part</button>
+</fieldset></section>
+    <h2 className="r7-panel-head">Outputs · active document</h2><section className="r7-section"><button disabled={!!revisionId} onClick={()=>void run(async()=>downloadPartFile(`${document.id}-custody.json`,JSON.stringify(await application.exportPart(projectId,document.id),null,2),"application/json"))}>Export Part custody</button><button disabled={!mesh||mesh.sourceRevisionId!==shown.id} onClick={()=>void run(async()=>downloadPartFile(`${document.id}-review-unreleased.stl`,reviewPartStl(mesh!,shown.id),"model/stl"))}>Download Part review STL (unreleased)</button><p role="status">{message}</p></section><section className="r7-section"><h2>Revision history</h2>{Object.entries(document.revisionIds).reverse().map(([id,content],index)=><button key={id} onClick={()=>navigate(`${url}/revisions/${id}`)}>Revision {document.part.revisions.length-index}{content===document.part.currentRevisionId?" · current":""}</button>)}
+    </section></div>,targets.left)}
+    {active&&createPortal(<div><section className="r7-section"><h3>Selected context</h3><p>Active Part and base revision are attached to local parameter proposals. Geometry selection is not connected to an agent.</p><button disabled>Attach selection to agent context</button><h3>Exact attached payload</h3><pre className="r7-context">{JSON.stringify({projectId,documentId:document.id,expectedRevisionId:Object.keys(document.revisionIds).find(id=>document.revisionIds[id]===base.revision.id)},null,2)}</pre></section><section className="r7-section"><fieldset disabled={readonly||busy||blocked}>      <h2>Structured change request</h2><p>Local typed proposal, no LLM backend. Supply the six parameter values as JSON; project, document and base revision are attached automatically.</p><textarea aria-label="Structured change request" value={json} onChange={e=>{proposalGeneration.current+=1;setJson(e.target.value);setPreview(null);setReady(false);}} placeholder={JSON.stringify(parameters,null,2)}/><button onClick={()=>void run(async()=>{setPreview(null);setReady(false);await propose({...proposal(),parameters:JSON.parse(json)});})}>Prepare change proposal</button>
+</fieldset><p>Manual proposal only. {preview?"Prepared locally · preview only, not sent.":"Not prepared or sent."}</p></section></div>,targets.right)}
+    {active&&createPortal(<section className="r7-authored-viewport" data-document-id={document.id} data-revision-id={shown.id}><Viewport onReviewMesh={setMesh} parameters={shown.parameters} authoritativeBase={shown} onBuildStatus={status=>setReady(status.state==="ready")} /></section>
+,targets.center)}
+  </>;
 }

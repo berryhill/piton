@@ -1,12 +1,9 @@
 import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { importBracketFixture, expectActivePart, expectEmptyParts } from "../workspace-fixtures";
 
 test("review STL contains own Part geometry and cannot download stale proposal meshes", async ({ page }) => {
-  await page.goto("/projects");
-  await page.getByRole("textbox", { name: "Project name", exact: true }).fill("Export checks");
-  await page.getByRole("button", { name: "Create project", exact: true }).click();
-  await page.getByRole("textbox", { name: "Part name", exact: true }).fill("Wide mount");
-  await page.getByRole("button", { name: "Create Part", exact: true }).click();
+  await importBracketFixture(page, "Export checks", "Wide mount");
   const downloadButton = page.getByRole("button", { name: "Download Part review STL (unreleased)", exact: true });
   await expect(downloadButton).toBeEnabled();
   await page.getByRole("spinbutton", { name: "base_length_mm", exact: true }).fill("155");
@@ -34,11 +31,14 @@ test("narrow and desktop project pages remain bounded and keyboard-accessible", 
     await expect(page.getByRole("button", { name: "Create project", exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
+  await page.getByRole("button", { name: "Create project", exact: true }).click();
   await page.getByRole("textbox", { name: "Project name", exact: true }).fill("Keyboard project");
   await page.getByRole("textbox", { name: "Project name", exact: true }).press("Enter");
   await expect(page.getByRole("heading", { name: "Keyboard project", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "☰ Project", exact: true }).press("Enter");
   await page.getByRole("textbox", { name: "Part name", exact: true }).fill("Keyboard part");
   await page.getByRole("textbox", { name: "Part name", exact: true }).press("Enter");
-  await expect(page.getByRole("heading", { name: "Keyboard part", exact: true })).toBeVisible();
+  await expectActivePart(page, "Keyboard project", "Keyboard part");
+  await expectEmptyParts(page, "Keyboard project", ["Keyboard part"]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

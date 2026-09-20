@@ -13,8 +13,9 @@ test("production bundle starts SQLite and reloads a project from OPFS", async ({
     }
   });
   await page.goto("/");
-  await page.getByRole("textbox", { name: "Project name", exact: true }).fill("Production SQLite proof");
   await page.getByRole("button", { name: "Create project", exact: true }).click();
+  await page.getByRole("textbox", { name: "Project name", exact: true }).fill("Production SQLite proof");
+  await page.getByRole("dialog").getByRole("button", { name: "Create project", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Production SQLite proof", exact: true })).toBeVisible();
   const projectUrl = page.url();
   await page.reload();

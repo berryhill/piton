@@ -1,0 +1,9 @@
+# Backend integration status
+
+REAL MODEL PROOF PASSED: two HTTP SSE turns through `backend.py` -> installed native Sessions API -> restricted AIAgent -> Nick-configured `openai-codex/gpt-6-astra`. Empty project, no document. Second turn retained first-turn context and truthfully denied workstation commands. Four persisted visible messages, idle state. Scratch process currently port 18445; parent may request process handoff. No shared config/runtime changes. Credential values never printed or written into source/argv. No new npm dependencies.
+
+Frontend: exact API in CONTRACT.md. Call bootstrap (credentials include), enroll project once via POST /api/chat/projects, then history/conversation. Origin browser sends automatically for POST; GET needs same-origin Fetch Metadata (normal browser fetch). CSRF header for POST. Origin header can be explicitly set only in test client. Project conversation independent of document. Stop is POST /api/chat/stop; interrupted state requires explicit POST /api/chat/recover before next send. Unknown project history returns 403 until enroll.
+
+Parent launch: installed Hermes venv Python; `PITON_CHAT_STATE` private directory, `PITON_ORIGIN` exact public HTTPS origin, `PITON_PORT` loopback listener, `PITON_DIST` compiled UI path. Production auth: exact `PITON_TAILSCALE_LOGIN` required, trusted Tailscale Serve -> loopback only. Do NOT expose listener directly or permit another reverse proxy to forward attacker-supplied Tailscale identity. Local bootstrap only when PITON_LOCAL_BOOTSTRAP=1 AND origin loopback. Need actual Tailscale identity/header verification before promoting.
+
+P2 remains incomplete: fixed context string is bounded/frozen and untrusted, but actual live browser MCP lease/query integration is not yet present. Empty capability list and hard runtime deny-all fence rather than false live tools. No arbitrary workstation tools. P1 remaining hardening/tests in progress.

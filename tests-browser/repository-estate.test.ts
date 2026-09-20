@@ -13,6 +13,7 @@ function trackedUnder(prefix: string): string[] {
 
 const applicationSourceFiles = [
   "App.tsx",
+  "ProjectWorkspace.tsx",
   "agentAdapter.ts",
   "application.ts",
   "assembly.ts",
@@ -31,11 +32,15 @@ const applicationSourceFiles = [
   "geometry/workerClient.ts",
   "lifecycle.ts",
   "main.tsx",
+  "partExport.ts",
   "startup.ts",
   "storage/repository.ts",
   "storage/schema.ts",
+  "storage/sqlite.worker.ts",
   "styles.css",
   "vite-env.d.ts",
+  "workspace.css",
+  "workspace.ts",
 ].map((path) => `src/${path}`);
 
 const retiredSourceDirectory = ["browser", "src"].join("-");

@@ -113,7 +113,7 @@ it("normalizes SQLite custody, migrates legacy singleton, enforces CAS and immut
  const {DatabaseSync}=process.getBuiltinModule("node:sqlite");const {SqliteOpfsProjectRepository}=await import("../src/storage/repository");const db=new DatabaseSync(":memory:");
  const repo=new SqliteOpfsProjectRepository();Object.assign(repo,{dbId:"test",promiser:async(request:any)=>{const {sql,bind=[]}=request.args;const stmt=db.prepare(sql);return {result:{resultRows:stmt.columns().length?stmt.all(...bind):(stmt.run(...bind),[])}};}});
  const {store}=await setup();db.exec("CREATE TABLE workspace_registry(id INTEGER PRIMARY KEY, version INTEGER, json TEXT)");db.prepare("INSERT INTO workspace_registry VALUES(1,?,?)").run(store.row!.version,store.row!.json);
- await repo.migrateWorkspace();expect(await repo.readWorkspace()).toEqual(store.row);expect(db.prepare("SELECT name FROM sqlite_schema WHERE name='workspace_registry'").all()).toHaveLength(0);
+ await repo.migrateWorkspace();expect(JSON.parse((await repo.readWorkspace())!.json)).toEqual(JSON.parse(store.row!.json));expect((await repo.readWorkspace())!.version).toBe(store.row!.version);expect(db.prepare("SELECT name FROM sqlite_schema WHERE name='workspace_registry'").all()).toHaveLength(0);
  const app=new WorkspaceApplication(repo);const before=await repo.readWorkspace();const state=await app.read();const p=state.projects[0],d=p.documents[0];
  const change={projectId:p.id,documentId:d.id,expectedRevisionId:Object.keys(d.revisionIds)[0],idempotencyKey:crypto.randomUUID(),parameters:{...DEFAULT_PARAMETERS,leg_length_mm:120}};
  await app.propose(change); await app.commit(change);
@@ -123,7 +123,7 @@ it("normalizes SQLite custody, migrates legacy singleton, enforces CAS and immut
  expect(db.prepare("SELECT * FROM workspace_revisions").all()).toHaveLength(2);await repo.migrateWorkspace();expect(await repo.readWorkspace()).toEqual(current);db.close();
 });
 
-import { WorkspaceApplication, parseWorkspaceRoute, resolvePart, type WorkspaceStore, type PartProposal } from "../src/workspace";
+import { WorkspaceApplication, assertWorkspaceState, assertWorkspaceTransition, parseWorkspaceRoute, resolvePart, type WorkspaceStore, type PartProposal } from "../src/workspace";
 import { DEFAULT_PARAMETERS } from "../src/domain";
 import { CadApplication } from "../src/application";
 import { MemoryProjectRepository } from "../src/storage/repository";
@@ -132,7 +132,29 @@ class Store implements WorkspaceStore {
   async readWorkspace(){return structuredClone(this.row);}
   async writeWorkspace(version:number,json:string){if(version!==(this.row?.version??0))throw new Error("stale workspace");this.row={version:version+1,json};}
 }
-async function setup(){const store=new Store();const app=new WorkspaceApplication(store);const projectId=await app.createProject("Mounts");const documentId=await app.createPart(projectId,"Bracket");const state=await app.read();const d=resolvePart(state,projectId,documentId).document;const proposal:PartProposal={projectId,documentId,expectedRevisionId:Object.keys(d.revisionIds)[0],idempotencyKey:crypto.randomUUID(),parameters:{...DEFAULT_PARAMETERS,leg_length_mm:100}};await app.propose(proposal);return {store,app,projectId,documentId,proposal};}
+async function setup(){const store=new Store();const app=new WorkspaceApplication(store);const legacy=new CadApplication(new MemoryProjectRepository());await legacy.open();const projectId=await app.importCustody(await legacy.exportPortableCustody());const documentId=(await app.read()).projects[0].documents[0].id;const state=await app.read();const d=resolvePart(state,projectId,documentId).document;const proposal:PartProposal={projectId,documentId,expectedRevisionId:Object.keys(d.revisionIds)[0],idempotencyKey:crypto.randomUUID(),parameters:{...DEFAULT_PARAMETERS,leg_length_mm:100}};await app.propose(proposal);return {store,app,projectId,documentId,proposal};}
+
+it("creates genuinely empty Parts, reopens and backs up mixed projects without changing imported custody", async () => {
+ const {app,store,projectId,documentId}=await setup();
+ const original=resolvePart(await app.read(),projectId,documentId).document;
+ const emptyId=await app.createPart(projectId,"Empty Part");
+ const reopened=new WorkspaceApplication(store);
+ const empty=resolvePart(await reopened.read(),projectId,emptyId).document;
+ expect(empty).toEqual({id:emptyId,name:"Empty Part",part:{id:emptyId,name:"Empty Part",acceptedRevisionId:null,currentRevisionId:null,revisions:[]},revisionIds:{}});
+ const proposal={projectId,documentId:emptyId,expectedRevisionId:crypto.randomUUID(),idempotencyKey:crypto.randomUUID(),parameters:DEFAULT_PARAMETERS};
+ await expect(app.propose(proposal)).rejects.toThrow("empty Part");
+ await expect(app.commit(proposal)).rejects.toThrow("empty Part");
+ await expect(app.exportPart(projectId,emptyId)).rejects.toThrow("empty Part");
+ const packet=await app.exportProject(projectId); const other=new WorkspaceApplication(new Store());
+ await other.importProject(packet);expect(await other.exportProject(projectId)).toEqual(packet);
+ expect(resolvePart(await other.read(),projectId,documentId).document).toEqual(original);
+ for(const mutate of [(d:any)=>d.part.currentRevisionId="bad",(d:any)=>d.part.acceptedRevisionId="bad",(d:any)=>d.legacyCustody=original.legacyCustody,(d:any)=>d.revisionIds[crypto.randomUUID()]="bad"]) {
+  const s=await app.read();mutate(resolvePart(s,projectId,emptyId).document);expect(()=>assertWorkspaceState(s)).toThrow();
+ }
+ const before=await app.read(), after=structuredClone(before);const d=resolvePart(after,projectId,documentId).document;
+ d.part={...d.part,acceptedRevisionId:null,currentRevisionId:null,revisions:[]};d.revisionIds={};delete d.legacyCustody;
+ expect(()=>assertWorkspaceTransition(before,after)).toThrow();
+});
 
 it("requires the same proposal preview after restart before authoring", async () => {
  const {store,proposal}=await setup(); const reopened=new WorkspaceApplication(store);
