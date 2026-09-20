@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Viewport from "./components/Viewport";
 import { CadApplication } from "./application";
 import { openProjectRepository } from "./storage/repository";
-import { WorkspaceApplication, isAuthoredPart, parseWorkspaceRoute, resolvePart, type WorkspaceProject, type PartProposal, type WorkspaceState, type PartDocument } from "./workspace";
+import { WorkspaceApplication, isAuthoredPart, isFeaturePart, parseWorkspaceRoute, resolvePart, type FeatureProposal, type WorkspaceProject, type PartProposal, type WorkspaceState, type PartDocument } from "./workspace";
 import type { BrowserProject, DesignRevision, LBracketParameters } from "./domain";
 import "./styles.css";
 import "./workspace.css";
@@ -11,6 +11,7 @@ import type { GeometryResult } from "./geometry/gate";
 import { downloadPartFile, reviewPartStl } from "./partExport";
 import { ConversationPanel } from "./chat/ConversationPanel";
 import type { SelectionReference } from "./chat/context";
+import type { PartFeature } from "./modeling/source";
 
 declare global { interface Window { pitonWorkspace: WorkspaceApplication; } }
 export default function ProjectWorkspace({application}: {application: WorkspaceApplication}) {
@@ -99,7 +100,7 @@ export default function ProjectWorkspace({application}: {application: WorkspaceA
 }
 type WorkbenchTargets = {left:HTMLDivElement;center:HTMLDivElement;right:HTMLDivElement};
 type DraftStatus = {dirty:boolean;busy:boolean;preview?:boolean};
-function ProjectWorkbench({application,project,document,revisionId,path,navigate,refresh,act,pending,error}:{application:WorkspaceApplication;project:WorkspaceProject;document?:PartDocument;revisionId?:string;path:string;navigate:(url:string)=>void;refresh:()=>Promise<void>;act:(fn:(go:(url:string)=>void)=>Promise<unknown>)=>Promise<void>;pending:boolean;error:string}) {
+function ProjectWorkbench({application,project,document,revisionId,path,navigate,refresh,act,pending,error}:{application: WorkspaceApplication;project: WorkspaceProject;document?:PartDocument;revisionId?:string;path:string;navigate:(url:string)=>void;refresh:()=>Promise<void>;act:(fn:(go:(url:string)=>void)=>Promise<unknown>)=>Promise<void>;pending:boolean;error:string}) {
   // Open tabs are UI state, never authored revisions or stored document membership.
   const [openIds,setOpenIds]=useState<string[]>(()=>document?[document.id]:[]);
   const [label,setLabel]=useState("");
@@ -111,6 +112,9 @@ function ProjectWorkbench({application,project,document,revisionId,path,navigate
   const [selections,setSelections]=useState<Record<string,SelectionReference>>({});
   const reportSelection=useCallback((ref:SelectionReference)=>{setSelections(current=>({...current,[ref.documentId]:ref}));},[]);
   const reportDraft=useCallback((id:string,status:DraftStatus)=>{drafts.current.set(id,status);setDraftStatuses(current=>({...current,[id]:status}));},[]);
+  // Empty Part authoring is a project-wide concern: identify the first empty Part
+  // so the project-only affordance can target it without an active tab.
+  const firstEmptyPart = useMemo(() => project.documents.find(d => d.part.currentRevisionId === null && !isFeaturePart(d.part)), [project.documents]);
   useEffect(()=>{if(document)setOpenIds(ids=>ids.includes(document.id)?ids:[...ids,document.id]);setLabel("");setTabError("");},[document?.id]);
   const ids=document&&!openIds.includes(document.id)?[...openIds,document.id]:openIds;
   const tabs=ids.flatMap(id=>{const d=project.documents.find(d=>d.id===id);return d?[d]:[];});
@@ -139,7 +143,8 @@ function ProjectWorkbench({application,project,document,revisionId,path,navigate
         </section>
         <div ref={setLeftTarget}/>
         {(!document || document.part.currentRevisionId===null)&&<><h2 className="r7-panel-head">Outputs · active document</h2><section className="r7-section"><p>{document?"Empty Part — use Export project backup to preserve this document.":"Open a Part to access its outputs."} No exact B-rep or fabrication release.</p><button disabled>Generated source</button><button disabled>Generate STL</button></section>
-        {!document&&<><h2 className="r7-panel-head">Model tree</h2><section className="r7-section"><p>No active document. Open or create a Part to inspect its model.</p></section></>}</>}
+        {!document&&firstEmptyPart&&<><h2 className="r7-panel-head">Empty Part authoring</h2><section className="r7-section"><p>Submit named features against <strong>{firstEmptyPart.name}</strong> to give this project its first revision.</p><button type="button" className="r7-open-empty-part" data-testid="open-first-empty-part" onClick={()=>openDocument(firstEmptyPart.id)}>Open {firstEmptyPart.name}</button></section></>}
+        {!document&&!firstEmptyPart&&<><h2 className="r7-panel-head">Model tree</h2><section className="r7-section"><p>No active document. Open or create a Part to inspect its model.</p></section></>}</>}
         <details className="r7-section"><summary>Project settings &amp; recovery</summary><form onSubmit={e=>{e.preventDefault();void act(()=>application.renameProject(project.id,label));}}><label>Project name <input value={label} placeholder={project.name} onChange={e=>setLabel(e.target.value)} required maxLength={100}/></label><button disabled={pending}>Rename project</button></form>
           <button disabled={pending} onClick={()=>void act(()=>application.archiveProject(project.id,!project.archived))}>{project.archived?"Restore project":"Archive project"}</button>
           <button disabled={pending} onClick={()=>void act(async()=>downloadPartFile(`${project.id}-project.json`,JSON.stringify(await application.exportProject(project.id),null,2),"application/json"))}>Export project backup</button>
@@ -163,6 +168,7 @@ function ProjectWorkbench({application,project,document,revisionId,path,navigate
       <aside className={`r7-right ${panel==="change"?"is-open":""}`} aria-label="Change request"><button className="r7-drawer-close" onClick={()=>setPanel(null)}>Close Change Request</button><h2 className="r7-panel-head">Change Request</h2><ConversationPanel project={project} documentId={document?.id} revisionId={revisionId} selection={document&&selections[document.id]?[selections[document.id]]:[]} draft={!revisionId&&!!(document&&draftStatuses[document.id]?.dirty)} preview={!revisionId&&!!(document&&draftStatuses[document.id]?.preview)}/><div ref={setRightTarget}/></aside>
       {targets&&tabs.map(d=>isAuthoredPart(d.part)?<PartEditor key={d.id} application={application} projectId={project.id} document={{...d,part:d.part}} archived={project.archived} refresh={refresh} navigate={navigate} active={document?.id===d.id&&!revisionId} targets={targets} reportDraft={reportDraft}/>:null)}
       {targets&&document&&isAuthoredPart(document.part)&&revisionId&&<PartEditor key={`${document.id}:${revisionId}`} application={application} projectId={project.id} document={{...document,part:document.part}} revisionId={revisionId} archived={project.archived} refresh={refresh} navigate={navigate} active targets={targets}/>}
+      {targets&&<EmptyFeatureAuthoring key="empty-feature-authoring" active={!!(document&&document.part.currentRevisionId===null&&!isFeaturePart(document.part)&&!revisionId&&!project.archived)} application={application} projectId={project.id} part={document && document.part.currentRevisionId===null && !isFeaturePart(document.part) ? document : undefined} refresh={refresh} pending={pending}/>}
     </div><footer className="r7-status"><span>{project.archived?"Archived project · read-only":"Browser-local project"} · {project.documents.length} Parts</span><span>needs_human_review · fabrication_release=false · machine_actuation=false</span></footer>
   </main>;
 }
@@ -305,4 +311,110 @@ function PartEditor({application,projectId,document,revisionId,archived,refresh,
     {active&&createPortal(<section className="r7-authored-viewport" data-document-id={document.id} data-revision-id={shown.id}><Viewport onReviewMesh={setMesh} parameters={shown.parameters} authoritativeBase={shown} onBuildStatus={status=>setReady(status.state==="ready")} /></section>
 ,targets.center)}
   </>;
+}
+/** Canonical bounded source text — kept in sync with src/modeling/source.ts HEADER
+ * so users see the exact wire format the application enforces. */
+const EMPTY_FEATURE_SOURCE_PLACEHOLDER =
+  '// Piton browser-typescript/v1; units=mm; restricted named-feature source\n' +
+  'part.rectangle({"id":"outline","name":"Plate outline","plane":"XY","width":80,"height":50});\n' +
+  'part.extrude({"id":"plate","name":"Plate thickness","profileId":"outline","distance":6});\n' +
+  'part.hole({"id":"mount-1","name":"Mounting hole 1","bodyId":"plate","x":15,"y":15,"diameter":5,"extent":"through"});\n';
+/** P3 first-feature authoring affordance. Reuses the existing Project / MVI
+ * semantics via WorkspaceApplication.proposeFeatures -> commitFeatures, and
+ * survives the project-only route (no active document). The textarea, the
+ * Propose and commit button, and the canonical placeholder source are all named
+ * GUI affordances, never silent defaults. */
+function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pending}:{
+  active:boolean;
+  application: WorkspaceApplication;
+  projectId: string;
+  part?: PartDocument;
+  refresh: () => Promise<void>;
+  pending:boolean;
+}) {
+  const [source,setSource]=useState(EMPTY_FEATURE_SOURCE_PLACEHOLDER);
+  const [busy,setBusy]=useState(false);
+  const [message,setMessage]=useState("");
+  const [error,setError]=useState("");
+  const [committedId,setCommittedId]=useState<string|null>(null);
+  const mounted=useRef(false);
+  useEffect(()=>{mounted.current=true;return ()=>{mounted.current=false;};},[]);
+  if (!active || !part) return null;
+  const target = part;
+  const run = async (fn: () => Promise<string | undefined>) => {
+    if (busy) return;
+    setBusy(true);setError("");setMessage("");setCommittedId(null);
+    try {
+      const result = await fn();
+      if (!mounted.current) return;
+      setCommittedId(result ?? "preview-only");
+      setMessage("First feature committed to feature Part; review mesh only · engineering approval not granted.");
+      await refresh();
+    } catch (e) {
+      if (mounted.current) {
+        const message = e instanceof Error ? e.message : (typeof e === "string" ? e : JSON.stringify(e));
+        setError(message || "Unknown error");
+      }
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  };
+  const submit = () => {
+    if (busy || !source.trim()) return;
+    const features = parseFeatureSource(source);
+    if (!features.length) { setError("No named features parsed from source. Use part.rectangle / circle / extrude / hole calls."); return; }
+    const proposal: FeatureProposal = {
+      projectId,
+      documentId: target.id,
+      expectedRevisionId: null,
+      idempotencyKey: crypto.randomUUID(),
+      units: "mm",
+      features,
+    };
+    void run(async () => {
+      const preview = await application.proposeFeatures(proposal);
+      if (!mounted.current) return undefined;
+      const revisionId = await application.commitFeatures(preview.proposal);
+      return revisionId;
+    });
+  };
+  const reset = () => { setSource(EMPTY_FEATURE_SOURCE_PLACEHOLDER); setError(""); setMessage(""); setCommittedId(null); };
+  return createPortal(
+    <section className="r7-empty-authoring" data-testid="empty-feature-authoring" aria-label="First feature source">
+      <h2 className="r7-panel-head">First feature source</h2>
+      <p className="r7-section-help">Submit a named-feature source to give <strong>{target.name}</strong> its first feature revision. Project and Part scope are attached automatically; the source is canonical, evaluated once, then committed or rejected without rewriting history.</p>
+      <label className="r7-feature-source-label">Named-feature source<textarea aria-label="Named feature source" data-testid="feature-source-input" value={source} onChange={e=>setSource(e.target.value)} disabled={busy} spellCheck={false} /></label>
+      <div className="r7-feature-source-actions">
+        <button type="button" className="workspace-primary" data-testid="submit-first-feature" disabled={busy || !source.trim() || pending} onClick={submit}>{busy?"Evaluating…":"Propose and commit first feature"}</button>
+        <button type="button" disabled={busy} onClick={reset}>Reset to canonical plate</button>
+      </div>
+      {message && <p role="status" data-testid="empty-feature-message">{message}</p>}
+      {committedId && committedId !== "preview-only" && <p role="status" data-testid="empty-feature-revision">Revision: {committedId}</p>}
+      {error && <p role="alert" data-testid="empty-feature-error">{error}</p>}
+    </section>,
+    globalThis.document.querySelector(".r7-right") ?? globalThis.document.body,
+  );
+}
+/** Parse the canonical named-feature source the application accepts. Mirrors
+ * src/modeling/source.ts but does not evaluate text — it only walks the
+ * part.<kind>({...}); grammar so the affordance can show a typed preview count
+ * and reject obviously empty payloads before hitting the worker. */
+function parseFeatureSource(text: string): PartFeature[] {
+  const header = '// Piton browser-typescript/v1; units=mm; restricted named-feature source\n';
+  const trimmed = text.replace(/\r\n/g,"\n");
+  if (!trimmed.startsWith(header) && trimmed.trim().length>0) {
+    // Accept non-canonical input (lacking the header) so the user can paste
+    // partial sketches; the application's parseFeatures call still validates.
+  }
+  const body = trimmed.startsWith(header) ? trimmed.slice(header.length) : trimmed;
+  if (!body.trim()) return [];
+  const features: PartFeature[] = [];
+  for (const line of body.split("\n")) {
+    const match = /^part\.(rectangle|circle|extrude|hole)\((\{.*\})\);$/.exec(line.trim());
+    if (!match) continue;
+    let parameters: Record<string, unknown>;
+    try { parameters = JSON.parse(match[2]); } catch { continue; }
+    features.push({ kind: match[1], ...parameters } as unknown as PartFeature);
+  }
+  return features;
 }

@@ -123,6 +123,11 @@
 .r7-status { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:0 9px; background:#0b151f; border-top:1px solid var(--r7-line); color:#8fa4b7; font-size:10px; overflow:hidden; }
 .r7-status span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .r7-error { position:absolute; bottom:32px; left:12px; right:12px; padding:10px; background:#281413; }
+.r7-empty-authoring { padding:12px 10px; border-bottom:1px solid var(--r7-line); }
+.r7-empty-authoring .r7-section-help { margin:6px 0 10px; color:#a9bac9; font-size:11px; }
+.r7-empty-authoring .r7-feature-source-label { display:flex; flex-direction:column; gap:5px; font-size:11px; color:#a9bac9; }
+.r7-empty-authoring textarea { min-height:120px; font:11px/1.45 ui-monospace,monospace; }
+.r7-empty-authoring .r7-feature-source-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
 .r7-workbench .r7-drawer-toggle,.r7-workbench .r7-drawer-close { display:none; }
 .project-workspace .workspace-primary { background:#f47a35; border-color:#f47a35; color:#071019; font-weight:750; padding:12px 22px; }
 .project-workspace > article { position:relative; max-width:1000px; margin:10px 0; border:1px solid #2a3c4f; border-radius:6px; background:#101b27; }

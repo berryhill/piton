@@ -506,7 +506,7 @@ export class SqliteOpfsProjectRepository implements ProjectRepository {
     for(const p of state.projects) {
       await this.exec("INSERT INTO workspace_projects VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,archived=excluded.archived,updated_at=excluded.updated_at",[p.id,p.name,Number(p.archived),p.updatedAt]);
       for(const d of p.documents) {
-        await this.exec("INSERT INTO workspace_documents VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,current_revision_id=excluded.current_revision_id",[d.id,p.id,d.name,d.part.id,d.part.acceptedRevisionId,d.part.currentRevisionId,d.legacyCustody?JSON.stringify(d.legacyCustody):null]);
+        await this.exec("INSERT INTO workspace_documents VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,accepted_revision_id=excluded.accepted_revision_id,current_revision_id=excluded.current_revision_id",[d.id,p.id,d.name,d.part.id,d.part.acceptedRevisionId,d.part.currentRevisionId,d.legacyCustody?JSON.stringify(d.legacyCustody):null]);
         for(const [id,rid] of Object.entries(d.revisionIds)) await this.exec("INSERT OR IGNORE INTO workspace_revisions VALUES (?,?,?,?)",[id,d.id,rid,JSON.stringify(d.part.revisions.find(r=>r.id===rid))]);
       }
     }
