@@ -197,7 +197,7 @@ it("creates an empty project directly into the R7 workbench without seeding docu
   expect(await screen.findByTestId("empty-project-viewport")).toBeVisible();
   expect(screen.getByRole("heading",{name:"Documents"})).toBeVisible();
   expect(screen.getByRole("heading",{name:"Change Request"})).toBeVisible();
-  expect(screen.getByRole("button",{name:"Prepare request"})).toBeDisabled();
+  expect(screen.getByRole("button",{name:"Send"})).toBeDisabled();
   expect(screen.getByRole("button",{name:"Generate STL"})).toBeDisabled();
   expect(screen.getByRole("button",{name:"New Assembly"})).toBeDisabled();
   expect(screen.queryByRole("button",{name:"Finish review mesh"})).not.toBeInTheDocument();
