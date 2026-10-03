@@ -37,6 +37,7 @@ async function localFetch(url: string, options: { method?: string; headers: Reco
 async function fixture(overrides: Partial<ChatOptions> = {}, mode = 'normal') {
   const calls: { url: string; body: Record<string, unknown> }[] = [];
   let sessions = 0;
+  let releaseStall: () => void = () => {};
   const upstream = await listen(createServer(async (req, res) => {
     let text = ''; for await (const chunk of req) text += chunk;
     calls.push({ url: req.url!, body: text ? JSON.parse(text) : {} });
@@ -46,7 +47,7 @@ async function fixture(overrides: Partial<ChatOptions> = {}, mode = 'normal') {
       if (mode === 'redirect') { res.writeHead(302, { Location: 'http://127.0.0.1:1/unrelated' }); res.end(); return; }
       res.setHeader('Content-Type', 'text/event-stream');
       res.flushHeaders();
-      if (mode === 'stall') return;
+      if (mode === 'stall') { releaseStall = () => { res.end(); }; return; }
       if (mode === 'redaction') {
         const marker = 'test-only-not-a-credential';
         for (const delta of [marker.slice(0, 8), marker.slice(8)]) res.write(`event: assistant.delta\ndata: ${JSON.stringify({ delta })}\n\n`);
@@ -85,7 +86,7 @@ async function fixture(overrides: Partial<ChatOptions> = {}, mode = 'normal') {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   }
-  return { request, calls, options, base };
+  return { request, calls, options, base, releaseStall: () => releaseStall() };
 }
 const query = new URLSearchParams(scope).toString();
 
@@ -171,12 +172,13 @@ describe('native scoped Hermes conversations', () => {
     expect(f.calls.filter(c => c.url.endsWith('/chat/stream'))).toHaveLength(1);
   });
   it('serializes identical scopes across handler instances', async () => {
-    const f = await fixture({ timeoutMs: 200 }, 'stall');
+    const f = await fixture({ timeoutMs: 5000 }, 'stall');
     const first = f.request('conversation', { ...scope, message: 'first' });
-    for (let i = 0; i < 30 && !f.calls.some(c => c.url.endsWith('/chat/stream')); i++) await new Promise(resolve => setTimeout(resolve, 5));
+    await expect.poll(() => f.calls.filter(c => c.url.endsWith('/chat/stream')).length, { timeout: 2000 }).toBe(1);
     const restarted = await listen(createServer(createChatHandler(f.options)));
     const second = await localFetch(restarted + '/api/chat/conversation', { method: 'POST', headers: { host: 'piton.test', origin: 'https://piton.test', cookie: 'test-principal=alice', 'x-piton-csrf': 'test-only-csrf', 'content-type': 'application/json' }, body: JSON.stringify({ ...scope, message: 'second' }) });
     expect(second.status).toBe(409); expect(await second.json()).toEqual({ error: 'conversation_busy' });
+    f.releaseStall();
     await first;
     expect(f.calls.filter(c => c.url.endsWith('/chat/stream'))).toHaveLength(1);
   });
