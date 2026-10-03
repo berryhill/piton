@@ -36,6 +36,7 @@ const applicationSourceFiles = [
   "geometry/workerClient.ts",
   "lifecycle.ts",
   "main.tsx",
+  "modeling/FeatureMeshViewport.tsx",
   "modeling/client.ts",
   "modeling/evaluator.ts",
   "modeling/modeling.worker.ts",
