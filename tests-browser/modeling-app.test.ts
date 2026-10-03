@@ -144,6 +144,32 @@ describe("P3 first-feature authoring pipeline", () => {
     await expect(app.commitFeatures(featureProposal(projectId, documentId, plateFeatures))).rejects.toThrow(/preview/i);
   });
 
+  it("edits dimensions through a second immutable preview and retains the first revision", async () => {
+    const store = new Store();
+    const app = new WorkspaceApplication(store, async source => evaluateFeatureSource(source, kernel));
+    const projectId = await app.createProject("Edits");
+    const documentId = await app.createPart(projectId, "Plate");
+    const first = await app.proposeFeatures(featureProposal(projectId, documentId, plateFeatures));
+    const firstPointer = await app.commitFeatures(first.proposal);
+    const original = (await app.read()).projects[0].documents[0].part;
+    if (!isFeaturePart(original)) throw new Error("expected feature Part");
+    const changed = plateFeatures.map(f => f.id === "outline" ? { ...f, width: 90 } as PartFeature : f);
+    const proposal = { ...featureProposal(projectId, documentId, changed), expectedRevisionId: firstPointer, operation: "replace" as const };
+    const second = await app.proposeFeatures(proposal);
+    expect(second.geometry.bounds.max).toEqual([90, 50, 6]);
+    expect((await app.read()).projects[0].documents[0].part.revisions).toHaveLength(1);
+    const secondPointer = await app.commitFeatures(second.proposal);
+    expect(secondPointer).not.toBe(firstPointer);
+    const reopened = new WorkspaceApplication(store);
+    const persisted = (await reopened.read()).projects[0].documents[0].part;
+    if (!isFeaturePart(persisted)) throw new Error("expected feature Part");
+    expect(persisted.revisions).toHaveLength(2);
+    expect(persisted.revisions[0]).toEqual(original.revisions[0]);
+    expect(persisted.revisions[1].parentRevisionId).toBe(original.currentRevisionId);
+    expect(readFeatures(persisted.revisions[1].authored)).toEqual(changed);
+    await expect(app.commitFeatures({ ...proposal, features: plateFeatures })).rejects.toThrow(/Idempotency conflict/);
+  });
+
   it("persists a committed feature Part across an application remount against the same store", async () => {
     const store = new Store();
     const evalFn = async (source: import("../src/modeling/source").FeatureSource) => evaluateFeatureSource(source, kernel);

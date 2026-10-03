@@ -2,7 +2,7 @@ import { sqlite3Worker1Promiser, type Worker1Promiser } from "@sqlite.org/sqlite
 import type { BrowserProject, CadCommandReceipt, CadCommandRequest, CandidateCommand, DesignRevision, PortableCustodyEnvelope, PortableCustodyPacket } from "../domain";
 import { SAFETY_TRUTH, assertPortableCustodyPacket, assertProjectIntegrity, canonicalPortableCustodyJson, deriveCandidateFromCommand, seedProject, sha256Hex } from "../domain";
 import { CURRENT_SCHEMA_VERSION, migrationStatements, WORKSPACE_SCHEMA } from "./schema";
-import { assertWorkspaceState, assertWorkspaceTransition, canonicalWorkspaceJson, isAuthoredPart, type WorkspaceState } from "../workspace";
+import { assertWorkspaceState, assertWorkspaceTransition, canonicalWorkspaceJson, type WorkspaceState } from "../workspace";
 import type { GeometryAuthorityBinding } from "../geometry/binding";
 import type { BuildAttempt, ChangeProposal, ChannelPointer, LifecycleRecord, ProposalDisposition } from "../lifecycle";
 import { assertLifecycleRecord } from "../lifecycle";
@@ -477,21 +477,27 @@ export class SqliteOpfsProjectRepository implements ProjectRepository {
     if(!meta || meta.schema_version!==schemaVersion || !Number.isSafeInteger(meta.version) || Number(meta.version)<0) throw new Error("Invalid workspace schema/version");
     const state:WorkspaceState={projects:[],imports:{},receipts:{}};
     for(const p of await rows("workspace_projects")) state.projects.push({id:String(p.id),name:String(p.name),archived:p.archived===1,updatedAt:String(p.updated_at),documents:[]});
+    const revisions = await rows("workspace_revisions");
     for(const d of await rows("workspace_documents")) {
       const p=state.projects.find(p=>p.id===d.project_id); if(!p) throw new Error("Orphan workspace document");
       const identity={id:String(d.source_id),name:String(d.name)};
       if ((d.accepted_revision_id === null) !== (d.current_revision_id === null)) throw new Error("Invalid mixed Part revision pointers");
+      const ownRevisions = revisions.filter(r=>r.document_id===d.id);
+      const decoded = ownRevisions.map(r => {
+        const revision: unknown = JSON.parse(String(r.revision_json));
+        if (!revision || typeof revision !== "object" || (revision as {id?:unknown}).id!==r.revision_id) throw new Error("Revision row mismatch");
+        return revision;
+      });
+      const feature = decoded.length > 0 && Object.hasOwn(decoded[0]!, "authored");
       const part = d.accepted_revision_id === null
         ? {...identity,acceptedRevisionId:null,currentRevisionId:null,revisions:[] as []}
-        : {...identity,acceptedRevisionId:String(d.accepted_revision_id),currentRevisionId:String(d.current_revision_id),revisions:[] as DesignRevision[]};
-      p.documents.push({id:String(d.id),name:String(d.name),part,revisionIds:{},...(d.legacy_json===null?{}:{legacyCustody:JSON.parse(String(d.legacy_json))})});
+        : feature
+          ? {kind:"feature-part" as const,...identity,acceptedRevisionId:String(d.accepted_revision_id),currentRevisionId:String(d.current_revision_id),revisions:decoded as import("../modeling/revisions").FeatureRevision[]}
+          : {...identity,acceptedRevisionId:String(d.accepted_revision_id),currentRevisionId:String(d.current_revision_id),revisions:decoded as DesignRevision[]};
+      const revisionIds=Object.fromEntries(ownRevisions.map(r=>[String(r.id),String(r.revision_id)]));
+      p.documents.push({id:String(d.id),name:String(d.name),part,revisionIds,...(d.legacy_json===null?{}:{legacyCustody:JSON.parse(String(d.legacy_json))})});
     }
-    for(const r of await rows("workspace_revisions")) {
-      const d=state.projects.flatMap(p=>p.documents).find(d=>d.id===r.document_id); if(!d) throw new Error("Orphan workspace revision");
-      const revision=JSON.parse(String(r.revision_json)); if(revision.id!==r.revision_id) throw new Error("Revision row mismatch");
-      if(!isAuthoredPart(d.part)) throw new Error("Empty Part has stored revisions");
-      d.part.revisions.push(revision); d.revisionIds[String(r.id)]=String(r.revision_id);
-    }
+    for(const r of revisions) if(!state.projects.some(p=>p.documents.some(d=>d.id===r.document_id))) throw new Error("Orphan workspace revision");
     for(const r of await rows("workspace_imports")) state.imports[String(r.digest)]=String(r.project_id);
     for(const r of await rows("workspace_receipts")) state.receipts[String(r.id)]={digest:String(r.digest),revisionId:String(r.revision_id)};
     assertWorkspaceState(state); return {version:Number(meta.version),state};

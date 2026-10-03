@@ -11,7 +11,10 @@ import type { GeometryResult } from "./geometry/gate";
 import { downloadPartFile, reviewPartStl } from "./partExport";
 import { ConversationPanel } from "./chat/ConversationPanel";
 import type { SelectionReference } from "./chat/context";
-import type { PartFeature } from "./modeling/source";
+import { readFeatures, type PartFeature } from "./modeling/source";
+import type { FeatureEvaluation } from "./modeling/evaluator";
+import FeatureMeshViewport from "./modeling/FeatureMeshViewport";
+import { evaluateFeatureSourceInWorker } from "./modeling/client";
 
 declare global { interface Window { pitonWorkspace: WorkspaceApplication; } }
 export default function ProjectWorkspace({application}: {application: WorkspaceApplication}) {
@@ -162,13 +165,13 @@ function ProjectWorkbench({application,project,document,revisionId,path,navigate
         <div className="r7-document-panel" id={`panel-${project.id}`} role={document?"tabpanel":undefined} aria-labelledby={document?`tab-${document.id}`:undefined} tabIndex={document?0:undefined}>
           <div className={`r7-mobile-tools ${document&&isAuthoredPart(document.part)?"has-authored-part":""}`}><button className="r7-drawer-toggle" aria-expanded={panel==="project"} onClick={()=>setPanel(panel==="project"?null:"project")}>☰ Project</button><button className="r7-drawer-toggle" aria-expanded={panel==="change"} onClick={()=>setPanel(panel==="change"?null:"change")}>Change Request</button></div>
           <div className="r7-editor-target" ref={setCenterTarget}/>
-          {(!document || document.part.currentRevisionId===null)&&<EmptyProjectViewport empty={!project.documents.length} partName={document?.name} panel={panel} togglePanel={value=>setPanel(panel===value?null:value)}/>}
+          {(!document || (document.part.currentRevisionId===null&&!draftStatuses[document.id]?.preview))&&<EmptyProjectViewport empty={!project.documents.length} partName={document?.name} panel={panel} togglePanel={value=>setPanel(panel===value?null:value)}/>}
         </div>{(error||tabError)&&<p className="r7-error" role="alert">{error||tabError}</p>}
       </section>
       <aside className={`r7-right ${panel==="change"?"is-open":""}`} aria-label="Change request"><button className="r7-drawer-close" onClick={()=>setPanel(null)}>Close Change Request</button><h2 className="r7-panel-head">Change Request</h2><ConversationPanel project={project} documentId={document?.id} revisionId={revisionId} selection={document&&selections[document.id]?[selections[document.id]]:[]} draft={!revisionId&&!!(document&&draftStatuses[document.id]?.dirty)} preview={!revisionId&&!!(document&&draftStatuses[document.id]?.preview)}/><div ref={setRightTarget}/></aside>
       {targets&&tabs.map(d=>isAuthoredPart(d.part)?<PartEditor key={d.id} application={application} projectId={project.id} document={{...d,part:d.part}} archived={project.archived} refresh={refresh} navigate={navigate} active={document?.id===d.id&&!revisionId} targets={targets} reportDraft={reportDraft}/>:null)}
       {targets&&document&&isAuthoredPart(document.part)&&revisionId&&<PartEditor key={`${document.id}:${revisionId}`} application={application} projectId={project.id} document={{...document,part:document.part}} revisionId={revisionId} archived={project.archived} refresh={refresh} navigate={navigate} active targets={targets}/>}
-      {targets&&<EmptyFeatureAuthoring key="empty-feature-authoring" active={!!(document&&document.part.currentRevisionId===null&&!isFeaturePart(document.part)&&!revisionId&&!project.archived)} application={application} projectId={project.id} part={document && document.part.currentRevisionId===null && !isFeaturePart(document.part) ? document : undefined} refresh={refresh} pending={pending}/>}
+      {targets&&tabs.filter(d=>d.part.currentRevisionId===null||isFeaturePart(d.part)).map(d=><EmptyFeatureAuthoring key={`features-${d.id}`} active={document?.id===d.id} application={application} projectId={project.id} part={d} refresh={refresh} pending={pending} archived={project.archived} revisionId={document?.id===d.id?revisionId:undefined} navigate={navigate} targets={targets} reportDraft={reportDraft}/>)}
     </div><footer className="r7-status"><span>{project.archived?"Archived project · read-only":"Browser-local project"} · {project.documents.length} Parts</span><span>needs_human_review · fabrication_release=false · machine_actuation=false</span></footer>
   </main>;
 }
@@ -185,7 +188,7 @@ function EmptyPartModelTree({document,onSelect}:{document:PartDocument;onSelect:
       {id:"front",label:"Front Plane · reference",detail:"CAD XZ plane (Y=0). Coordinate reference only; not an authored feature."},
       {id:"top",label:"Top Plane · reference",detail:"CAD XY plane (Z=0), the physical grid plane. Coordinate reference only; not an authored feature."},
       {id:"right",label:"Right Plane · reference",detail:"CAD YZ plane (X=0). Coordinate reference only; not an authored feature."}]},
-    {id:"features",label:"Features (0)",detail:"No authored features or sketches. Feature authoring, suppression and history editing are not implemented."},
+    {id:"features",label:"Features (0)",detail:"No authored features yet. Use named-feature source to preview a bounded profile, extrusion and hole."},
     {id:"bodies",label:"Solid Bodies (0)",detail:"No solid bodies. This Part has no authored geometry or review mesh."}]}];
   const visible:EmptyTreeNode[]=[],all=new Map<string,EmptyTreeNode>(),parents=new Map<string,string>();
   const collect=(list:EmptyTreeNode[],parent?:string,shown=true)=>{for(const node of list){all.set(node.id,node);if(parent)parents.set(node.id,parent);if(shown)visible.push(node);if(node.children)collect(node.children,node.id,shown&&expanded.includes(node.id));}};
@@ -249,7 +252,7 @@ function EmptyProjectViewport({empty,partName,panel,togglePanel}:{empty:boolean;
     return()=>{disposed=true;cleanup();};
   },[]);
   return <><div className="r7-toolbar" aria-label="View controls"><button className="r7-drawer-toggle" aria-expanded={panel==="project"} onClick={()=>togglePanel("project")}>☰ Project</button>{["Iso","Front","Top","Fit"].map(name=><button key={name} disabled={!available} onClick={()=>command.current(name)}>{name}</button>)}<button disabled title="Open a document with review geometry to measure">Measure</button><button disabled>Clear measurement</button>{["↶ Roll","Roll ↷"].map(name=><button key={name} disabled={!available} onClick={()=>command.current(name)}>{name}</button>)}<button className="r7-drawer-toggle" aria-expanded={panel==="change"} onClick={()=>togglePanel("change")}>Agent</button></div>
-    <div className="r7-empty-viewport" data-testid="empty-project-viewport" aria-label="Empty CAD viewport"><div className="r7-three" ref={host}/><div className="r7-empty-message"><strong>{partName?"Empty Part":empty?"Empty project":"No open document"}</strong><p>{partName?`${partName} has no authored geometry or revisions. Sketch and feature authoring are not implemented.`:empty?"Create a Part from the project panel to begin.":"Open a document from the project panel to continue."}</p>{failure&&<p role="status">{failure}</p>}</div><div className="r7-axis">CAD Z ↑<br/><span>grid = physical CAD Z=0 · mm</span></div></div>
+    <div className="r7-empty-viewport" data-testid="empty-project-viewport" aria-label="Empty CAD viewport"><div className="r7-three" ref={host}/><div className="r7-empty-message"><strong>{partName?"Empty Part":empty?"Empty project":"No open document"}</strong><p>{partName?`${partName} has no authored geometry or revisions. Use named-feature source to preview a Part.`:empty?"Create a Part from the project panel to begin.":"Open a document from the project panel to continue."}</p>{failure&&<p role="status">{failure}</p>}</div><div className="r7-axis">CAD Z ↑<br/><span>grid = physical CAD Z=0 · mm</span></div></div>
   </>;
 }
 function PartEditor({application,projectId,document,revisionId,archived,refresh,navigate,active,targets,reportDraft}:{application:WorkspaceApplication;projectId:string;document:PartDocument & {part:BrowserProject};revisionId?:string;archived:boolean;refresh:()=>Promise<void>;navigate:(url:string)=>void;active:boolean;targets:WorkbenchTargets;reportDraft?:(id:string,status:DraftStatus)=>void}) {
@@ -319,102 +322,81 @@ const EMPTY_FEATURE_SOURCE_PLACEHOLDER =
   'part.rectangle({"id":"outline","name":"Plate outline","plane":"XY","width":80,"height":50});\n' +
   'part.extrude({"id":"plate","name":"Plate thickness","profileId":"outline","distance":6});\n' +
   'part.hole({"id":"mount-1","name":"Mounting hole 1","bodyId":"plate","x":15,"y":15,"diameter":5,"extent":"through"});\n';
-/** P3 first-feature authoring affordance. Reuses the existing Project / MVI
- * semantics via WorkspaceApplication.proposeFeatures -> commitFeatures, and
- * survives the project-only route (no active document). The textarea, the
- * Propose and commit button, and the canonical placeholder source are all named
- * GUI affordances, never silent defaults. */
-function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pending}:{
+/** Both first-feature and subsequent source edits cross the same preview gate. */
+function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pending,archived,revisionId,navigate,targets,reportDraft}:{
   active:boolean;
   application: WorkspaceApplication;
   projectId: string;
   part?: PartDocument;
   refresh: () => Promise<void>;
   pending:boolean;
+  archived?:boolean;
+  revisionId?:string;
+  navigate?:(url:string)=>void;
+  targets?:WorkbenchTargets;
+  reportDraft?:(id:string,status:DraftStatus)=>void;
 }) {
-  const [source,setSource]=useState(EMPTY_FEATURE_SOURCE_PLACEHOLDER);
+  const current = part && isFeaturePart(part.part) ? part.part.revisions.find(r=>r.id===part.part.currentRevisionId) : undefined;
+  const shown = part && isFeaturePart(part.part) && revisionId ? part.part.revisions.find(r=>r.id===part.revisionIds[revisionId]) : current;
+  const [source,setSource]=useState(current?.authored.source ?? EMPTY_FEATURE_SOURCE_PLACEHOLDER);
   const [busy,setBusy]=useState(false);
-  const [message,setMessage]=useState("");
   const [error,setError]=useState("");
-  const [committedId,setCommittedId]=useState<string|null>(null);
-  const mounted=useRef(false);
-  useEffect(()=>{mounted.current=true;return ()=>{mounted.current=false;};},[]);
-  if (!active || !part) return null;
-  const target = part;
-  const run = async (fn: () => Promise<string | undefined>) => {
-    if (busy) return;
-    setBusy(true);setError("");setMessage("");setCommittedId(null);
+  const [preview,setPreview]=useState<Awaited<ReturnType<WorkspaceApplication["proposeFeatures"]>>|null>(null);
+  const [geometry,setGeometry]=useState<FeatureEvaluation|null>(null);
+  const [message,setMessage]=useState("");
+  const generation=useRef(0), mounted=useRef(false), operation=useRef(false);
+  const readonly=!!archived||!!revisionId;
+  const currentPointer=part&&current?Object.keys(part.revisionIds).find(id=>part.revisionIds[id]===current.id):null;
+  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;generation.current++;};},[]);
+  useEffect(()=>{
+    if(!shown)return;
+    const token=++generation.current;
+    setGeometry(null);
+    void evaluateFeatureSourceInWorker(shown.authored).then(result=>{if(mounted.current&&token===generation.current)setGeometry(result);}).catch(e=>{if(mounted.current&&token===generation.current)setError(e instanceof Error?e.message:"Review mesh unavailable");});
+  },[shown?.id]);
+  useEffect(()=>{if(current&&!preview)setSource(current.authored.source);},[current?.id]);
+  useEffect(()=>{if(part)reportDraft?.(part.id,{dirty:!!preview||source!==(current?.authored.source??EMPTY_FEATURE_SOURCE_PLACEHOLDER),busy,preview:!!preview});},[part?.id,source,current?.id,busy,preview,reportDraft]);
+  if (!part) return null;
+  const invalidate=()=>{generation.current++;if(preview)application.cancelFeatureProposal(preview.proposal);setPreview(null);};
+  const submit=async()=>{
+    if(operation.current||readonly||pending)return;
+    invalidate();
+    const token=++generation.current;
+    operation.current=true;setBusy(true);setError("");setMessage("");
     try {
-      const result = await fn();
-      if (!mounted.current) return;
-      setCommittedId(result ?? "preview-only");
-      setMessage("First feature committed to feature Part; review mesh only · engineering approval not granted.");
-      await refresh();
-    } catch (e) {
-      if (mounted.current) {
-        const message = e instanceof Error ? e.message : (typeof e === "string" ? e : JSON.stringify(e));
-        setError(message || "Unknown error");
-      }
-    } finally {
-      if (mounted.current) setBusy(false);
-    }
+      const features=parseFeatureSource(source);
+      if (!features.length) throw new Error("No named features parsed from source. Use part.rectangle / circle / extrude / hole calls.");
+      const proposal:FeatureProposal={projectId,documentId:part.id,expectedRevisionId:currentPointer??null,idempotencyKey:crypto.randomUUID(),units:"mm",features,...(current?{operation:"replace" as const}:{})};
+      const result=await application.proposeFeatures(proposal);
+      if(mounted.current&&token===generation.current){setPreview(result);setGeometry(result.geometry);setMessage("Preview only · not committed. Inspect the review mesh, then explicitly commit.");}
+      else application.cancelFeatureProposal(result.proposal);
+    }catch(e){if(mounted.current)setError(e instanceof Error?e.message:"Preview failed");}
+    finally{operation.current=false;if(mounted.current)setBusy(false);}
   };
-  const submit = () => {
-    if (busy || !source.trim()) return;
-    const features = parseFeatureSource(source);
-    if (!features.length) { setError("No named features parsed from source. Use part.rectangle / circle / extrude / hole calls."); return; }
-    const proposal: FeatureProposal = {
-      projectId,
-      documentId: target.id,
-      expectedRevisionId: null,
-      idempotencyKey: crypto.randomUUID(),
-      units: "mm",
-      features,
-    };
-    void run(async () => {
-      const preview = await application.proposeFeatures(proposal);
-      if (!mounted.current) return undefined;
-      const revisionId = await application.commitFeatures(preview.proposal);
-      return revisionId;
-    });
+  const commit=async()=>{
+    if(!preview||operation.current||readonly||pending)return;
+    operation.current=true;setBusy(true);setError("");
+    try {const id=await application.commitFeatures(preview.proposal);if(!mounted.current)return;setPreview(null);setMessage(`Revision committed: ${id} · engineering approval not granted.`);await refresh();}
+    catch(e){if(mounted.current)setError(e instanceof Error?e.message:"Commit failed");}
+    finally{operation.current=false;if(mounted.current)setBusy(false);}
   };
-  const reset = () => { setSource(EMPTY_FEATURE_SOURCE_PLACEHOLDER); setError(""); setMessage(""); setCommittedId(null); };
-  return createPortal(
-    <section className="r7-empty-authoring" data-testid="empty-feature-authoring" aria-label="First feature source">
-      <h2 className="r7-panel-head">First feature source</h2>
-      <p className="r7-section-help">Submit a named-feature source to give <strong>{target.name}</strong> its first feature revision. Project and Part scope are attached automatically; the source is canonical, evaluated once, then committed or rejected without rewriting history.</p>
-      <label className="r7-feature-source-label">Named-feature source<textarea aria-label="Named feature source" data-testid="feature-source-input" value={source} onChange={e=>setSource(e.target.value)} disabled={busy} spellCheck={false} /></label>
-      <div className="r7-feature-source-actions">
-        <button type="button" className="workspace-primary" data-testid="submit-first-feature" disabled={busy || !source.trim() || pending} onClick={submit}>{busy?"Evaluating…":"Propose and commit first feature"}</button>
-        <button type="button" disabled={busy} onClick={reset}>Reset to canonical plate</button>
-      </div>
-      {message && <p role="status" data-testid="empty-feature-message">{message}</p>}
-      {committedId && committedId !== "preview-only" && <p role="status" data-testid="empty-feature-revision">Revision: {committedId}</p>}
-      {error && <p role="alert" data-testid="empty-feature-error">{error}</p>}
-    </section>,
-    globalThis.document.querySelector(".r7-right") ?? globalThis.document.body,
-  );
+  return <>
+    {active&&createPortal(<section className="r7-empty-authoring" data-testid="empty-feature-authoring" aria-label="First feature source">
+      <h2 className="r7-panel-head">{current?"Named features":"First feature source"}</h2>
+      <p className="r7-section-help">{part.name} · browser-typescript/v1 · mm · review mesh only. Source is authored only on explicit commit.</p>
+      {current&&<nav aria-label="Feature revision history">{part.part.revisions.map((revision,index)=>{const pointer=Object.keys(part.revisionIds).find(id=>part.revisionIds[id]===revision.id);return <button key={revision.id} onClick={()=>navigate?.(`/projects/${projectId}/documents/${part.id}/revisions/${pointer}`)}>Revision {index+1}</button>;})}{revisionId&&<button onClick={()=>navigate?.(`/projects/${projectId}/documents/${part.id}`)}>Open current revision</button>}</nav>}
+      <label className="r7-feature-source-label">Named feature source<textarea aria-label="Named feature source" data-testid="feature-source-input" value={revisionId?shown?.authored.source??source:source} onChange={e=>{invalidate();setSource(e.target.value);}} disabled={busy||readonly} spellCheck={false} /></label>
+      <div className="r7-feature-source-actions"><button type="button" className="workspace-primary" data-testid="submit-first-feature" disabled={busy||readonly||!source.trim()||pending} onClick={()=>void submit()}>{busy?"Evaluating…":"Preview features"}</button>
+        <button type="button" disabled={busy||readonly} onClick={()=>{invalidate();setSource(current?.authored.source??EMPTY_FEATURE_SOURCE_PLACEHOLDER);setError("");}}>Discard draft</button>
+        <button type="button" disabled={!preview||busy||readonly} onClick={()=>void commit()}>Commit feature revision</button></div>
+      {preview&&<section data-testid="feature-preview"><strong>Preview only · not committed</strong><p>{preview.candidate.id} · {preview.geometry.triangles.length/3} triangles · {preview.geometry.volumeMm3.toFixed(2)} mm³</p></section>}
+      {message&&<p role="status" data-testid="empty-feature-message">{message}</p>}{error&&<p role="alert" data-testid="empty-feature-error">{error}</p>}
+    </section>,targets?.right??globalThis.document.querySelector(".r7-right")??globalThis.document.body)}
+    {active&&current&&targets&&createPortal(<section className="r7-section" aria-label="Named feature tree"><h2>Model tree</h2><p>{readFeatures(shown?.authored??current.authored).length} named features · 1 review body</p><ul>{readFeatures(shown?.authored??current.authored).map(f=><li key={f.id}>{f.name} · {f.kind}</li>)}</ul></section>,targets.left)}
+    {active&&geometry&&targets&&createPortal(<FeatureMeshViewport geometry={geometry} revisionId={preview?.candidate.id??shown?.id??""}/>,targets.center)}
+  </>;
 }
-/** Parse the canonical named-feature source the application accepts. Mirrors
- * src/modeling/source.ts but does not evaluate text — it only walks the
- * part.<kind>({...}); grammar so the affordance can show a typed preview count
- * and reject obviously empty payloads before hitting the worker. */
+/** Never drop invalid lines: parse through the same strict canonical source reader. */
 function parseFeatureSource(text: string): PartFeature[] {
-  const header = '// Piton browser-typescript/v1; units=mm; restricted named-feature source\n';
-  const trimmed = text.replace(/\r\n/g,"\n");
-  if (!trimmed.startsWith(header) && trimmed.trim().length>0) {
-    // Accept non-canonical input (lacking the header) so the user can paste
-    // partial sketches; the application's parseFeatures call still validates.
-  }
-  const body = trimmed.startsWith(header) ? trimmed.slice(header.length) : trimmed;
-  if (!body.trim()) return [];
-  const features: PartFeature[] = [];
-  for (const line of body.split("\n")) {
-    const match = /^part\.(rectangle|circle|extrude|hole)\((\{.*\})\);$/.exec(line.trim());
-    if (!match) continue;
-    let parameters: Record<string, unknown>;
-    try { parameters = JSON.parse(match[2]); } catch { continue; }
-    features.push({ kind: match[1], ...parameters } as unknown as PartFeature);
-  }
-  return features;
+  return [...readFeatures({authorityProfile:"browser-typescript/v1",units:"mm",source:text})];
 }

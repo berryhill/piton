@@ -54,14 +54,14 @@ it("renders the named first-feature source affordance only on an empty Part", as
   expect(textarea).toBeInTheDocument();
   expect(textarea).not.toBeDisabled();
   const button = screen.getByTestId("submit-first-feature");
-  expect(button).toHaveTextContent("Propose and commit first feature");
+  expect(button).toHaveTextContent("Preview features");
   expect(button).not.toBeDisabled();
   // The canonical placeholder source must be visible to the user.
   expect((textarea as HTMLTextAreaElement).value).toMatch(/part\.rectangle/);
   expect((textarea as HTMLTextAreaElement).value).toMatch(/part\.extrude/);
 });
 
-it("calls proposeFeatures then commitFeatures when the user submits the named affordance", async () => {
+it("previews without committing until explicit confirmation", async () => {
   const { app, projectId, documentId } = await setup();
   history.replaceState(null, "", `/projects/${projectId}/documents/${documentId}`);
   render(<ProjectWorkspace application={app} />);
@@ -90,10 +90,10 @@ it("calls proposeFeatures then commitFeatures when the user submits the named af
   expect(proposal.documentId).toBe(documentId);
   expect(proposal.units).toBe("mm");
   expect(proposal.features.length).toBeGreaterThan(0);
-  await waitFor(() => {
-    expect(commit).toHaveBeenCalledTimes(1);
-  });
-  await screen.findByTestId("empty-feature-message");
+  await screen.findByTestId("feature-preview");
+  expect(commit).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Commit feature revision" }));
+  await waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
 });
 
 it("shows an error alert when the source cannot be parsed into features", async () => {
@@ -104,8 +104,36 @@ it("shows an error alert when the source cannot be parsed into features", async 
   // Replace the canonical placeholder with text that has no part.<kind>({...}) calls.
   fireEvent.change(screen.getByTestId("feature-source-input"), { target: { value: "// not a feature source\n" } });
   fireEvent.click(screen.getByTestId("submit-first-feature"));
-  expect(await screen.findByTestId("empty-feature-error")).toHaveTextContent(/No named features/);
+  expect(await screen.findByTestId("empty-feature-error")).toHaveTextContent(/Invalid browser TypeScript source or units/);
 });
 
 // Local helper: re-exported here so the test file stands on its own.
 import { within } from "@testing-library/react";
+
+it("keeps first-feature source drafts document-local when switching Parts", async () => {
+  const { app, projectId, documentId } = await setup();
+  const secondId = await app.createPart(projectId, "Second plate");
+  history.replaceState(null, "", `/projects/${projectId}/documents/${documentId}`);
+  render(<ProjectWorkspace application={app} />);
+  const firstSource = await screen.findByTestId("feature-source-input");
+  const original = (firstSource as HTMLTextAreaElement).value;
+  const draft = original.replace('"width":80', '"width":90');
+  fireEvent.change(firstSource, { target: { value: draft } });
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Project Files" })).getByRole("button", { name: "Second plate" }));
+  await waitFor(() => expect(location.pathname).toContain(secondId));
+  expect(screen.getByTestId("feature-source-input")).toHaveValue(original);
+  fireEvent.click(screen.getByRole("tab", { name: /^Plate$/ }));
+  expect(screen.getByTestId("feature-source-input")).toHaveValue(draft);
+});
+
+it("rejects a malformed operation rather than silently previewing a valid subset", async () => {
+  const { app, projectId, documentId } = await setup();
+  const propose = vi.spyOn(app, "proposeFeatures");
+  history.replaceState(null, "", `/projects/${projectId}/documents/${documentId}`);
+  render(<ProjectWorkspace application={app} />);
+  const input = await screen.findByTestId("feature-source-input");
+  fireEvent.change(input, { target: { value: (input as HTMLTextAreaElement).value + 'part.hole({broken});\n' } });
+  fireEvent.click(screen.getByTestId("submit-first-feature"));
+  await screen.findByTestId("empty-feature-error");
+  expect(propose).not.toHaveBeenCalled();
+});

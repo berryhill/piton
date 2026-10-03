@@ -1,4 +1,4 @@
-# Piton Nick bridge contract (implementation in server/chat/backend.py)
+# Piton Nick bridge contract (implementation in server/chat/backend.ts)
 
 Objective: actual profile-bound Nick conversation via native Hermes Sessions API; browser TypeScript remains sole CAD authority. Acceptance: real streamed reply, durable project history, negative auth/origin tests, no ambient tools. No shared runtime/config changes.
 

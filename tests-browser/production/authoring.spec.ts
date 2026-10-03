@@ -89,20 +89,37 @@ test("production empty-Part authoring commits a named feature source through the
   const submit = page.getByTestId("submit-first-feature");
   await expect(submit).toBeEnabled();
   await submit.click();
-  // The affordance must show a clear status (success or named error from the
-  // downstream pipeline); never a silent failure or unresolved promise.
-  let succeeded = false;
-  let reportedError = "";
-  for (let attempt = 0; attempt < 40; attempt++) {
-    const status = await page.evaluate(() => ({
-      message: document.querySelector('[data-testid="empty-feature-message"]')?.textContent?.trim() ?? "",
-      error: document.querySelector('[data-testid="empty-feature-error"]')?.textContent?.trim() ?? "",
-    }));
-    if (status.message.includes("First feature committed")) { succeeded = true; break; }
-    if (status.error.length > 0 && !status.error.startsWith("[object")) { reportedError = status.error; break; }
-    await page.waitForTimeout(500);
-  }
-  expect(succeeded || reportedError.length > 0, `expected success or a named error; reportedError="${reportedError}"`).toBeTruthy();
+  // Actual review geometry is visible before any authored revision exists.
+  await expect(page.getByTestId("feature-preview")).toContainText("Preview only · not committed");
+  await expect(page.getByTestId("feature-mesh-viewport").locator("canvas")).toBeVisible();
+  const readPart = () => page.evaluate(async () => (await window.pitonWorkspace.read()).projects[0].documents[0].part);
+  expect((await readPart()).revisions).toHaveLength(0);
+  const previewId = await page.getByTestId("feature-mesh-viewport").getAttribute("data-revision-id");
+  await page.getByRole("button", { name: "Commit feature revision", exact: true }).click();
+  await expect(page.getByTestId("empty-feature-message")).toContainText("Revision committed:");
+  const first = await readPart();
+  expect(first.revisions).toHaveLength(1);
+  expect(first.currentRevisionId).toBe(previewId);
+  await expect(page.getByRole("region", { name: "Named feature tree" })).toContainText("Plate outline");
+  await page.reload();
+  await expect(page.getByTestId("feature-mesh-viewport").locator("canvas")).toBeVisible();
+  expect(await readPart()).toEqual(first);
+  const source = page.getByTestId("feature-source-input");
+  await source.fill((await source.inputValue()).replace('"width":80', '"width":90'));
+  await page.getByTestId("submit-first-feature").click();
+  await expect(page.getByTestId("feature-preview")).toBeVisible();
+  expect((await readPart()).revisions).toHaveLength(1);
+  await page.getByRole("button", { name: "Commit feature revision", exact: true }).click();
+  await expect(page.getByTestId("empty-feature-message")).toContainText("Revision committed:");
+  const second = await readPart();
+  expect(second.revisions).toHaveLength(2);
+  expect(second.revisions[0]).toEqual(first.revisions[0]);
+  await page.reload();
+  await expect(page.getByTestId("feature-mesh-viewport").locator("canvas")).toBeVisible();
+  expect(await readPart()).toEqual(second);
+  await page.getByRole("button", { name: "Revision 1", exact: true }).click();
+  await expect(source).toBeDisabled();
+  await expect(source).toHaveValue(/"width":80/);
   // Safety truth remains on the page footer regardless of outcome.
   await expect(page.locator(".r7-status")).toContainText("needs_human_review");
   await expect(page.locator(".r7-status")).toContainText("fabrication_release=false");

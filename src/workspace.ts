@@ -12,13 +12,16 @@ export interface FeatureProposal {
   idempotencyKey: string;
   units: "mm";
   features: readonly PartFeature[];
+  /** Explicit full-source edit; omitted means append-only first-feature command. */
+  operation?: "replace";
 }
 export function parseFeatureProposal(input: unknown): FeatureProposal {
-  keys(input, ["projectId", "documentId", "expectedRevisionId", "idempotencyKey", "units", "features"]);
+  keys(input, ["projectId", "documentId", "expectedRevisionId", "idempotencyKey", "units", "features"], ["operation"]);
   const p = input as FeatureProposal;
   for (const id of [p.projectId, p.documentId, p.idempotencyKey]) resourceId(id);
   if (p.expectedRevisionId !== null) resourceId(p.expectedRevisionId);
   if (p.units !== "mm" || !Array.isArray(p.features) || p.features.length === 0 || p.features.length > 66) throw new Error("Invalid feature proposal units or operation count");
+  if (p.operation !== undefined && p.operation !== "replace") throw new Error("Invalid feature operation");
   return structuredClone(p);
 }
 
@@ -178,7 +181,8 @@ export class WorkspaceApplication {
     const previous = state.receipts[proposal.idempotencyKey];
     if (previous && previous.digest !== digest) throw new WorkspaceError("idempotency_conflict", "Idempotency conflict");
     const { document, authored } = this.featureBase(state, proposal);
-    const source = appendFeatures(authored, proposal.features);
+    if (proposal.operation === "replace" && !isFeaturePart(document.part)) throw new WorkspaceError("empty_part", "Replacement requires an authored feature Part");
+    const source = appendFeatures(proposal.operation === "replace" ? emptyFeatureSource() : authored, proposal.features);
     const cached = this.#featurePreviews.get(digest);
     if (cached) return structuredClone({ proposal, ...cached });
     if (this.#featurePreviewGeneration.size >= 16) throw new Error("Too many pending feature evaluations");
