@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("measurement admission follows the active document tree and Inspect category", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/demo");
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
 
   const persistentMeasure = page.getByRole("button", { name: "Measure selected review entity" });
@@ -25,7 +25,7 @@ test("measurement admission follows the active document tree and Inspect categor
 
 test("seeded edit preview commit and OPFS reload remain unreleased", async ({ page }) => {
   test.setTimeout(60_000);
-  await page.goto("/");
+  await page.goto("/demo");
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
   await expect(page.getByRole("button", { name: "Assembly fixture" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByText(/Assembly fixture is review-only interaction evidence/)).toBeVisible();
@@ -108,7 +108,7 @@ test("seeded edit preview commit and OPFS reload remain unreleased", async ({ pa
 });
 
 test("imports into a fresh bounded OPFS namespace, commits, and reopens that exact custody", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/demo");
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
   const input = page.getByLabel("Leg length (mm)");
   await input.fill("132");
@@ -177,7 +177,7 @@ test("malformed reopen namespace fails visibly before any database opens", async
 });
 
 test("SQLite WASM reports migrated schema and direct durable readback", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/demo");
   await expect(page.getByText("Accepted immutable revision")).toBeVisible();
 
   const evidence = await page.evaluate(async () => {
@@ -197,6 +197,8 @@ test("SQLite WASM reports migrated schema and direct durable readback", async ({
       "channel_pointers", "command_receipts", "draft_exports", "evidence_closures",
       "fabrication_releases", "projects", "proposal_dispositions",
       "released_package_projections", "revisions",
+      "workspace_documents", "workspace_imports", "workspace_meta", "workspace_projects",
+      "workspace_receipts", "workspace_revisions",
     ],
   });
   expect(evidence.revisionCount).toBeGreaterThanOrEqual(1);

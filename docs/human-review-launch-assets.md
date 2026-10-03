@@ -2,12 +2,16 @@
 
 These assets prepare evidence for a person; they do not approve, export for fabrication, release, promote a channel, or actuate a machine. Every review retains `review_state=needs_human_review`, `fabrication_release=false`, and `machine_actuation=false`.
 
-## Browser workbench review
+## Project authoring review
+
+Follow [Project workspaces](project-workspaces.md): create two projects with distinct Parts, preview/commit dimensional changes, reopen document and historical links, test unknown-resource rejection, and export/import a project backup in fresh browser storage to verify original bookmark recovery. Confirm all outputs remain review-only.
+
+## Legacy browser workbench review
 
 1. Install the exact locked dependencies with `pnpm install --frozen-lockfile`.
 2. Install Chromium once with `pnpm exec playwright install chromium`.
 3. Run the canonical gate with `pnpm verify`.
-4. Launch with `pnpm start` and open the URL printed by Vite.
+4. Launch with `pnpm start` and open `/demo` on the URL printed by Vite.
 5. Confirm the seeded L-bracket, source-parameter zone, bbox, build-volume context, and review-only disclosure.
 6. Confirm CAD Z=0 sits on the physical grid.
 7. Preview and commit one bounded `leg_length_mm` mutation, then reload and verify OPFS readback.

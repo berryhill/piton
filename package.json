@@ -7,11 +7,14 @@
   "scripts": {
     "start": "./launch-piton.sh",
     "dev": "vite --host 127.0.0.1",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "typecheck": "tsc --noEmit && pnpm typecheck:server",
+    "typecheck:server": "tsc -p server/chat/tsconfig.json",
+    "test": "vitest run && pnpm test:server",
+    "test:server": "vitest run --config server/chat/vitest.config.ts",
     "test:e2e": "playwright test",
+    "test:production": "playwright test --config playwright.production.config.ts",
     "build": "tsc --noEmit && vite build",
-    "verify": "pnpm typecheck && pnpm test && pnpm build && pnpm test:e2e"
+    "verify": "pnpm typecheck && pnpm test && pnpm build && pnpm test:e2e && pnpm test:production"
   },
   "dependencies": {
     "@sqlite.org/sqlite-wasm": "3.51.2-build8",
