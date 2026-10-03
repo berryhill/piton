@@ -57,6 +57,8 @@ export type BackendOptions = {
   allowLocalBootstrap?: boolean;
   /** Override the request timeout for upstream calls. */
   timeoutMs?: number;
+  /** Independent server-owned runtime policy verifier; absent/false/throw denies. */
+  verifyConversationIsolation?: () => Promise<boolean>;
 };
 
 export type BackendSnapshot = {
@@ -142,7 +144,7 @@ class ConversationLedger {
   private async write(projectId: string, documentId: string | null, messages: Message[]): Promise<void> {
     const target = this.key(projectId, documentId);
     const temporary = target + '.' + randomUUID() + '.tmp';
-    const file = await open(temporary, constants.O_EXCL | constants.O_CREAT, 0o600);
+    const file = await open(temporary, constants.O_EXCL | constants.O_CREAT | constants.O_WRONLY, 0o600);
     try {
       await file.writeFile(JSON.stringify({ messages, updatedAt: now() }));
       await file.sync();
@@ -184,7 +186,7 @@ class AuthStore {
     await mkdir(join(this.directory, record.tokenHash.slice(0, 2)), { recursive: true, mode: 0o700 });
     const target = this.path(record.tokenHash);
     const temporary = target + '.' + randomUUID() + '.tmp';
-    const file = await open(temporary, constants.O_EXCL | constants.O_CREAT, 0o600);
+    const file = await open(temporary, constants.O_EXCL | constants.O_CREAT | constants.O_WRONLY, 0o600);
     try {
       await file.writeFile(JSON.stringify(record));
       await file.sync();
@@ -219,7 +221,7 @@ class ProjectStore {
     await this.ready();
     const target = this.path(record.id);
     const temporary = target + '.' + randomUUID() + '.tmp';
-    const file = await open(temporary, constants.O_EXCL | constants.O_CREAT, 0o600);
+    const file = await open(temporary, constants.O_EXCL | constants.O_CREAT | constants.O_WRONLY, 0o600);
     try {
       await file.writeFile(JSON.stringify(record));
       await file.sync();
@@ -271,7 +273,7 @@ class IdempotencyStore {
     await this.ready();
     const target = this.path(record.id);
     const temporary = target + '.' + randomUUID() + '.tmp';
-    const file = await open(temporary, constants.O_EXCL | constants.O_CREAT, 0o600);
+    const file = await open(temporary, constants.O_EXCL | constants.O_CREAT | constants.O_WRONLY, 0o600);
     try {
       await file.writeFile(JSON.stringify(record));
       await file.sync();
@@ -306,15 +308,22 @@ export function createBackendService(options: BackendOptions): BackendService {
   const allowLocalBootstrap = Boolean(options.allowLocalBootstrap) && isLoopback;
   const tailscaleLogin = options.tailscaleLogin;
 
-  let upstream: string | undefined;
+  let upstreamRoot: string | undefined;
+  let upstreamApi: string | undefined;
   let credential: string | undefined;
   try {
     const candidate = new URL(env.PITON_HERMES_UPSTREAM ?? '');
     if (candidate.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(candidate.hostname) && candidate.pathname === '/' && !candidate.search && !candidate.hash && !candidate.username && !candidate.password) {
-      upstream = candidate.origin + '/p/nick-mercer';
+      upstreamRoot = candidate.origin;
+      upstreamApi = candidate.origin + '/p/nick-mercer';
     }
   } catch { /* No upstream available. */ }
   credential = env.API_SERVER_KEY;
+  async function isolationVerified(): Promise<boolean> {
+    if (!upstreamRoot || !credential || !options.verifyConversationIsolation) return false;
+    try { return (await options.verifyConversationIsolation()) === true; }
+    catch { return false; }
+  }
 
   // Mount the existing bridge substrate on a private loopback HTTP listener so we can
   // proxy the browser-facing conversation/history/availability through it without
@@ -323,11 +332,20 @@ export function createBackendService(options: BackendOptions): BackendService {
   let bridgeOrigin = '';
   function startBridgeServer(): void {
     if (bridgeServer) return;
-    if (!upstream || !credential) return;
-    const bridgeOptions: BridgeOptions = {
-      origin: `http://127.0.0.1`,
+    if (!upstreamRoot || !credential) return;
+    let bridgeHandler: ReturnType<typeof createChatHandler> | undefined;
+    const server = createServer((req, res) => {
+      if (!bridgeHandler) { res.writeHead(503); res.end(); return; }
+      bridgeHandler(req, res);
+    });
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') return;
+      bridgeOrigin = `http://127.0.0.1:${address.port}`;
+      const bridgeOptions: BridgeOptions = {
+      origin: bridgeOrigin,
       storeDirectory: join(stateRoot, 'bridge'),
-      env: { PITON_HERMES_UPSTREAM: upstream, API_SERVER_KEY: credential },
+      env: { PITON_HERMES_UPSTREAM: upstreamRoot, API_SERVER_KEY: credential },
       authenticate: async (req) => {
         const record = await authenticateFromCookie(req);
         if (!record) return null;
@@ -340,13 +358,10 @@ export function createBackendService(options: BackendOptions): BackendService {
         const project = await projectStore.get(scope.projectId);
         return Boolean(project && project.principal === principal);
       },
-      verifyConversationIsolation: async () => Boolean(upstream && credential),
+      verifyConversationIsolation: isolationVerified,
       timeoutMs: options.timeoutMs,
-    };
-    const server = createServer(createChatHandler(bridgeOptions));
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (address && typeof address === 'object') bridgeOrigin = `http://127.0.0.1:${address.port}`;
+      };
+      bridgeHandler = createChatHandler(bridgeOptions);
     });
     bridgeServer = server;
   }
@@ -355,7 +370,7 @@ export function createBackendService(options: BackendOptions): BackendService {
   let cachedRuntime: { model: string; provider: string } | null = null;
   let cachedRuntimeAt = 0;
   async function fetchRuntime(): Promise<{ model: string; provider: string } | null> {
-    if (!upstream || !credential) return null;
+    if (!upstreamApi || !credential) return null;
     if (cachedRuntime && (now() - cachedRuntimeAt) < 30_000) return cachedRuntime;
     try {
       const runtime = await proxyUpstream('/v1/models', 'GET');
@@ -369,11 +384,11 @@ export function createBackendService(options: BackendOptions): BackendService {
   }
 
   async function proxyUpstream(path: string, method: 'GET' | 'POST', body?: unknown): Promise<string | null> {
-    if (!upstream || !credential) return null;
+    if (!upstreamApi || !credential) return null;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5_000); timer.unref();
     try {
-      const response = await fetch(upstream + path, {
+      const response = await fetch(upstreamApi + path, {
         method, signal: controller.signal, redirect: 'error',
         headers: { Authorization: `Bearer ${credential}`, 'Content-Type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -500,10 +515,11 @@ export function createBackendService(options: BackendOptions): BackendService {
   async function availability(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const record = await requireAuthAndCsrf(req);
     void record;
-    const runtime = upstream && credential ? await fetchRuntime() : null;
-    const capabilities: Capability[] = upstream && credential ? ['project_conversation', 'frozen_context_attach', 'document_link'] : [];
+    const verified = await isolationVerified();
+    const runtime = verified ? await fetchRuntime() : null;
+    const capabilities: Capability[] = verified && runtime ? ['project_conversation', 'frozen_context_attach', 'document_link'] : [];
     jsonResponse(res, 200, {
-      available: Boolean(upstream && credential && runtime),
+      available: Boolean(verified && runtime),
       profile: 'nick-mercer',
       capabilities,
       runtime: runtime ?? undefined,
@@ -572,7 +588,7 @@ export function createBackendService(options: BackendOptions): BackendService {
         method: 'POST',
         headers: {
           host: url.host,
-          origin: 'http://127.0.0.1',
+          origin: bridgeOrigin,
           'content-type': 'application/json',
           'x-piton-csrf': input.csrf,
           ...(input.cookie ? { cookie: input.cookie } : {}),
@@ -635,6 +651,7 @@ export function createBackendService(options: BackendOptions): BackendService {
     const requestId = typeof body.requestId === 'string' && UUID_RE.test(body.requestId) ? body.requestId : randomUUID();
     const project = await projectStore.get(projectId);
     if (!project || project.principal !== auth.principal) throw forbidden('project_not_owned');
+    if (!await isolationVerified()) throw unavailable();
     activeRuns.limit(projectId);
     if (project.status === 'interrupted') throw conflict('conversation_requires_recovery');
     const fingerprint = createHash('sha256').update(JSON.stringify({ message, context: context ?? '' })).digest('hex');
@@ -740,13 +757,14 @@ export function createBackendService(options: BackendOptions): BackendService {
   }
 
   async function snapshot(): Promise<BackendSnapshot> {
-    const runtime = upstream && credential ? await fetchRuntime() : null;
+    const verified = await isolationVerified();
+    const runtime = verified ? await fetchRuntime() : null;
     return {
-      available: Boolean(upstream && credential && runtime),
+      available: Boolean(verified && runtime),
       profile: 'nick-mercer',
-      capabilities: upstream && credential ? ['project_conversation', 'frozen_context_attach', 'document_link'] : [],
+      capabilities: verified && runtime ? ['project_conversation', 'frozen_context_attach', 'document_link'] : [],
       runtime: runtime ?? null,
-      substrate: { upstream: upstream ?? null, authenticated: Boolean(credential) },
+      substrate: { upstream: upstreamRoot ?? null, authenticated: Boolean(credential) },
     };
   }
 
