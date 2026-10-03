@@ -1,10 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import type { FeatureEvaluation } from "./evaluator";
+import type * as Three from "three";
+import { Vector2 } from "three";
+import type { FixtureReviewMeasurement, FixtureReviewPoint } from "../fixture";
+import { clearReviewMeasurementOverlay, updateReviewMeasurementOverlay } from "../components/reviewMeasurement";
+
+/** Ray hits are display-frame millimetres, matching the shared overlay's frame. */
+export function reviewMeshPointAt(raycaster: Three.Raycaster, camera: Three.Camera, mesh: Three.Mesh, bounds: DOMRect, x: number, y: number): FixtureReviewPoint | null {
+  if (!(bounds.width > 0 && bounds.height > 0)) return null;
+  const pointer = new Vector2(((x - bounds.left) / bounds.width) * 2 - 1, -((y - bounds.top) / bounds.height) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  const hit = raycaster.intersectObject(mesh, false)[0];
+  return hit ? [hit.point.x, hit.point.y, hit.point.z] : null;
+}
 
 /** A review-only projection of the evaluated Manifold triangles, not CAD authority. */
-export default function FeatureMeshViewport({ geometry, revisionId }: { geometry: FeatureEvaluation; revisionId: string }) {
+export default function FeatureMeshViewport({ geometry, revisionId, measurement={phase:"idle"}, onMeasurementPoint, onMeasurementHover, onMeasurementCancel }: {
+  geometry: FeatureEvaluation; revisionId: string; measurement?: FixtureReviewMeasurement;
+  onMeasurementPoint?: (point:FixtureReviewPoint)=>void; onMeasurementHover?: (point:FixtureReviewPoint|null)=>void; onMeasurementCancel?:()=>void;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
+  const interaction=useRef({measurement,onMeasurementPoint,onMeasurementHover,onMeasurementCancel});
+  interaction.current={measurement,onMeasurementPoint,onMeasurementHover,onMeasurementCancel};
+  const updateOverlay=useRef<(value:FixtureReviewMeasurement)=>void>(()=>{});
+  useEffect(()=>{updateOverlay.current(measurement);},[measurement]);
   useEffect(() => {
     let disposed = false;
     let dispose = () => {};
@@ -30,7 +50,10 @@ export default function FeatureMeshViewport({ geometry, revisionId }: { geometry
         meshGeometry.setIndex(geometry.triangles);
         meshGeometry.computeVertexNormals();
         const material = new THREE.MeshStandardMaterial({ color: 0x58b8d3, side: THREE.DoubleSide, metalness: 0.12, roughness: 0.7 });
-        scene.add(new THREE.Mesh(meshGeometry, material));
+        const mesh=new THREE.Mesh(meshGeometry, material);
+        scene.add(mesh);
+        const overlay=new THREE.Group();overlay.name="review-mesh-measurement-overlay";scene.add(overlay);
+        updateOverlay.current=value=>{element.dataset.measurementOverlay=updateReviewMeasurementOverlay(overlay,value);renderer.render(scene,camera);};
         const grid = new THREE.GridHelper(240, 24, 0x42647d, 0x243c4e);
         scene.add(grid);
         scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 2));
@@ -43,17 +66,27 @@ export default function FeatureMeshViewport({ geometry, revisionId }: { geometry
         const span = Math.max(...bounds.max.map((v, i) => v - bounds.min[i]), 10);
         camera.position.copy(controls.target).add(new THREE.Vector3(span * 1.7, span * 1.5, span * 1.8));
         camera.lookAt(controls.target); controls.update();
+        const raycaster=new THREE.Raycaster();
+        const pick=(x:number,y:number)=>reviewMeshPointAt(raycaster,camera,mesh,renderer.domElement.getBoundingClientRect(),x,y);
+        const keyboardPick=()=>{const rect=renderer.domElement.getBoundingClientRect();for(const y of [0.5,0.4,0.6,0.3,0.7])for(const x of [0.5,0.4,0.6,0.3,0.7]){const point=pick(rect.left+rect.width*x,rect.top+rect.height*y);if(point)return point;}return null;};
+        let down={x:0,y:0};
+        const pointerDown=(event:PointerEvent)=>{down={x:event.clientX,y:event.clientY};if(interaction.current.measurement.phase!=="idle")renderer.domElement.focus();};
+        const click=(event:MouseEvent)=>{if(Math.hypot(event.clientX-down.x,event.clientY-down.y)>4)return;const phase=interaction.current.measurement.phase;if(phase!=="armed"&&phase!=="endpoint-a")return;const point=pick(event.clientX,event.clientY);if(point)interaction.current.onMeasurementPoint?.(point);};
+        const move=(event:PointerEvent)=>{if(interaction.current.measurement.phase==="endpoint-a")interaction.current.onMeasurementHover?.(pick(event.clientX,event.clientY));};
+        const keydown=(event:KeyboardEvent)=>{const phase=interaction.current.measurement.phase;if(event.key==="Escape"&&phase!=="idle"){event.preventDefault();interaction.current.onMeasurementCancel?.();}else if((event.key==="Enter"||event.key===" ")&&(phase==="armed"||phase==="endpoint-a")){event.preventDefault();const point=keyboardPick();if(point)interaction.current.onMeasurementPoint?.(point);}};
+        renderer.domElement.tabIndex=0;renderer.domElement.setAttribute("aria-label","Feature review mesh; when measuring press Enter or Space to pick a visible mesh point, Escape to cancel");
+        renderer.domElement.addEventListener("pointerdown",pointerDown);renderer.domElement.addEventListener("click",click);renderer.domElement.addEventListener("pointermove",move);renderer.domElement.addEventListener("keydown",keydown);
         const render = () => renderer.render(scene, camera);
         const resize = () => { const width = element.clientWidth, height = element.clientHeight; if (!width || !height) return; camera.aspect = width / height; camera.updateProjectionMatrix(); renderer.setSize(width, height); render(); };
         const observer = new ResizeObserver(resize); observer.observe(element);
-        controls.addEventListener("change", render); resize();
-        dispose = () => { observer.disconnect(); controls.dispose(); meshGeometry.dispose(); material.dispose(); grid.geometry.dispose(); (grid.material as import("three").Material).dispose(); renderer.dispose(); renderer.domElement.remove(); };
+        controls.addEventListener("change", render); resize();updateOverlay.current(interaction.current.measurement);
+        dispose = () => { observer.disconnect();controls.removeEventListener("change",render);renderer.domElement.removeEventListener("pointerdown",pointerDown);renderer.domElement.removeEventListener("click",click);renderer.domElement.removeEventListener("pointermove",move);renderer.domElement.removeEventListener("keydown",keydown);updateOverlay.current=()=>{};clearReviewMeasurementOverlay(overlay);controls.dispose(); meshGeometry.dispose(); material.dispose(); grid.geometry.dispose(); (grid.material as import("three").Material).dispose(); renderer.dispose(); renderer.domElement.remove(); };
       } catch (cause) { if (!disposed) setError(cause instanceof Error ? cause.message : "WebGL unavailable"); }
     })();
     return () => { disposed = true; dispose(); };
   }, [geometry]);
   return <section className="r7-empty-viewport r7-authored-viewport" aria-label="Feature review mesh" data-revision-id={revisionId} data-testid="feature-mesh-viewport">
-    <div className="r7-three" ref={host} />
+    <div className="r7-three" ref={host} data-measurement-phase={measurement.phase} />
     <div className="r7-axis">Review mesh only · CAD Z ↑<br />mm · not fabrication approved</div>
     {error && <p role="status">3D preview unavailable: {error}</p>}
   </section>;

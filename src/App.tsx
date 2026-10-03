@@ -756,8 +756,8 @@ function FixtureTree({
 }
 
 const UNAVAILABLE_COMMANDS: Readonly<Record<Exclude<FixtureCommandCategory, "inspect">, readonly string[]>> = {
-  features: ["New Sketch", "Extrude", "Revolve", "Hole", "Linear Pattern", "Fillet", "Chamfer"],
-  sketch: ["Line", "Rectangle", "Circle", "Dimension"],
+  features: ["Extrude", "Revolve", "Hole", "Linear Pattern", "Fillet", "Chamfer"],
+  sketch: ["New Sketch", "Line", "Rectangle", "Circle", "Dimension"],
   assembly: ["Insert Component", "Move Component", "Fix/Float"],
   mates: ["Distance", "Concentric", "Coincident"],
 };

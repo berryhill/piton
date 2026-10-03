@@ -15,6 +15,9 @@ import { readFeatures, type PartFeature } from "./modeling/source";
 import type { FeatureEvaluation } from "./modeling/evaluator";
 import FeatureMeshViewport from "./modeling/FeatureMeshViewport";
 import { evaluateFeatureSourceInWorker } from "./modeling/client";
+import { PartCommandUI } from "./modeling/PartCommandUI";
+import { emptyFeatureSource } from "./modeling/source";
+import type { FixtureReviewMeasurement, FixtureReviewPoint } from "./fixture";
 
 declare global { interface Window { pitonWorkspace: WorkspaceApplication; } }
 export default function ProjectWorkspace({application}: {application: WorkspaceApplication}) {
@@ -205,7 +208,7 @@ function EmptyPartModelTree({document,onSelect}:{document:PartDocument;onSelect:
     else if(event.key==="ArrowLeft"){if(node.children&&expanded.includes(node.id))toggle(node.id);else if(parents.has(node.id))focus(parents.get(node.id)!);}
     else if(event.key==="Enter"||event.key===" ")setSelected(node.id);
   }}><div className="r7-tree-row"><span className="r7-tree-disclosure" aria-hidden="true" onClick={event=>{if(node.children){event.stopPropagation();focus(node.id);toggle(node.id);}}}>{node.children?(expanded.includes(node.id)?"▾":"▸"):"·"}</span><span>{node.label}</span></div>{node.children&&expanded.includes(node.id)&&<div role="group">{renderNodes(node.children)}</div>}</div>);
-  return <section className="r7-model-tree"><h2 className="r7-panel-head">Model tree</h2><div role="tree" aria-label={`${document.name} model tree`}>{renderNodes(nodes)}</div><section className="r7-tree-details" aria-label="Model selection details"><h3>{document.name} · {all.get(selected)?.label}</h3><p>{all.get(selected)?.detail}</p></section><div className="r7-tree-commands"><button disabled title="Sketch authoring is not implemented">New Sketch</button><button disabled title="Extrusion authoring is not implemented">Extrude</button></div></section>;
+  return <section className="r7-model-tree"><h2 className="r7-panel-head">Model tree</h2><div role="tree" aria-label={`${document.name} model tree`}>{renderNodes(nodes)}</div><section className="r7-tree-details" aria-label="Model selection details"><h3>{document.name} · {all.get(selected)?.label}</h3><p>{all.get(selected)?.detail}</p></section></section>;
 }
 function EmptyProjectViewport({empty,partName,panel,togglePanel}:{empty:boolean;partName?:string;panel:"project"|"change"|null;togglePanel:(panel:"project"|"change")=>void}) {
   const host=useRef<HTMLDivElement>(null);
@@ -342,41 +345,90 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const [preview,setPreview]=useState<Awaited<ReturnType<WorkspaceApplication["proposeFeatures"]>>|null>(null);
-  const [geometry,setGeometry]=useState<FeatureEvaluation|null>(null);
+  const [geometry,setGeometry]=useState<{mesh:FeatureEvaluation;scope:string}|null>(null);
+  const [measurement,setMeasurement]=useState<{scope:string;value:FixtureReviewMeasurement}|null>(null);
   const [message,setMessage]=useState("");
-  const generation=useRef(0), mounted=useRef(false), operation=useRef(false);
+  const [sketchDirty,setSketchDirty]=useState(false);
+  const [draftBase,setDraftBase]=useState<string|null>(()=>part&&isFeaturePart(part.part)?Object.keys(part.revisionIds).find(id=>part.revisionIds[id]===part.part.currentRevisionId)??null:null);
+  const [conflict,setConflict]=useState(false);
+  const [sketchReset,setSketchReset]=useState(0);
+  const generation=useRef(0), geometryGeneration=useRef(0), mounted=useRef(false), operation=useRef(false);
   const readonly=!!archived||!!revisionId;
   const currentPointer=part&&current?Object.keys(part.revisionIds).find(id=>part.revisionIds[id]===current.id):null;
-  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;generation.current++;};},[]);
+  const draftDirty=sketchDirty||!!preview||source!==(current?.authored.source??EMPTY_FEATURE_SOURCE_PLACEHOLDER);
+  const blocked=conflict||draftBase!==(currentPointer??null);
+  const reload=()=>{
+    generation.current++;geometryGeneration.current++;
+    if(preview)application.cancelFeatureProposal(preview.proposal);
+    setPreview(null);setGeometry(null);setMeasurement(null);
+    setSource(current?.authored.source??EMPTY_FEATURE_SOURCE_PLACEHOLDER);
+    setDraftBase(currentPointer??null);setConflict(false);setSketchReset(value=>value+1);
+    setSketchDirty(false);setError("");setMessage("");
+  };
+  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;generation.current++;geometryGeneration.current++;};},[]);
+  useEffect(()=>{if(!active)setMeasurement(null);},[active]);
   useEffect(()=>{
     if(!shown)return;
-    const token=++generation.current;
+    const token=++geometryGeneration.current;
     setGeometry(null);
-    void evaluateFeatureSourceInWorker(shown.authored).then(result=>{if(mounted.current&&token===generation.current)setGeometry(result);}).catch(e=>{if(mounted.current&&token===generation.current)setError(e instanceof Error?e.message:"Review mesh unavailable");});
-  },[shown?.id]);
-  useEffect(()=>{if(current&&!preview)setSource(current.authored.source);},[current?.id]);
-  useEffect(()=>{if(part)reportDraft?.(part.id,{dirty:!!preview||source!==(current?.authored.source??EMPTY_FEATURE_SOURCE_PLACEHOLDER),busy,preview:!!preview});},[part?.id,source,current?.id,busy,preview,reportDraft]);
+    if(!revisionId&&preview&&draftBase===(currentPointer??null)) {
+      setGeometry({mesh:preview.geometry,scope:preview.candidate.id});
+      return;
+    }
+    void evaluateFeatureSourceInWorker(shown.authored).then(result=>{if(mounted.current&&token===geometryGeneration.current)setGeometry({mesh:result,scope:shown.id});}).catch(e=>{if(mounted.current&&token===geometryGeneration.current)setError(e instanceof Error?e.message:"Review mesh unavailable");});
+  },[shown?.id,revisionId]);
+  const previousCurrent=useRef(current?.authored.source??EMPTY_FEATURE_SOURCE_PLACEHOLDER);
+  useEffect(()=>{
+    if(draftBase===(currentPointer??null))return;
+    if(sketchDirty||preview||source!==previousCurrent.current) {
+      generation.current++;
+      if(preview)application.cancelFeatureProposal(preview.proposal);
+      setPreview(null);setGeometry(null);setMeasurement(null);setConflict(true);
+    } else {
+      setDraftBase(currentPointer??null);
+      setSource(current?.authored.source??EMPTY_FEATURE_SOURCE_PLACEHOLDER);
+    }
+    previousCurrent.current=current?.authored.source??EMPTY_FEATURE_SOURCE_PLACEHOLDER;
+  },[currentPointer]);
+  useEffect(()=>{if(part)reportDraft?.(part.id,{dirty:draftDirty,busy,preview:!!preview&&!blocked});},[part?.id,draftDirty,busy,preview,blocked,reportDraft]);
   if (!part) return null;
-  const invalidate=()=>{generation.current++;if(preview)application.cancelFeatureProposal(preview.proposal);setPreview(null);};
+  const visiblePreview=!revisionId&&!blocked?preview:null;
+  const scope=visiblePreview?.candidate.id??shown?.id??"";
+  const admitted=active&&!!geometry&&geometry.scope===scope;
+  const currentMeasurement=admitted&&measurement?.scope===scope?measurement.value:{phase:"idle"} as FixtureReviewMeasurement;
+  const measure=()=>{if(admitted)setMeasurement({scope,value:{phase:"armed"}});};
+  const clearMeasurement=()=>setMeasurement(null);
+  const point=(point:FixtureReviewPoint)=>{
+    if(!admitted||!point.every(Number.isFinite))return;
+    setMeasurement(previous=>{
+      if(previous?.scope!==scope)return previous;
+      const value=previous.value;
+      if(value.phase==="armed")return {scope,value:{phase:"endpoint-a",endpointA:point,hoverEndpoint:null}};
+      if(value.phase==="endpoint-a"&&value.endpointA)return {scope,value:{phase:"complete",endpointA:value.endpointA,endpointB:point}};
+      return previous;
+    });
+  };
+  const hover=(point:FixtureReviewPoint|null)=>setMeasurement(previous=>previous?.scope===scope&&previous.value.phase==="endpoint-a"?{scope,value:{...previous.value,hoverEndpoint:point}}:previous);
+  const invalidate=()=>{generation.current++;geometryGeneration.current++;if(preview)application.cancelFeatureProposal(preview.proposal);setPreview(null);setGeometry(null);setMeasurement(null);};
   const submit=async()=>{
-    if(operation.current||readonly||pending)return;
+    if(operation.current||readonly||pending||blocked)return;
     invalidate();
     const token=++generation.current;
     operation.current=true;setBusy(true);setError("");setMessage("");
     try {
       const features=parseFeatureSource(source);
       if (!features.length) throw new Error("No named features parsed from source. Use part.rectangle / circle / extrude / hole calls.");
-      const proposal:FeatureProposal={projectId,documentId:part.id,expectedRevisionId:currentPointer??null,idempotencyKey:crypto.randomUUID(),units:"mm",features,...(current?{operation:"replace" as const}:{})};
+      const proposal:FeatureProposal={projectId,documentId:part.id,expectedRevisionId:draftBase,idempotencyKey:crypto.randomUUID(),units:"mm",features,...(current?{operation:"replace" as const}:{})};
       const result=await application.proposeFeatures(proposal);
-      if(mounted.current&&token===generation.current){setPreview(result);setGeometry(result.geometry);setMessage("Preview only · not committed. Inspect the review mesh, then explicitly commit.");}
+      if(mounted.current&&token===generation.current){setPreview(result);setGeometry({mesh:result.geometry,scope:result.candidate.id});setMessage("Preview only · not committed. Inspect the review mesh, then explicitly commit.");}
       else application.cancelFeatureProposal(result.proposal);
     }catch(e){if(mounted.current)setError(e instanceof Error?e.message:"Preview failed");}
     finally{operation.current=false;if(mounted.current)setBusy(false);}
   };
   const commit=async()=>{
-    if(!preview||operation.current||readonly||pending)return;
+    if(!preview||operation.current||readonly||pending||blocked)return;
     operation.current=true;setBusy(true);setError("");
-    try {const id=await application.commitFeatures(preview.proposal);if(!mounted.current)return;setPreview(null);setMessage(`Revision committed: ${id} · engineering approval not granted.`);await refresh();}
+    try {const id=await application.commitFeatures(preview.proposal);if(!mounted.current)return;setDraftBase(id);setSource(preview.candidate.authored.source);previousCurrent.current=preview.candidate.authored.source;setPreview(null);setGeometry(null);setMeasurement(null);setMessage(`Revision committed: ${id} · engineering approval not granted.`);await refresh();}
     catch(e){if(mounted.current)setError(e instanceof Error?e.message:"Commit failed");}
     finally{operation.current=false;if(mounted.current)setBusy(false);}
   };
@@ -385,15 +437,17 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
       <h2 className="r7-panel-head">{current?"Named features":"First feature source"}</h2>
       <p className="r7-section-help">{part.name} · browser-typescript/v1 · mm · review mesh only. Source is authored only on explicit commit.</p>
       {current&&<nav aria-label="Feature revision history">{part.part.revisions.map((revision,index)=>{const pointer=Object.keys(part.revisionIds).find(id=>part.revisionIds[id]===revision.id);return <button key={revision.id} onClick={()=>navigate?.(`/projects/${projectId}/documents/${part.id}/revisions/${pointer}`)}>Revision {index+1}</button>;})}{revisionId&&<button onClick={()=>navigate?.(`/projects/${projectId}/documents/${part.id}`)}>Open current revision</button>}</nav>}
+      {!revisionId&&blocked&&<><p role="alert">Part changed since this draft began. Local draft preserved; reload the latest revision or reconcile before preview or commit.</p><button type="button" disabled={busy} onClick={reload}>Reload latest revision</button></>}
       <label className="r7-feature-source-label">Named feature source<textarea aria-label="Named feature source" data-testid="feature-source-input" value={revisionId?shown?.authored.source??source:source} onChange={e=>{invalidate();setSource(e.target.value);}} disabled={busy||readonly} spellCheck={false} /></label>
-      <div className="r7-feature-source-actions"><button type="button" className="workspace-primary" data-testid="submit-first-feature" disabled={busy||readonly||!source.trim()||pending} onClick={()=>void submit()}>{busy?"Evaluating…":"Preview features"}</button>
-        <button type="button" disabled={busy||readonly} onClick={()=>{invalidate();setSource(current?.authored.source??EMPTY_FEATURE_SOURCE_PLACEHOLDER);setError("");}}>Discard draft</button>
-        <button type="button" disabled={!preview||busy||readonly} onClick={()=>void commit()}>Commit feature revision</button></div>
-      {preview&&<section data-testid="feature-preview"><strong>Preview only · not committed</strong><p>{preview.candidate.id} · {preview.geometry.triangles.length/3} triangles · {preview.geometry.volumeMm3.toFixed(2)} mm³</p></section>}
-      {message&&<p role="status" data-testid="empty-feature-message">{message}</p>}{error&&<p role="alert" data-testid="empty-feature-error">{error}</p>}
+      <div className="r7-feature-source-actions"><button type="button" className="workspace-primary" data-testid="submit-first-feature" disabled={busy||readonly||blocked||!source.trim()||pending} onClick={()=>void submit()}>{busy?"Evaluating…":"Preview features"}</button>
+        <button type="button" disabled={busy||readonly} onClick={reload}>Discard draft</button>
+        </div>
+      {visiblePreview&&<section data-testid="feature-preview"><strong>Preview only · not committed</strong><p>{visiblePreview.candidate.id} · {visiblePreview.geometry.triangles.length/3} triangles · {visiblePreview.geometry.volumeMm3.toFixed(2)} mm³</p></section>}
+      {!revisionId&&message&&<p role="status" data-testid="empty-feature-message">{message}</p>}{error&&<p role="alert" data-testid="empty-feature-error">{error}</p>}
     </section>,targets?.right??globalThis.document.querySelector(".r7-right")??globalThis.document.body)}
+    {targets&&createPortal(<div hidden={!active}><PartCommandUI context={{projectId,documentId:part.id,revisionId:draftBase}} baseSource={revisionId?shown?.authored??emptyFeatureSource():current?.authored??emptyFeatureSource()} source={revisionId?shown?.authored.source??source:!current&&source===EMPTY_FEATURE_SOURCE_PLACEHOLDER?emptyFeatureSource().source:source} onSource={next=>{invalidate();setSource(next);}} readonly={readonly||blocked} busy={busy||pending} previewReady={!!visiblePreview} onPreview={()=>void submit()} onCommit={()=>void commit()} onSketchDirty={setSketchDirty} resetToken={sketchReset} measureAvailable={admitted} measurement={currentMeasurement} onMeasure={measure} onClearMeasurement={clearMeasurement}/></div>,targets.center)}
     {active&&current&&targets&&createPortal(<section className="r7-section" aria-label="Named feature tree"><h2>Model tree</h2><p>{readFeatures(shown?.authored??current.authored).length} named features · 1 review body</p><ul>{readFeatures(shown?.authored??current.authored).map(f=><li key={f.id}>{f.name} · {f.kind}</li>)}</ul></section>,targets.left)}
-    {active&&geometry&&targets&&createPortal(<FeatureMeshViewport geometry={geometry} revisionId={preview?.candidate.id??shown?.id??""}/>,targets.center)}
+    {admitted&&geometry&&targets&&createPortal(<FeatureMeshViewport key={scope} geometry={geometry.mesh} revisionId={scope} measurement={currentMeasurement} onMeasurementPoint={point} onMeasurementHover={hover} onMeasurementCancel={clearMeasurement}/>,targets.center)}
   </>;
 }
 /** Never drop invalid lines: parse through the same strict canonical source reader. */
