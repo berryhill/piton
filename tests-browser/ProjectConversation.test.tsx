@@ -64,6 +64,16 @@ it('surfaces unavailable authentication without fabricated responses',async () =
   vi.stubGlobal('fetch',vi.fn(async () => new Response('{"error":"unauthorized"}',{status:401})));render(<ConversationPanel project={project()} selection={[]}/>);
   await screen.findByText('unauthorized');expect(screen.getByRole('button',{name:'Send'})).toBeDisabled();expect(screen.getByRole('log')).not.toHaveTextContent('Nick');
 });
+it('explains a static HTML fallback without exposing a JSON parser error',async () => {
+  const fetcher = vi.fn(async () => new Response('<!doctype html><html></html>', { headers: { 'Content-Type': 'text/html' } }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<ConversationPanel project={project()} selection={[]}/>);
+  await screen.findByText('Agent backend is not deployed on this server. Manual modeling is available.');
+  expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+  expect(screen.getByRole('log')).not.toHaveTextContent('Nick');
+  expect(screen.queryByText(/Unexpected token/)).not.toBeInTheDocument();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
 it('keeps removable attached references distinct from current highlights',async () => {
   transport();const p=project(),ref=reference(p);render(<ConversationPanel project={p} documentId={p.documents[0].id} selection={[ref]}/>);await ready();
   expect(screen.getByRole('list',{name:'Attached context'})).toBeEmptyDOMElement();fireEvent.click(screen.getByRole('button',{name:'Attach selected reference'}));

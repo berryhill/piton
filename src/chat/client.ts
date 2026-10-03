@@ -8,6 +8,10 @@ export class ChatClient {
     const timeout = AbortSignal.timeout(path === 'conversation' ? 180_000 : 20_000);
     signal = signal ? AbortSignal.any([signal, timeout]) : timeout;
     const response = await fetch(`/api/chat/${path}`, { method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', redirect: 'error', signal, headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(this.csrf ? { 'X-Piton-CSRF': this.csrf } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
+    if (response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() === 'text/html') {
+      await response.body?.cancel();
+      throw new Error('Agent backend is not deployed on this server. Manual modeling is available.');
+    }
     if (!response.ok) {
       const value = await response.json().catch(() => ({})) as { error?: string };
       throw new Error(value.error ?? `chat_http_${response.status}`);
