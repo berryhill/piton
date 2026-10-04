@@ -239,6 +239,7 @@ describe('backend confinement and bridge routing', () => {
     try {
       for (let i = 0; i < 50; i++) {
         expect(await (await f.call('conversation', 'POST', { projectId, message: 'same question' })).text()).toContain('assistant.completed');
+        await waitForProjectCleanup(f.stateDirectory);
       }
       const project = JSON.parse(await fs.readFile(join(f.stateDirectory, 'projects', projectId + '.json'), 'utf8'));
       const store = new SessionStore(join(f.stateDirectory, 'bridge'));
@@ -257,6 +258,7 @@ describe('backend confinement and bridge routing', () => {
       expect(failed).toBe(true);
       expect((await store.load(key)).messages).toEqual(before.messages);
       expect(f.inputs).toHaveLength(51);
+      await waitForProjectCleanup(f.stateDirectory);
       expect((await f.call('recover', 'POST', { projectId })).status).toBe(200);
       const history = await (await f.call('history?projectId=' + projectId)).json();
       expect(history.messages.at(-1)).toEqual({ role: 'assistant', content: 'mock answer' });
@@ -297,6 +299,7 @@ describe('backend confinement and bridge routing', () => {
     const f = await fixture(async () => true);
     try {
       expect(await (await f.call('conversation', 'POST', { projectId, message: 'same question' })).text()).toContain('assistant.completed');
+      await waitForProjectCleanup(f.stateDirectory);
       let failed = false;
       vi.mocked(rename).mockImplementation(async (source, target) => {
         if (!failed && String(target).startsWith(join(f.stateDirectory, 'bridge') + '/')) {
@@ -506,6 +509,7 @@ describe('backend confinement and bridge routing', () => {
       for (const documentId of ['22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333', null]) {
         const response = await f.call('conversation', 'POST', { projectId, documentId, message: `part ${documentId}`, requestId: randomUUID() });
         expect(await response.text()).toContain('assistant.completed');
+        await waitForProjectCleanup(f.stateDirectory);
       }
       const history = await (await f.call('history?projectId=' + projectId)).json();
       expect(history.messages).toHaveLength(6);
