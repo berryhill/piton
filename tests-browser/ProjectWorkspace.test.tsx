@@ -259,7 +259,7 @@ it("preserves parameter, structured and rename drafts across tabs and history, t
   expect(screen.getByLabelText("Part name")).toHaveValue("Draft name");
   fireEvent.click(screen.getByRole("button",{name:"Revision 1 · current"}));
   expect(location.pathname).toBe(`/projects/${projectId}/documents/${documentId}/revisions/${Object.keys(before.revisionIds)[0]}`);
-  expect(screen.getAllByRole("tab")).toHaveLength(2);
+  expect(within(screen.getByRole("tablist",{name:"Open documents"})).getAllByRole("tab")).toHaveLength(2);
   expect(screen.getByLabelText("leg_length_mm")).toBeDisabled();
   fireEvent.click(screen.getByRole("button",{name:"Open current revision"}));
   expect(screen.getByLabelText("leg_length_mm")).toHaveValue(111);

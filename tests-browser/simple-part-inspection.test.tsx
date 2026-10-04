@@ -6,11 +6,15 @@ import ProjectWorkspace from "../src/ProjectWorkspace";
 import { WorkspaceApplication, type WorkspaceStore } from "../src/workspace";
 import { evaluateFeatureSource } from "../src/modeling/evaluator";
 import { reviewMeshPointAt } from "../src/modeling/FeatureMeshViewport";
+import { useEffect } from "react";
 
 vi.mock("../src/components/Viewport",()=>({default:()=>null}));
 vi.mock("../src/modeling/FeatureMeshViewport",async importOriginal=>{
   const actual=await importOriginal<typeof import("../src/modeling/FeatureMeshViewport")>();
-  return {...actual,default:({revisionId,measurement,onMeasurementPoint,onMeasurementCancel}:{revisionId:string;measurement:{phase:string};onMeasurementPoint:(point:readonly [number,number,number])=>void;onMeasurementCancel:()=>void})=><section data-testid="feature-mesh-viewport" data-revision-id={revisionId} data-phase={measurement.phase}><button onClick={()=>onMeasurementPoint([0,0,0])}>Pick A</button><button onClick={()=>onMeasurementPoint([3,4,0])}>Pick B</button><button onClick={onMeasurementCancel}>Escape mesh</button></section>};
+  return {...actual,default:({revisionId,measurement,onMeasurementPoint,onMeasurementCancel,onRendererStatus}:{revisionId:string;measurement:{phase:string};onMeasurementPoint:(point:readonly [number,number,number])=>void;onMeasurementCancel:()=>void;onRendererStatus?:(status:{revisionId:string;state:"ready"|"failed";reason?:string})=>void})=>{
+    useEffect(()=>{onRendererStatus?.({revisionId,state:"ready"});},[revisionId,onRendererStatus]);
+    return <section data-testid="feature-mesh-viewport" data-revision-id={revisionId} data-phase={measurement.phase}><button onClick={()=>onMeasurementPoint([0,0,0])}>Pick A</button><button onClick={()=>onMeasurementPoint([3,4,0])}>Pick B</button><button onClick={onMeasurementCancel}>Escape mesh</button><button onClick={()=>onRendererStatus?.({revisionId,state:"failed",reason:"WebGL context lost"})}>Fail renderer</button></section>;
+  }};
 });
 let kernel:ManifoldToplevel;
 beforeAll(async()=>{kernel=await Module();kernel.setup();});
@@ -71,6 +75,16 @@ it("measures two mesh points in mm, clears/cancels without writing a revision",a
   fireEvent.click(measure);fireEvent.click(screen.getByRole("button",{name:"Pick A"}));
   fireEvent.click(screen.getByRole("button",{name:"Escape mesh"}));
   expect(within(commands()).getByRole("button",{name:"Clear"})).toBeDisabled();
+});
+it("revokes measurement on renderer failure without changing custody",async()=>{
+  const {app,commands}=await setup();await preview(commands);const before=await app.read();
+  fireEvent.click(within(commands()).getByRole("button",{name:"Measure"}));fireEvent.click(screen.getByRole("button",{name:"Pick A"}));
+  fireEvent.click(screen.getByRole("button",{name:"Fail renderer"}));
+  expect(within(commands()).getByRole("button",{name:"Measure"})).toBeDisabled();
+  expect(within(commands()).getByRole("button",{name:"Clear"})).toBeDisabled();
+  expect(screen.getByTestId("feature-measurement")).toHaveTextContent("WebGL context lost");
+  fireEvent.click(screen.getByRole("button",{name:"Pick B"}));expect(screen.getByTestId("feature-measurement")).not.toHaveTextContent("5.00 mm");
+  expect(await app.read()).toEqual(before);
 });
 it("removes measurement across tabs and when preview geometry is invalidated",async()=>{
   const {app,commands,projectId}=await setup();await preview(commands);

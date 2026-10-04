@@ -49,11 +49,44 @@ for(const viewport of [{width:1920,height:1080},{width:1280,height:720},{width:3
     await page.screenshot({path:info.outputPath(`sidebar-solid-${viewport.width}.png`),fullPage:true});
     if(viewport.width<940)await page.getByRole('button',{name:'Change Request',exact:true}).first().click();await page.getByRole('button',{name:'Revision 1',exact:true}).click();await close(page);await expect(mesh).toHaveAttribute('data-revision-id',ids.content);await hierarchy(page,'Plate');await expect(page.getByRole('heading',{name:'Model tree · historical',exact:true})).toBeVisible();
     expect(errors).toEqual([]);
+    if(viewport.width===1280) {
+      await close(page);const commands=page.getByRole('region',{name:'Part commands'});
+      await commands.getByRole('tab',{name:'Inspect',exact:true}).click();
+      await expect(commands.getByRole('button',{name:'Measure',exact:true})).toBeEnabled();
+      const before=await page.evaluate(async()=>JSON.stringify(await window.pitonWorkspace.read()));
+      await commands.getByRole('button',{name:'Measure',exact:true}).click();
+      await mesh.locator('canvas').press('Enter');await expect(mesh.locator('.r7-three')).toHaveAttribute('data-measurement-phase','endpoint-a');
+      await mesh.locator('canvas').evaluate(canvas=>canvas.dispatchEvent(new Event('webglcontextlost',{cancelable:true})));
+      await expect(commands.getByRole('button',{name:'Measure',exact:true})).toBeDisabled();
+      await expect(commands.getByRole('button',{name:'Clear',exact:true})).toBeDisabled();
+      await expect(commands.getByTestId('feature-measurement')).toContainText('WebGL context lost');
+      await mesh.locator('canvas').press('Enter');await expect(mesh.locator('.r7-three')).toHaveAttribute('data-measurement-phase','idle');
+      expect(await page.evaluate(async()=>JSON.stringify(await window.pitonWorkspace.read()))).toBe(before);
+    }
   });
 }
+test('feature inspection reports real WebGL initialization failure and never arms picking',async({page})=>{
+  await page.addInitScript(`(() => { const original=HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext=function(kind,...args){return ['webgl','webgl2','experimental-webgl'].includes(kind)?null:original.call(this,kind,...args);}; })()`);
+  const {projectUrl}=await importBracketFixture(page,'Renderer failure','Bracket');const projectId=new URL(projectUrl).pathname.split('/')[2];
+  const url=await page.evaluate(async(projectId)=>{
+    const app=window.pitonWorkspace,documentId=await app.createPart(projectId,'Plate');
+    const proposal=await app.proposeFeatures({projectId,documentId,expectedRevisionId:null,idempotencyKey:crypto.randomUUID(),units:'mm',features:[{kind:'rectangle',id:'outline',name:'Plate outline',plane:'XY',width:80,height:50},{kind:'extrude',id:'body',name:'Plate thickness',profileId:'outline',distance:6}]});
+    await app.commitFeatures(proposal.proposal);return `/projects/${projectId}/documents/${documentId}`;
+  },projectId);
+  await page.goto(url);const commands=page.getByRole('region',{name:'Part commands'});
+  await commands.getByRole('tab',{name:'Inspect',exact:true}).click();
+  await expect(commands.getByTestId('feature-measurement')).toContainText('WebGL');
+  await expect(commands.getByRole('button',{name:'Measure',exact:true})).toBeDisabled();
+  await expect(commands.getByRole('button',{name:'Clear',exact:true})).toBeDisabled();
+});
 test('imported parameter preview/tree/history stays parameter authority with shared camera',async({page})=>{
   test.setTimeout(90000);const {documentUrl}=await importBracketFixture(page,'Imported projection','Bracket');await hierarchy(page,'Bracket');
   await expect(page.getByRole('treeitem',{name:'Parameters (6)'})).toBeVisible();await expect(page.getByRole('treeitem',{name:/ · (rectangle|extrude)$/})).toHaveCount(0);
+  const commands=page.getByRole('region',{name:'Part commands'});
+  expect(await commands.getByRole('tab').allTextContents()).toEqual(['Sketch','Features','Inspect']);
+  await commands.getByRole('tab',{name:'Sketch',exact:true}).click();await expect(commands.getByRole('button',{name:'New Sketch',exact:true})).toBeDisabled();await expect(commands).toContainText('Imported parameter-authority');
+  await commands.getByRole('tab',{name:'Features',exact:true}).click();for(const name of ['Extrude','Revolve','Hole','Linear Pattern','Fillet','Chamfer'])await expect(commands.getByRole('button',{name,exact:true})).toBeDisabled();
+  await commands.getByRole('tab',{name:'Inspect',exact:true}).click();
   await page.getByRole('spinbutton',{name:'leg_length_mm',exact:true}).fill('112');await page.getByRole('button',{name:'Propose and preview',exact:true}).click();await expect(page.getByRole('button',{name:'Commit revision',exact:true})).toBeEnabled();
   await expect(page.getByRole('heading',{name:'Model tree · preview',exact:true})).toBeVisible();
   await page.getByRole('treeitem',{name:'Parameters (6)'}).press('ArrowRight');await page.getByRole('treeitem',{name:'leg_length_mm',exact:true}).click();await expect(page.getByRole('region',{name:'Model selection details'})).toContainText('112');
@@ -70,5 +103,6 @@ test('imported parameter preview/tree/history stays parameter authority with sha
   await expect(page.getByTestId('viewport')).toHaveAttribute('data-measurement-phase','idle');
   expect(await page.evaluate(async()=>JSON.stringify((await window.pitonWorkspace.read()).projects[0].documents[0].part))).toBe(beforeMeasurement);
   await page.getByRole('button',{name:'Commit revision',exact:true}).click();await expect(page.getByRole('heading',{name:'Model tree · committed',exact:true})).toBeVisible();await page.getByRole('button',{name:'Revision 1',exact:true}).click();await expect(page.getByRole('spinbutton',{name:'leg_length_mm',exact:true})).toHaveValue('80');await expect(page.getByRole('heading',{name:'Model tree · historical',exact:true})).toBeVisible();
+  await commands.getByRole('tab',{name:'Features',exact:true}).click();await expect(commands).toContainText('read-only');await commands.getByRole('tab',{name:'Inspect',exact:true}).click();
   await page.getByRole('button',{name:'Open current revision',exact:true}).click();await expect(page).toHaveURL(documentUrl);await expect(page.getByRole('spinbutton',{name:'leg_length_mm',exact:true})).toHaveValue('112');
 });

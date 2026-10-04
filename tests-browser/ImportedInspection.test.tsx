@@ -37,6 +37,19 @@ async function setup() {
 }
 const inspect = () => screen.getByRole("group", { name: "Imported review inspection" });
 const admit = () => fireEvent.click(screen.getByRole("button", { name: "Admit review mesh" }));
+it("shares ordered categories and discloses unsupported imported mutations without converting custody", async () => {
+  const { app, projectId } = await setup(); const before = await app.exportProject(projectId);
+  const commands = screen.getByRole("region", { name: "Part commands" });
+  expect(within(commands).getAllByRole("tab").map(node => node.textContent)).toEqual(["Sketch", "Features", "Inspect"]);
+  fireEvent.click(within(commands).getByRole("tab", { name: "Sketch" }));
+  expect(within(commands).getByRole("button", { name: "New Sketch" })).toBeDisabled();
+  expect(commands).toHaveTextContent("Imported parameter-authority");
+  fireEvent.click(within(commands).getByRole("tab", { name: "Features" }));
+  for (const name of ["Extrude", "Revolve", "Hole", "Linear Pattern", "Fillet", "Chamfer"]) expect(within(commands).getByRole("button", { name })).toBeDisabled();
+  fireEvent.click(within(commands).getByRole("tab", { name: "Inspect" }));
+  admit(); expect(within(inspect()).getByRole("button", { name: "Measure" })).toBeEnabled();
+  expect(await app.exportProject(projectId)).toEqual(before);
+});
 it("arms, hovers, measures and clears only the imported review mesh, without changing custody", async () => {
   const { app, projectId } = await setup(); const initial = await app.exportProject(projectId);
   expect(within(inspect()).getByRole("button", { name: "Measure" })).toBeDisabled();

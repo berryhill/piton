@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Viewport from "./components/Viewport";
 import { CadApplication } from "./application";
@@ -13,9 +13,9 @@ import { ConversationPanel } from "./chat/ConversationPanel";
 import type { SelectionReference } from "./chat/context";
 import { readFeatures, type PartFeature } from "./modeling/source";
 import type { FeatureEvaluation } from "./modeling/evaluator";
-import FeatureMeshViewport from "./modeling/FeatureMeshViewport";
+import FeatureMeshViewport, {type FeatureRendererStatus} from "./modeling/FeatureMeshViewport";
 import { assertFeatureEvaluation, evaluateFeatureSourceInWorker } from "./modeling/client";
-import { PartCommandUI } from "./modeling/PartCommandUI";
+import { PartCommandUI, PartCategoryTabs, type PartCategory } from "./modeling/PartCommandUI";
 import { emptyFeatureSource } from "./modeling/source";
 import type { FeatureSource } from "./modeling/source";
 import type { FixtureReviewMeasurement, FixtureReviewPoint } from "./fixture";
@@ -333,7 +333,7 @@ function PartEditor({application,projectId,document,revisionId,archived,refresh,
   const hover=(picked:FixtureReviewPoint|null)=>setMeasurement(previous=>previous?.scope===scope&&previous.value.phase==="endpoint-a"?{scope,value:{...previous.value,hoverEndpoint:picked}}:previous);
   const distance=currentMeasurement.endpointA&&currentMeasurement.endpointB?Math.hypot(...currentMeasurement.endpointA.map((value,index)=>value-currentMeasurement.endpointB![index])):null;
   return <>
-    {active&&createPortal(<div role="group" aria-label="Imported review inspection"><button disabled={!admitted} title={admitted?undefined:"Revision-matched admitted review mesh required; wait for geometry or resolve preview/conflict"} onClick={()=>{if(admitted)setMeasurement({scope,value:{phase:"armed"}});}}>Measure</button><button disabled={currentMeasurement.phase==="idle"} title={currentMeasurement.phase==="idle"?"No active review-mesh measurement":undefined} onClick={clearMeasurement}>Clear</button><p data-testid="imported-measurement">{distance!==null?`${distance.toFixed(2)} mm · review-only, not exact B-rep`:currentMeasurement.phase==="armed"?"Select first point on the review mesh":currentMeasurement.phase==="endpoint-a"?"Select second point on the review mesh":admitted?"Choose Measure for a two-point review-mesh distance":"Measurement unavailable until revision-matched review geometry is admitted"}</p></div>,targets.commands)}
+    {active&&createPortal(<ImportedPartCommands readonly={readonly}><div role="group" aria-label="Imported review inspection"><button disabled={!admitted} title={admitted?undefined:"Revision-matched admitted review mesh required; wait for geometry or resolve preview/conflict"} onClick={()=>{if(admitted)setMeasurement({scope,value:{phase:"armed"}});}}>Measure</button><button disabled={currentMeasurement.phase==="idle"} title={currentMeasurement.phase==="idle"?"No active review-mesh measurement":undefined} onClick={clearMeasurement}>Clear</button><p data-testid="imported-measurement">{distance!==null?`${distance.toFixed(2)} mm · review-only, not exact B-rep`:currentMeasurement.phase==="armed"?"Select first point on the review mesh":currentMeasurement.phase==="endpoint-a"?"Select second point on the review mesh":admitted?"Choose Measure for a two-point review-mesh distance":"Measurement unavailable until revision-matched review geometry is admitted"}</p></div></ImportedPartCommands>,targets.commands)}
     {active&&createPortal(<div><section className="r7-section"><nav><button onClick={()=>navigate(`/projects/${projectId}`)}>Project overview</button>{readonly&&<button onClick={()=>navigate(url)}>Open current revision</button>}</nav><p>{readonly?"Historical / archived document — read-only":"Editable imported Part · L-bracket"}</p><h2>Parameters (mm)</h2>
     {blocked&&<p role="alert">Document changed outside this draft. Reload the latest revision before authoring; your unsaved draft has been preserved.</p>}{blocked&&<button disabled={busy} onClick={reload}>Reload latest revision</button>}
     <fieldset disabled={readonly || busy || blocked}>{Object.entries(parameters).map(([key,value])=><label key={key}>{key}<input aria-label={key} type="number" step="0.1" value={Number.isFinite(value) ? value : ""} onChange={e=>{proposalGeneration.current += 1;setParameters({...parameters,[key]:e.target.valueAsNumber});setPreview(null);setReady(false);setMesh(null);setMeasurement(null);}}/></label>)}
@@ -351,6 +351,11 @@ function PartEditor({application,projectId,document,revisionId,archived,refresh,
 }
 /** Canonical bounded source text — kept in sync with src/modeling/source.ts HEADER
  * so users see the exact wire format the application enforces. */
+function ImportedPartCommands({children,readonly}:{children:ReactNode;readonly:boolean}) {
+  const id=useId();const [category,setCategory]=useState<PartCategory>("Inspect");
+  const reason=readonly?"Historical / archived imported Part is read-only; Sketch and feature mutations are unavailable.":"Imported parameter-authority Part has no named-feature history; edit its parameters instead of Sketch or feature mutations.";
+  return <section className="r7-command-ui" aria-label="Part commands"><PartCategoryTabs id={id} category={category} onSelect={setCategory}/><div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${category}`}>{category==="Inspect"?children:<><div className="r7-command-tools">{(category==="Sketch"?["New Sketch","Line","Rectangle","Circle","Dimension"]:["Extrude","Revolve","Hole","Linear Pattern","Fillet","Chamfer"]).map(name=><button key={name} disabled title={reason}>{name}</button>)}</div><p className="r7-section-help">{reason}</p></>}</div></section>;
+}
 const EMPTY_FEATURE_SOURCE_PLACEHOLDER =
   '// Piton browser-typescript/v1; units=mm; restricted named-feature source\n' +
   'part.rectangle({"id":"outline","name":"Plate outline","plane":"XY","width":80,"height":50});\n' +
@@ -384,6 +389,8 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
   const [message,setMessage]=useState("");
   const [sketchDirty,setSketchDirty]=useState(false);
   const [sketchVisible,setSketchVisible]=useState(false);
+  const [rendererStatus,setRendererStatus]=useState<FeatureRendererStatus|null>(null);
+  const reportRenderer=useCallback((status:FeatureRendererStatus)=>{setRendererStatus(status);if(status.state!=="ready")setMeasurement(previous=>previous?.scope===status.revisionId?null:previous);},[]);
   const [draftBase,setDraftBase]=useState<string|null>(()=>part&&isFeaturePart(part.part)?Object.keys(part.revisionIds).find(id=>part.revisionIds[id]===part.part.currentRevisionId)??null:null);
   const [conflict,setConflict]=useState(false);
   const [sketchReset,setSketchReset]=useState(0);
@@ -431,6 +438,8 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
   useEffect(()=>{reportCandidate(part.id,visiblePreview?{kind:'features',documentId:part.id,baseRevisionId:draftBase,id:visiblePreview.candidate.id,authored:visiblePreview.candidate.authored}:undefined);},[part.id,draftBase,visiblePreview?.candidate.id,reportCandidate]);
   const scope=visiblePreview?.candidate.id??shown?.id??"";
   const admitted=active&&!!geometry&&geometry.scope===scope;
+  const pickingReady=admitted&&!sketchVisible&&rendererStatus?.revisionId===scope&&rendererStatus.state==="ready";
+  const measureUnavailableReason=!admitted?"No admitted review mesh to measure":sketchVisible?"Finish or cancel the sketch to inspect review geometry":rendererStatus?.revisionId===scope?rendererStatus.reason??"Review renderer initializing":"Review renderer initializing";
   const displayedSource=visiblePreview?.candidate.authored??shown?.authored;
   const sourcePointer=visiblePreview?null:revisionId??currentPointer;
   const outputMode=revisionId?"Historical committed":visiblePreview?"Uncommitted preview":shown?"Current committed":"Empty Part";
@@ -438,11 +447,11 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
   if(displayedSource&&admitted&&geometryState==="ready"&&!blocked) {
     try {assertFeatureEvaluation(displayedSource,geometry!.mesh);exportable=true;} catch { /* Do not expose rejected or mismatched worker geometry. */ }
   }
-  const currentMeasurement=admitted&&measurement?.scope===scope?measurement.value:{phase:"idle"} as FixtureReviewMeasurement;
-  const measure=()=>{if(admitted)setMeasurement({scope,value:{phase:"armed"}});};
+  const currentMeasurement=pickingReady&&measurement?.scope===scope?measurement.value:{phase:"idle"} as FixtureReviewMeasurement;
+  const measure=()=>{if(pickingReady)setMeasurement({scope,value:{phase:"armed"}});};
   const clearMeasurement=()=>setMeasurement(null);
   const point=(point:FixtureReviewPoint)=>{
-    if(!admitted||!point.every(Number.isFinite))return;
+    if(!pickingReady||!point.every(Number.isFinite))return;
     setMeasurement(previous=>{
       if(previous?.scope!==scope)return previous;
       const value=previous.value;
@@ -497,9 +506,9 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
       {visiblePreview&&<section data-testid="feature-preview"><strong>Preview only · not committed</strong><p>{visiblePreview.candidate.id} · {visiblePreview.geometry.triangles.length/3} triangles · {visiblePreview.geometry.volumeMm3.toFixed(2)} mm³</p></section>}
       {!revisionId&&message&&<p role="status" data-testid="empty-feature-message">{message}</p>}{error&&<p role="alert" data-testid="empty-feature-error">{error}</p>}
     </section>,targets?.right??globalThis.document.querySelector(".r7-right")??globalThis.document.body)}
-    {targets&&createPortal(<div hidden={!active}><PartCommandUI active={active} context={{projectId,documentId:part.id,revisionId:draftBase}} baseSource={revisionId?shown?.authored??emptyFeatureSource():current?.authored??emptyFeatureSource()} source={revisionId?shown?.authored.source??source:!current&&source===EMPTY_FEATURE_SOURCE_PLACEHOLDER?emptyFeatureSource().source:source} onSource={next=>{invalidate();setSource(next);}} readonly={readonly||blocked} busy={busy||pending} previewReady={!!visiblePreview} onPreview={()=>void submit()} onCommit={()=>void commit()} onSketchDirty={setSketchDirty} onSketchVisible={setSketchVisible} onOpenProperties={openProperties} propertyTarget={targets.right} viewportTarget={targets.center} resetToken={sketchReset} measureAvailable={admitted} measurement={currentMeasurement} onMeasure={measure} onClearMeasurement={clearMeasurement}/></div>,targets.commands)}
+    {targets&&createPortal(<div hidden={!active}><PartCommandUI active={active} context={{projectId,documentId:part.id,revisionId:draftBase}} baseSource={revisionId?shown?.authored??emptyFeatureSource():current?.authored??emptyFeatureSource()} source={revisionId?shown?.authored.source??source:!current&&source===EMPTY_FEATURE_SOURCE_PLACEHOLDER?emptyFeatureSource().source:source} onSource={next=>{invalidate();setSource(next);}} readonly={readonly||blocked} busy={busy||pending} previewReady={!!visiblePreview} onPreview={()=>void submit()} onCommit={()=>void commit()} onSketchDirty={setSketchDirty} onSketchVisible={setSketchVisible} onOpenProperties={openProperties} propertyTarget={targets.right} viewportTarget={targets.center} resetToken={sketchReset} measureAvailable={pickingReady} measureUnavailableReason={measureUnavailableReason} measurement={currentMeasurement} onMeasure={measure} onClearMeasurement={clearMeasurement}/></div>,targets.commands)}
 
-    {active&&!sketchVisible&&admitted&&geometry&&targets&&createPortal(<FeatureMeshViewport key={scope} viewKey={`${projectId}:${part.id}:${scope}`} geometry={geometry.mesh} revisionId={scope} measurement={currentMeasurement} onMeasurementPoint={point} onMeasurementHover={hover} onMeasurementCancel={clearMeasurement}/>,targets.center)}
+    {active&&!sketchVisible&&admitted&&geometry&&targets&&createPortal(<FeatureMeshViewport key={scope} viewKey={`${projectId}:${part.id}:${scope}`} geometry={geometry.mesh} revisionId={scope} measurement={currentMeasurement} onMeasurementPoint={point} onMeasurementHover={hover} onMeasurementCancel={clearMeasurement} onRendererStatus={reportRenderer}/>,targets.center)}
     {active&&!sketchVisible&&!admitted&&targets&&createPortal(shown||busy||geometryState==="failed"?<section className="r7-empty-viewport r7-geometry-status" data-testid="feature-geometry-status" role={geometryState==="failed"?"alert":"status"}>
       <strong>{geometryState==="failed"?"Review geometry unavailable":geometryState==="invalidated"?"Review preview invalidated":revisionId?"Loading historical review geometry":"Loading review geometry"}</strong>
       <p>{shown?"Saved Part source and revision history remain available; this is not an empty Part.":"Draft is not committed; no saved geometry was created."}</p>

@@ -17,20 +17,25 @@ export function reviewMeshPointAt(raycaster: Three.Raycaster, camera: Three.Came
 }
 
 /** A review-only projection of the evaluated Manifold triangles, not CAD authority. */
-export default function FeatureMeshViewport({ geometry, revisionId, viewKey, measurement={phase:"idle"}, onMeasurementPoint, onMeasurementHover, onMeasurementCancel }: {
+export interface FeatureRendererStatus { revisionId:string;state:"initializing"|"ready"|"failed"|"unavailable";reason?:string; }
+export default function FeatureMeshViewport({ geometry, revisionId, viewKey, measurement={phase:"idle"}, onMeasurementPoint, onMeasurementHover, onMeasurementCancel, onRendererStatus }: {
   geometry: FeatureEvaluation; revisionId: string; viewKey?: string; measurement?: FixtureReviewMeasurement;
   onMeasurementPoint?: (point:FixtureReviewPoint)=>void; onMeasurementHover?: (point:FixtureReviewPoint|null)=>void; onMeasurementCancel?:()=>void;
+  onRendererStatus?:(status:FeatureRendererStatus)=>void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
+  const pickingReady=useRef(false);
   const interaction=useRef({measurement,onMeasurementPoint,onMeasurementHover,onMeasurementCancel});
   interaction.current={measurement,onMeasurementPoint,onMeasurementHover,onMeasurementCancel};
   const updateOverlay=useRef<(value:FixtureReviewMeasurement)=>void>(()=>{});
   useEffect(()=>{updateOverlay.current(measurement);},[measurement]);
   useEffect(() => {
     setReady(false);
+    pickingReady.current=false;
     setError("");
+    onRendererStatus?.({revisionId,state:"initializing",reason:"Review renderer initializing"});
     let disposed = false;
     let dispose = () => {};
     void (async () => {
@@ -86,7 +91,7 @@ export default function FeatureMeshViewport({ geometry, revisionId, viewKey, mea
         view("reset");
         restoreCamera(viewKey, camera, controls);
         const raycaster=new THREE.Raycaster();
-        const pick=(x:number,y:number)=>reviewMeshPointAt(raycaster,camera,mesh,renderer.domElement.getBoundingClientRect(),x,y);
+        const pick=(x:number,y:number)=>pickingReady.current?reviewMeshPointAt(raycaster,camera,mesh,renderer.domElement.getBoundingClientRect(),x,y):null;
         const keyboardPick=()=>{const rect=renderer.domElement.getBoundingClientRect();for(const y of [0.5,0.4,0.6,0.3,0.7])for(const x of [0.5,0.4,0.6,0.3,0.7]){const point=pick(rect.left+rect.width*x,rect.top+rect.height*y);if(point)return point;}return null;};
         let down={x:0,y:0};
         const pointerDown=(event:PointerEvent)=>{down={x:event.clientX,y:event.clientY};if(interaction.current.measurement.phase!=="idle")renderer.domElement.focus();};
@@ -99,12 +104,14 @@ export default function FeatureMeshViewport({ geometry, revisionId, viewKey, mea
         const resize = () => { const width = element.clientWidth, height = element.clientHeight; if (!width || !height) return; camera.aspect = width / height; camera.updateProjectionMatrix(); renderer.setSize(width, height); render(); };
         const observer = new ResizeObserver(resize); observer.observe(element);
         controls.addEventListener("change", render); resize();updateOverlay.current(interaction.current.measurement);
-        setReady(true);
-        dispose = () => { delete actions.setView;delete actions.fitView;delete actions.resetView;delete actions.rollView;observer.disconnect();controls.removeEventListener("change",render);renderer.domElement.removeEventListener("pointerdown",pointerDown);renderer.domElement.removeEventListener("click",click);renderer.domElement.removeEventListener("pointermove",move);renderer.domElement.removeEventListener("keydown",keydown);updateOverlay.current=()=>{};clearReviewMeasurementOverlay(overlay);controls.dispose(); meshGeometry.dispose(); material.dispose(); grid.geometry.dispose(); (grid.material as import("three").Material).dispose(); renderer.dispose(); renderer.domElement.remove(); };
-      } catch (cause) { if (!disposed) setError(cause instanceof Error ? cause.message : "WebGL unavailable"); }
+        const lost=(event:Event)=>{event.preventDefault();pickingReady.current=false;setReady(false);setError("WebGL context lost");onRendererStatus?.({revisionId,state:"failed",reason:"WebGL context lost"});};
+        renderer.domElement.addEventListener("webglcontextlost",lost);
+        pickingReady.current=true;setReady(true);onRendererStatus?.({revisionId,state:"ready"});
+        dispose = () => { renderer.domElement.removeEventListener("webglcontextlost",lost);delete actions.setView;delete actions.fitView;delete actions.resetView;delete actions.rollView;observer.disconnect();controls.removeEventListener("change",render);renderer.domElement.removeEventListener("pointerdown",pointerDown);renderer.domElement.removeEventListener("click",click);renderer.domElement.removeEventListener("pointermove",move);renderer.domElement.removeEventListener("keydown",keydown);updateOverlay.current=()=>{};clearReviewMeasurementOverlay(overlay);controls.dispose(); meshGeometry.dispose(); material.dispose(); grid.geometry.dispose(); (grid.material as import("three").Material).dispose(); renderer.dispose(); renderer.domElement.remove(); };
+      } catch (cause) { if (!disposed) {const reason=cause instanceof Error?cause.message:"WebGL unavailable";setReady(false);setError(reason);onRendererStatus?.({revisionId,state:"failed",reason});} }
     })();
-    return () => { disposed = true; dispose(); };
-  }, [geometry, viewKey]);
+    return () => { disposed = true;pickingReady.current=false;dispose();onRendererStatus?.({revisionId,state:"unavailable",reason:"Review renderer inactive"}); };
+  }, [geometry, viewKey, revisionId, onRendererStatus]);
   return <section className="r7-empty-viewport r7-authored-viewport" aria-label="Feature review mesh" data-revision-id={revisionId} data-testid="feature-mesh-viewport">
     <div className="r7-three" ref={host} data-measurement-phase={measurement.phase} />
     <ViewControls host={host} unavailable={error ? `renderer failed: ${error}` : ready ? null : "renderer initializing"} />
