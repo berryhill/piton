@@ -148,6 +148,7 @@
 .r7-sketch-preview { width:calc(100% - 64px); height:calc(100% - 80px); color:#59d8ff; overflow:visible; }
 .r7-sketch-preview :is(circle,polygon,polyline) { vector-effect:non-scaling-stroke; stroke-width:2; }
 .r7-workplane-caption { position:absolute; top:12px; left:12px; padding:6px 8px; background:#09141de0; color:#c9eefd; }
+.r7-geometry-status { display:flex; flex-direction:column; justify-content:center; align-items:center; padding:24px; color:#c9eefd; text-align:center; }
 .r7-advanced-source summary { cursor:pointer; padding:8px; color:#a9bac9; }
 .r7-workbench .r7-drawer-toggle,.r7-workbench .r7-drawer-close { display:none; }
 .project-workspace .workspace-primary { background:#f47a35; border-color:#f47a35; color:#071019; font-weight:750; padding:12px 22px; }

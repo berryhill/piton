@@ -349,6 +349,7 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
   const [error,setError]=useState("");
   const [preview,setPreview]=useState<Awaited<ReturnType<WorkspaceApplication["proposeFeatures"]>>|null>(null);
   const [geometry,setGeometry]=useState<{mesh:FeatureEvaluation;scope:string}|null>(null);
+  const [geometryState,setGeometryState]=useState<"idle"|"loading"|"ready"|"failed"|"invalidated">("idle");
   const [measurement,setMeasurement]=useState<{scope:string;value:FixtureReviewMeasurement}|null>(null);
   const [message,setMessage]=useState("");
   const [sketchDirty,setSketchDirty]=useState(false);
@@ -374,13 +375,13 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
   useEffect(()=>{
     if(!shown)return;
     const token=++geometryGeneration.current;
-    setGeometry(null);
+    setGeometry(null);setGeometryState("loading");
     if(!revisionId&&preview&&draftBase===(currentPointer??null)) {
-      setGeometry({mesh:preview.geometry,scope:preview.candidate.id});
+      setGeometry({mesh:preview.geometry,scope:preview.candidate.id});setGeometryState("ready");
       return;
     }
-    void evaluateFeatureSourceInWorker(shown.authored).then(result=>{if(mounted.current&&token===geometryGeneration.current)setGeometry({mesh:result,scope:shown.id});}).catch(e=>{if(mounted.current&&token===geometryGeneration.current)setError(e instanceof Error?e.message:"Review mesh unavailable");});
-  },[shown?.id,revisionId]);
+    void evaluateFeatureSourceInWorker(shown.authored).then(result=>{if(mounted.current&&token===geometryGeneration.current){setGeometry({mesh:result,scope:shown.id});setGeometryState("ready");}}).catch(e=>{if(mounted.current&&token===geometryGeneration.current){setGeometryState("failed");setError(e instanceof Error?e.message:"Review mesh unavailable");}});
+  },[shown?.id,revisionId,sketchReset]);
   const previousCurrent=useRef(current?.authored.source??EMPTY_FEATURE_SOURCE_PLACEHOLDER);
   useEffect(()=>{
     if(draftBase===(currentPointer??null))return;
@@ -413,20 +414,20 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
     });
   };
   const hover=(point:FixtureReviewPoint|null)=>setMeasurement(previous=>previous?.scope===scope&&previous.value.phase==="endpoint-a"?{scope,value:{...previous.value,hoverEndpoint:point}}:previous);
-  const invalidate=()=>{generation.current++;geometryGeneration.current++;if(preview)application.cancelFeatureProposal(preview.proposal);setPreview(null);setGeometry(null);setMeasurement(null);};
+  const invalidate=()=>{generation.current++;geometryGeneration.current++;if(preview)application.cancelFeatureProposal(preview.proposal);setPreview(null);setGeometry(null);setGeometryState("invalidated");setMeasurement(null);};
   const submit=async()=>{
     if(operation.current||readonly||pending||blocked)return;
     invalidate();
     const token=++generation.current;
-    operation.current=true;setBusy(true);setError("");setMessage("");
+    operation.current=true;setBusy(true);setGeometryState("loading");setError("");setMessage("");
     try {
       const features=parseFeatureSource(source);
       if (!features.length) throw new Error("No named features parsed from source. Use part.rectangle / circle / extrude / hole calls.");
       const proposal:FeatureProposal={projectId,documentId:part.id,expectedRevisionId:draftBase,idempotencyKey:crypto.randomUUID(),units:"mm",features,...(current?{operation:"replace" as const}:{})};
       const result=await application.proposeFeatures(proposal);
-      if(mounted.current&&token===generation.current){setPreview(result);setGeometry({mesh:result.geometry,scope:result.candidate.id});setMessage("Preview only · not committed. Inspect the review mesh, then explicitly commit.");}
+      if(mounted.current&&token===generation.current){setPreview(result);setGeometry({mesh:result.geometry,scope:result.candidate.id});setGeometryState("ready");setMessage("Preview only · not committed. Inspect the review mesh, then explicitly commit.");}
       else application.cancelFeatureProposal(result.proposal);
-    }catch(e){if(mounted.current)setError(e instanceof Error?e.message:"Preview failed");}
+    }catch(e){if(mounted.current){setGeometryState("failed");setError(e instanceof Error?e.message:"Preview failed");}}
     finally{operation.current=false;if(mounted.current)setBusy(false);}
   };
   const commit=async()=>{
@@ -454,7 +455,10 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
     {targets&&createPortal(<div hidden={!active}><PartCommandUI active={active} context={{projectId,documentId:part.id,revisionId:draftBase}} baseSource={revisionId?shown?.authored??emptyFeatureSource():current?.authored??emptyFeatureSource()} source={revisionId?shown?.authored.source??source:!current&&source===EMPTY_FEATURE_SOURCE_PLACEHOLDER?emptyFeatureSource().source:source} onSource={next=>{invalidate();setSource(next);}} readonly={readonly||blocked} busy={busy||pending} previewReady={!!visiblePreview} onPreview={()=>void submit()} onCommit={()=>void commit()} onSketchDirty={setSketchDirty} onSketchVisible={setSketchVisible} onOpenProperties={openProperties} propertyTarget={targets.right} viewportTarget={targets.center} resetToken={sketchReset} measureAvailable={admitted} measurement={currentMeasurement} onMeasure={measure} onClearMeasurement={clearMeasurement}/></div>,targets.commands)}
     {active&&current&&targets&&createPortal(<section className="r7-section" aria-label="Named feature tree"><h2>Model tree</h2><p>{readFeatures(shown?.authored??current.authored).length} named features · 1 review body</p><ul>{readFeatures(shown?.authored??current.authored).map(f=><li key={f.id}>{f.name} · {f.kind}</li>)}</ul></section>,targets.left)}
     {active&&!sketchVisible&&admitted&&geometry&&targets&&createPortal(<FeatureMeshViewport key={scope} geometry={geometry.mesh} revisionId={scope} measurement={currentMeasurement} onMeasurementPoint={point} onMeasurementHover={hover} onMeasurementCancel={clearMeasurement}/>,targets.center)}
-    {active&&!sketchVisible&&!admitted&&targets&&createPortal(<EmptyProjectViewport empty={false} partName={part.name}/>,targets.center)}
+    {active&&!sketchVisible&&!admitted&&targets&&createPortal(shown||busy||geometryState==="failed"?<section className="r7-empty-viewport r7-geometry-status" data-testid="feature-geometry-status" role={geometryState==="failed"?"alert":"status"}>
+      <strong>{geometryState==="failed"?"Review geometry unavailable":geometryState==="invalidated"?"Review preview invalidated":revisionId?"Loading historical review geometry":"Loading review geometry"}</strong>
+      <p>{shown?"Saved Part source and revision history remain available; this is not an empty Part.":"Draft is not committed; no saved geometry was created."}</p>
+    </section>:<EmptyProjectViewport empty={false} partName={part.name}/>,targets.center)}
   </>;
 }
 /** Never drop invalid lines: parse through the same strict canonical source reader. */
