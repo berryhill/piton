@@ -1,0 +1,15 @@
+.piton-chat { padding: 14px; min-width: 0; border-bottom: 1px solid #294252; }
+.piton-chat header { display: block; padding: 0; }
+.piton-chat h3, .piton-chat h4 { margin: 0 0 8px; }
+.piton-chat [role=status], .piton-chat .chat-scope { font-size: 12px; color: #afc4d4; }
+.piton-chat .chat-transcript { max-height: 42vh; min-height: 100px; overflow-y: auto; overflow-wrap: anywhere; margin: 12px 0; }
+.piton-chat .chat-turn { padding: 10px; border: 1px solid #294252; border-radius: 6px; margin-bottom: 10px; }
+.piton-chat .chat-user { background: #183040; }
+.piton-chat .chat-turn p { white-space: pre-wrap; margin: 6px 0 0; line-height: 1.5; }
+.piton-chat textarea { width: 100%; min-height: 88px; resize: vertical; box-sizing: border-box; }
+.piton-chat .chat-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.piton-chat .chat-attachments { border-top: 1px solid #294252; padding-top: 10px; }
+.piton-chat .chat-attachments ul { list-style: none; padding: 0; }
+.piton-chat .chat-attachments li { display: flex; align-items: center; justify-content: space-between; gap: 4px; font-size: 12px; }
+.piton-chat pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto; font-size: 11px; }
+.piton-chat .chat-error { color: #ffb8a9; overflow-wrap: anywhere; }

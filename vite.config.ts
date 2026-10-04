@@ -16,7 +16,13 @@ export default defineConfig({
       "Cross-Origin-Embedder-Policy": "require-corp",
     },
   },
-  optimizeDeps: { exclude: ["@sqlite.org/sqlite-wasm"] },
+  optimizeDeps: {
+    // The HTML crawl does not enter geometry.worker.ts. Discovering Manifold
+    // on its first worker request otherwise re-optimizes deps and reloads all
+    // open pages, discarding in-progress interactions (even in other tabs).
+    include: ["manifold-3d"],
+    exclude: ["@sqlite.org/sqlite-wasm"],
+  },
   test: {
     environment: "jsdom",
     setupFiles: ["./tests-browser/setup.ts"],

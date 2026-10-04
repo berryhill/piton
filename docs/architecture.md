@@ -8,7 +8,9 @@ The current repository has no server application, Python application, external e
 
 ## Application path and authority
 
-The concrete startup and command path is:
+The default startup opens `ProjectWorkspace` at `/projects` through `WorkspaceApplication`, backed by normalized SQLite registry, document, revision, import and receipt records. Project/document/revision route ownership is validated independently of names. The GUI and `window.pitonWorkspace` use the same proposal and command boundary. All six bounded L-bracket parameters are editable; current-session proposals preserve exact preview-to-commit identity, and commits use transactional workspace-version CAS. See [Project workspaces](project-workspaces.md).
+
+The preserved `/demo` and legacy import/reopen command path is:
 
 ```text
 index.html
