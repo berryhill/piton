@@ -64,6 +64,10 @@
 .r7-authored-viewport .viewport-shell { display:grid; grid-template-rows:auto minmax(0,1fr); min-height:0; }
 .r7-authored-viewport .view-actions { position:static; order:-1; display:flex; justify-content:flex-start; flex-wrap:wrap; gap:3px; padding:5px 8px; min-height:41px; background:#111d29; border-bottom:1px solid var(--r7-line); }
 .r7-authored-viewport .view-actions button { margin:0; }
+.r7-editor-target > .view-actions { position:static; display:flex; flex-wrap:wrap; gap:3px; padding:5px 8px; background:#111d29; border-bottom:1px solid var(--r7-line); }
+.r7-authored-viewport[data-testid="feature-mesh-viewport"] { display:grid; grid-template-rows:auto minmax(0,1fr); }
+.r7-authored-viewport[data-testid="feature-mesh-viewport"] > .view-actions { grid-row:1; }
+.r7-authored-viewport[data-testid="feature-mesh-viewport"] > .r7-three { position:relative; inset:auto; grid-row:2; min-height:0; overflow:hidden; }
 .r7-authored-viewport .viewport { min-height:0; overflow:hidden; }
 .r7-authored-viewport .viewport-status { top:58px; right:12px; width:fit-content; max-width:calc(100% - 24px); pointer-events:none; }
 .r7-context { white-space:pre-wrap; overflow-wrap:anywhere; color:#b8c8d6; font:10px/1.5 ui-monospace,monospace; }
@@ -98,6 +102,9 @@
 .r7-right { border-left:1px solid var(--r7-line); }
 .r7-workbench .r7-panel-head { margin:0; padding:8px 10px; border-bottom:1px solid var(--r7-line); font-size:10px; font-weight:800; letter-spacing:.1em; color:#91a6b9; }
 .r7-section { padding:10px; border-bottom:1px solid var(--r7-line); }
+.r7-section[aria-label="Active document outputs"] p { margin:4px 0; font-size:10px; }
+.r7-section[aria-label="Active document outputs"] button { padding:4px 7px; font-size:10px; }
+.r7-section[aria-label="Active document outputs"] pre { max-width:100%; white-space:pre-wrap; overflow-wrap:anywhere; }
 .r7-section h3 { margin:0 0 8px; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#b8c8d6; }
 .r7-workbench p { font-size:11px; color:#91a6b9; }
 .r7-workbench button { margin:3px 3px 3px 0; padding:6px 9px; border:1px solid var(--r7-line); border-radius:5px; background:#1b2b3a; font:inherit; color:inherit; }
@@ -120,6 +127,7 @@
 .r7-empty-message p { margin:4px 0 0; }
 .r7-axis { position:absolute; right:12px; bottom:12px; color:#59d8ff; text-align:right; pointer-events:none; }
 .r7-axis span { color:#91a6b9; font-size:10px; }
+.r7-axis { max-width:calc(100% - 24px); overflow-wrap:anywhere; }
 .r7-status { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:0 9px; background:#0b151f; border-top:1px solid var(--r7-line); color:#8fa4b7; font-size:10px; overflow:hidden; }
 .r7-status span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .r7-error { position:absolute; bottom:32px; left:12px; right:12px; padding:10px; background:#281413; }

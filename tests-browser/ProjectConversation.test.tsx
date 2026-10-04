@@ -4,6 +4,8 @@ import { ConversationPanel } from '../src/chat/ConversationPanel';
 import { freezeContext, type SelectionReference } from '../src/chat/context';
 import { ChatClient } from '../src/chat/client';
 import type { WorkspaceProject } from '../src/workspace';
+import { appendFeatures, emptyFeatureSource } from '../src/modeling/source';
+import { makeFeatureRevision } from '../src/modeling/revisions';
 
 const project = (): WorkspaceProject => ({id:'11111111-1111-4111-8111-111111111111',name:'Test project',archived:false,updatedAt:'2026-01-01',documents:['Alpha','Beta'].map((name,i) => ({id:`22222222-2222-4222-8222-22222222222${i}`,name,part:{id:name,name,acceptedRevisionId:null,currentRevisionId:null,revisions:[]},revisionIds:{}}))});
 const reference = (p: WorkspaceProject): SelectionReference => ({documentId:p.documents[0].id,revisionId:null,nodeId:'top',label:'Alpha · Top plane',representation:'coordinate-reference'});
@@ -87,6 +89,19 @@ it('snapshots immutable bounded data and rejects wrong project, missing revision
   expect(() => freezeContext(p,undefined,undefined,[{...ref,nodeId:'mesh-face-0'}])).toThrow('unsupported_reference');
   expect(() => freezeContext(p,undefined,undefined,Array(17).fill(ref))).toThrow('context_too_large');
   expect(context.buildId).toBeNull();expect(context.savedParameters).toBeNull();expect(context.constraints.material).toBeNull();
+});
+it('accepts saved feature references only at their owned revision, never preview or fake mesh IDs',() => {
+  const p=project(),d=p.documents[0];
+  const source=appendFeatures(emptyFeatureSource(),[{kind:'rectangle',id:'outline',name:'Outline',plane:'XY',width:40,height:20},{kind:'extrude',id:'plate',name:'Plate',profileId:'outline',distance:6}]);
+  const revision=makeFeatureRevision(null,source,'2026-01-01T00:00:00Z');
+  d.part={kind:'feature-part',id:d.id,name:d.name,acceptedRevisionId:revision.id,currentRevisionId:revision.id,revisions:[revision]};
+  const pointer='33333333-3333-4333-8333-333333333333';d.revisionIds[pointer]=revision.id;
+  const ref:SelectionReference={documentId:d.id,revisionId:pointer,nodeId:'feature:outline',label:'Outline · rectangle',representation:'feature'};
+  expect(freezeContext(p,d.id,undefined,[ref]).selection).toEqual([ref]);
+  expect(() => freezeContext(p,d.id,undefined,[{...ref,revisionId:null}])).toThrow('stale_revision');
+  expect(() => freezeContext(p,d.id,undefined,[{...ref,nodeId:'feature:unknown'}])).toThrow('unsupported_reference');
+  expect(() => freezeContext(p,d.id,undefined,[{...ref,nodeId:'mesh-face-0'}])).toThrow('unsupported_reference');
+  expect(() => freezeContext(p,d.id,undefined,[{...ref,revisionId:'other'}])).toThrow('stale_revision');
 });
 it('handles fragmented CRLF SSE frames and refuses a stream without completion',async () => {
   const frame='event: assistant.delta\r\ndata: {"delta":"hello"}\r\n\r\nevent: assistant.completed\r\ndata: {"content":"hello"}\r\n\r\n';

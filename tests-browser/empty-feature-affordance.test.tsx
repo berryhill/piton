@@ -83,7 +83,7 @@ it("previews without committing until explicit confirmation", async () => {
       units: "mm",
       features: [],
     },
-    candidate: { id: "rev-test", parentRevisionId: null, createdAt: new Date().toISOString(), authorityProfile: "browser-typescript/v1", authored: { authorityProfile: "browser-typescript/v1", units: "mm", source: "" }, reviewState: "needs_human_review", fabricationRelease: false, machineActuation: false, releaseState: "unreleased" },
+    candidate: { id: "rev-test", parentRevisionId: null, createdAt: new Date().toISOString(), authorityProfile: "browser-typescript/v1", authored: { authorityProfile: "browser-typescript/v1", units: "mm", source: '// Piton browser-typescript/v1; units=mm; restricted named-feature source\npart.rectangle({"id":"outline","name":"Outline","plane":"XY","width":80,"height":50});\npart.extrude({"id":"body","name":"Thickness","profileId":"outline","distance":6});\n' }, reviewState: "needs_human_review", fabricationRelease: false, machineActuation: false, releaseState: "unreleased" },
     geometry: { sourceDigest: "sha256-0", environmentDigest: "sha256-0", claimScope: "review-mesh-only", units: "mm", fabricationRelease: false, machineActuation: false, reviewState: "needs_human_review", releaseState: "unreleased", bounds: { min: [0, 0, 0], max: [80, 50, 6] }, volumeMm3: 80 * 50 * 6, vertices: [], triangles: [], checks: [] },
   });
   const commit = vi.spyOn(app, "commitFeatures").mockResolvedValue("rev-test-uuid");

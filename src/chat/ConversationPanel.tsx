@@ -4,8 +4,8 @@ import { ChatClient, type Availability, type ChatMessage } from './client';
 import { freezeContext, type FrozenContext, type SelectionReference } from './context';
 import './chat.css';
 
-type Props = { project: WorkspaceProject; documentId?: string; revisionId?: string; selection: SelectionReference[]; draft?: boolean; preview?: boolean };
-export function ConversationPanel({ project, documentId, revisionId, selection, draft = false, preview = false }: Props) {
+type Props = { project: WorkspaceProject; documentId?: string; revisionId?: string; selection: SelectionReference[]; selectionLabel?: string; selectionDetail?: string; projectionMode?: string; unavailableReason?: string; draft?: boolean; preview?: boolean };
+export function ConversationPanel({ project, documentId, revisionId, selection, selectionLabel, selectionDetail, projectionMode, unavailableReason, draft = false, preview = false }: Props) {
   const client = useRef(new ChatClient()).current;
   const mounted = useRef(false), operation = useRef(false), connectionGeneration = useRef(0), stream = useRef<AbortController | null>(null);
   const [messages,setMessages] = useState<ChatMessage[]>([]), [prompt,setPrompt] = useState('');
@@ -80,7 +80,7 @@ export function ConversationPanel({ project, documentId, revisionId, selection, 
     <p className="chat-scope">Read-only conversation. No modeling or workstation tools granted.</p>
     {availability?.runtime && <details><summary>Runtime</summary><p>{availability.runtime.provider ?? 'Provider unreported'} · {availability.runtime.model ?? 'Model unreported'}</p><p>Capabilities: {availability.capabilities.join(', ') || 'None'}</p></details>}
     <div className="chat-transcript" role="log" aria-label="Conversation history" aria-live="polite">{messages.map((message,index) => <article key={index} className={`chat-turn chat-${message.role}`}><strong>{message.role === 'user' ? 'You' : 'Nick'}</strong><p>{message.content}</p></article>)}{partial && <article className="chat-turn"><strong>Nick · {busy ? 'streaming' : 'incomplete'}</strong><p>{partial}</p></article>}{!messages.length && !partial && <p>No conversation yet. Ask about this project, with or without an open Part.</p>}</div>
-    <div className="chat-attachments"><h4>Selected context</h4><p>{selection.length ? selection.map(ref => ref.label).join(', ') : 'No selected reference. Geometry picking is not connected.'}</p>
+    <div className="chat-attachments"><section className="r7-tree-details" aria-label="Model selection details"><h4>Selected context</h4><p>{selectionLabel ? `${selectionLabel} · ${projectionMode ?? 'current'}` : selection.length ? selection.map(ref => ref.label).join(', ') : 'No selected reference in this projection.'}</p>{selectionDetail&&<p>{selectionDetail}</p>}{unavailableReason&&<p>{unavailableReason}</p>}</section>
       <button type="button" disabled={!selection.length || busy} onClick={() => setAttachments(current => [...current,...selection.filter(ref => !current.some(old => old.documentId === ref.documentId && old.nodeId === ref.nodeId))].slice(0,16))}>Attach selected reference</button>
       <ul aria-label="Attached context">{attachments.map((ref,index) => <li key={`${ref.documentId}:${ref.nodeId}`}>{ref.label}<button type="button" aria-label={`Remove ${ref.label}`} disabled={busy} onClick={() => setAttachments(current => current.filter((_,i) => i !== index))}>×</button></li>)}</ul>
       <p className="chat-scope">Highlights and explicit attachments are separate. References are coordinate context, not exact geometry.</p>

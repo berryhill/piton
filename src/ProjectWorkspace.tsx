@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Viewport from "./components/Viewport";
 import { CadApplication } from "./application";
@@ -8,16 +8,20 @@ import type { BrowserProject, DesignRevision, LBracketParameters } from "./domai
 import "./styles.css";
 import "./workspace.css";
 import type { GeometryResult } from "./geometry/gate";
-import { downloadPartFile, reviewPartStl } from "./partExport";
+import { downloadPartFile, featureReviewStl, reviewPartStl } from "./partExport";
 import { ConversationPanel } from "./chat/ConversationPanel";
 import type { SelectionReference } from "./chat/context";
 import { readFeatures, type PartFeature } from "./modeling/source";
 import type { FeatureEvaluation } from "./modeling/evaluator";
-import FeatureMeshViewport from "./modeling/FeatureMeshViewport";
-import { evaluateFeatureSourceInWorker } from "./modeling/client";
-import { PartCommandUI } from "./modeling/PartCommandUI";
+import FeatureMeshViewport, {type FeatureRendererStatus} from "./modeling/FeatureMeshViewport";
+import { assertFeatureEvaluation, evaluateFeatureSourceInWorker } from "./modeling/client";
+import { PartCommandUI, PartCategoryTabs, type PartCategory } from "./modeling/PartCommandUI";
 import { emptyFeatureSource } from "./modeling/source";
+import type { FeatureSource } from "./modeling/source";
 import type { FixtureReviewMeasurement, FixtureReviewPoint } from "./fixture";
+import { applyCameraAction, recordCameraPose, ViewControls, type ViewHost } from "./components/ViewControls";
+import { meshBounds } from "./geometry/view";
+import { findTreeNode, projectDocumentTree, validSelection, type DocumentCandidate, type DocumentProjection, type DocumentTreeNode } from "./modeling/documentProjection";
 
 declare global { interface Window { pitonWorkspace: WorkspaceApplication; } }
 export default function ProjectWorkspace({application}: {application: WorkspaceApplication}) {
@@ -104,7 +108,7 @@ export default function ProjectWorkspace({application}: {application: WorkspaceA
 
   </main>;
 }
-type WorkbenchTargets = {left:HTMLDivElement;center:HTMLDivElement;commands:HTMLDivElement;right:HTMLDivElement};
+type WorkbenchTargets = {left:HTMLDivElement;outputs:HTMLDivElement;center:HTMLDivElement;commands:HTMLDivElement;right:HTMLDivElement};
 type DraftStatus = {dirty:boolean;busy:boolean;preview?:boolean};
 function ProjectWorkbench({application,project,document,revisionId,path,navigate,refresh,act,pending,error}:{application: WorkspaceApplication;project: WorkspaceProject;document?:PartDocument;revisionId?:string;path:string;navigate:(url:string)=>void;refresh:()=>Promise<void>;act:(fn:(go:(url:string)=>void)=>Promise<unknown>)=>Promise<void>;pending:boolean;error:string}) {
   // Open tabs are UI state, never authored revisions or stored document membership.
@@ -112,10 +116,19 @@ function ProjectWorkbench({application,project,document,revisionId,path,navigate
   const [label,setLabel]=useState("");
   const [panel,setPanel]=useState<"project"|"change"|null>(null);
   const [tabError,setTabError]=useState("");
-  const [leftTarget,setLeftTarget]=useState<HTMLDivElement|null>(null),[centerTarget,setCenterTarget]=useState<HTMLDivElement|null>(null),[commandTarget,setCommandTarget]=useState<HTMLDivElement|null>(null),[rightTarget,setRightTarget]=useState<HTMLDivElement|null>(null);
+  const [leftTarget,setLeftTarget]=useState<HTMLDivElement|null>(null),[outputsTarget,setOutputsTarget]=useState<HTMLDivElement|null>(null),[centerTarget,setCenterTarget]=useState<HTMLDivElement|null>(null),[commandTarget,setCommandTarget]=useState<HTMLDivElement|null>(null),[rightTarget,setRightTarget]=useState<HTMLDivElement|null>(null);
   const drafts=useRef(new Map<string,DraftStatus>());
   const [draftStatuses,setDraftStatuses]=useState<Record<string,DraftStatus>>({});
   const [selections,setSelections]=useState<Record<string,SelectionReference>>({});
+  const [candidates,setCandidates]=useState<Record<string,DocumentCandidate>>({});
+  const reportCandidate=useCallback((id:string,candidate?:DocumentCandidate)=>setCandidates(current=>{if(!candidate&&!current[id])return current;const next={...current};if(candidate)next[id]=candidate;else delete next[id];return next;}),[]);
+  const projection=document?projectDocumentTree(document,revisionId,revisionId?undefined:candidates[document.id]):null;
+  const highlighted=document&&projection?selections[document.id]:undefined;
+  const highlightedNode=highlighted&&projection?findTreeNode(projection.nodes,highlighted.nodeId):undefined;
+  const selected=highlighted&&projection&&validSelection(projection,highlighted)?highlighted:null;
+  const previewSemantic=projection?.mode==='preview'&&highlightedNode&&['collection','feature','parameter'].includes(highlightedNode.representation)&&highlighted?.sourceRevisionId===projection.sourceRevisionId;
+  const visibleNode=selected?highlightedNode:previewSemantic?highlightedNode:undefined;
+
   const reportSelection=useCallback((ref:SelectionReference)=>{setSelections(current=>({...current,[ref.documentId]:ref}));},[]);
   const reportDraft=useCallback((id:string,status:DraftStatus)=>{drafts.current.set(id,status);setDraftStatuses(current=>({...current,[id]:status}));},[]);
   // Empty Part authoring is a project-wide concern: identify the first empty Part
@@ -135,22 +148,24 @@ function ProjectWorkbench({application,project,document,revisionId,path,navigate
       if(next)globalThis.document.getElementById(`tab-${next.id}`)?.focus();
       else globalThis.document.getElementById(`file-${id}`)?.focus();}
   };
-  const targets=leftTarget&&centerTarget&&commandTarget&&rightTarget?{left:leftTarget,center:centerTarget,commands:commandTarget,right:rightTarget}:null;
+  const targets=leftTarget&&outputsTarget&&centerTarget&&commandTarget&&rightTarget?{left:leftTarget,outputs:outputsTarget,center:centerTarget,commands:commandTarget,right:rightTarget}:null;
   return <main className="project-workspace r7-workbench">
     <header className="r7-header"><span className="r7-dot"/><strong>Piton</strong><span className="r7-container-label">Project container</span><h1>{project.name}</h1><span className="r7-execution">Browser local · Project conversation</span><button onClick={()=>navigate("/projects")}>All projects</button></header>
     <div className="r7-workspace">
       <aside className={`r7-left ${panel==="project"?"is-open":""}`} aria-label="Project documents and model"><button className="r7-drawer-close" onClick={()=>setPanel(null)}>Close Project panel</button>
-        {tabs.map(d=>d.part.currentRevisionId===null&&<div key={d.id} hidden={document?.id!==d.id}><EmptyPartModelTree document={d} onSelect={reportSelection}/></div>)}
         <h2 className="r7-panel-head">Files · Part / Assembly</h2>
         <section className="r7-section"><h3>Documents</h3><nav aria-label="Project Files" className="r7-files">{project.documents.map(d=><button id={`file-${d.id}`} aria-label={d.name} aria-current={document?.id===d.id?"page":undefined} key={d.id} onClick={()=>openDocument(d.id)}><span className="r7-file-icon" aria-hidden="true">PRT</span>{d.name}</button>)}</nav>
           {!project.documents.length&&<p>No documents yet. This project is empty.</p>}
           {!project.archived&&<form onSubmit={e=>{e.preventDefault();void act(async go=>{const id=await application.createPart(project.id,label);await refresh();go(`/projects/${project.id}/documents/${id}`);});}}><label>{document?"New Part name":"Part name"} <input value={label} onChange={e=>setLabel(e.target.value)} required maxLength={100}/></label><button disabled={pending}>Create Part</button><p>Creates an empty Part. No sample geometry or revisions are added.</p></form>}
           <button disabled title="Assembly authoring is not implemented">New Assembly</button>
         </section>
+        <h2 className="r7-panel-head">Outputs · active document</h2><section className="r7-section" aria-label="Active document outputs"><p>No exact B-rep or fabrication release. Review only.</p>{!document&&<><p>Open a Part to access its outputs.</p><button disabled title="Open a Part first">Generated source</button><button disabled title="Open a Part first; only unreleased review STL is available">Generate STL</button></>}<div ref={setOutputsTarget}/></section>
+        {tabs.map(d=><div key={d.id} hidden={document?.id!==d.id}><DocumentModelTree projection={document?.id===d.id&&projection?projection:projectDocumentTree(d)} onSelect={reportSelection}/></div>)}
+        {!document&&<><h2 className="r7-panel-head">Model tree</h2><section className="r7-section"><p>No active document. Open or create a Part to inspect its model.</p></section></>}
         <div ref={setLeftTarget}/>
-        {(!document || document.part.currentRevisionId===null)&&<><h2 className="r7-panel-head">Outputs · active document</h2><section className="r7-section"><p>{document?"Empty Part — use Export project backup to preserve this document.":"Open a Part to access its outputs."} No exact B-rep or fabrication release.</p><button disabled>Generated source</button><button disabled>Generate STL</button></section>
+        {(!document || document.part.currentRevisionId===null)&&<>
         {!document&&firstEmptyPart&&<><h2 className="r7-panel-head">Empty Part authoring</h2><section className="r7-section"><p>Submit named features against <strong>{firstEmptyPart.name}</strong> to give this project its first revision.</p><button type="button" className="r7-open-empty-part" data-testid="open-first-empty-part" onClick={()=>openDocument(firstEmptyPart.id)}>Open {firstEmptyPart.name}</button></section></>}
-        {!document&&!firstEmptyPart&&<><h2 className="r7-panel-head">Model tree</h2><section className="r7-section"><p>No active document. Open or create a Part to inspect its model.</p></section></>}</>}
+        </>}
         <details className="r7-section"><summary>Project settings &amp; recovery</summary><form onSubmit={e=>{e.preventDefault();void act(()=>application.renameProject(project.id,label));}}><label>Project name <input value={label} placeholder={project.name} onChange={e=>setLabel(e.target.value)} required maxLength={100}/></label><button disabled={pending}>Rename project</button></form>
           <button disabled={pending} onClick={()=>void act(()=>application.archiveProject(project.id,!project.archived))}>{project.archived?"Restore project":"Archive project"}</button>
           <button disabled={pending} onClick={()=>void act(async()=>downloadPartFile(`${project.id}-project.json`,JSON.stringify(await application.exportProject(project.id),null,2),"application/json"))}>Export project backup</button>
@@ -173,34 +188,30 @@ function ProjectWorkbench({application,project,document,revisionId,path,navigate
           </div>
         </div>{(error||tabError)&&<p className="r7-error" role="alert">{error||tabError}</p>}
       </section>
-      <aside className={`r7-right ${panel==="change"?"is-open":""}`} aria-label="Change request"><button className="r7-drawer-close" onClick={()=>setPanel(null)}>Close Change Request</button><h2 className="r7-panel-head">Change Request</h2><ConversationPanel project={project} documentId={document?.id} revisionId={revisionId} selection={document&&selections[document.id]?[selections[document.id]]:[]} draft={!revisionId&&!!(document&&draftStatuses[document.id]?.dirty)} preview={!revisionId&&!!(document&&draftStatuses[document.id]?.preview)}/><div ref={setRightTarget}/></aside>
-      {targets&&tabs.map(d=>isAuthoredPart(d.part)?<PartEditor key={d.id} application={application} projectId={project.id} document={{...d,part:d.part}} archived={project.archived} refresh={refresh} navigate={navigate} active={document?.id===d.id&&!revisionId} targets={targets} reportDraft={reportDraft}/>:null)}
+      <aside className={`r7-right ${panel==="change"?"is-open":""}`} aria-label="Change request"><button className="r7-drawer-close" onClick={()=>setPanel(null)}>Close Change Request</button><h2 className="r7-panel-head">Change Request</h2><ConversationPanel project={project} documentId={document?.id} revisionId={revisionId} selection={selected?[selected]:[]} selectionLabel={visibleNode?.label} selectionDetail={visibleNode?.detail} projectionMode={projection?.mode} unavailableReason={previewSemantic?"Uncommitted feature/parameter reference unavailable until commit; preview highlight only.":undefined} draft={!revisionId&&!!(document&&draftStatuses[document.id]?.dirty)} preview={!revisionId&&!!(document&&draftStatuses[document.id]?.preview)}/><div ref={setRightTarget}/></aside>
+      {targets&&tabs.map(d=>isAuthoredPart(d.part)?<PartEditor key={d.id} application={application} projectId={project.id} document={{...d,part:d.part}} archived={project.archived} refresh={refresh} navigate={navigate} active={document?.id===d.id&&!revisionId} targets={targets} reportDraft={reportDraft} reportCandidate={reportCandidate}/>:null)}
       {targets&&document&&isAuthoredPart(document.part)&&revisionId&&<PartEditor key={`${document.id}:${revisionId}`} application={application} projectId={project.id} document={{...document,part:document.part}} revisionId={revisionId} archived={project.archived} refresh={refresh} navigate={navigate} active targets={targets}/>}
-      {targets&&tabs.filter(d=>d.part.currentRevisionId===null||isFeaturePart(d.part)).map(d=><EmptyFeatureAuthoring key={`features-${d.id}`} active={document?.id===d.id} application={application} projectId={project.id} part={d} refresh={refresh} pending={pending} archived={project.archived} revisionId={document?.id===d.id?revisionId:undefined} navigate={navigate} targets={targets} reportDraft={reportDraft} openProperties={()=>setPanel("change")}/>)}
+      {targets&&tabs.filter(d=>d.part.currentRevisionId===null||isFeaturePart(d.part)).map(d=><EmptyFeatureAuthoring key={`features-${d.id}`} active={document?.id===d.id} application={application} projectId={project.id} part={d} refresh={refresh} pending={pending} archived={project.archived} revisionId={document?.id===d.id?revisionId:undefined} navigate={navigate} targets={targets} reportDraft={reportDraft} reportCandidate={reportCandidate} openProperties={()=>setPanel("change")}/>)}
     </div><footer className="r7-status"><span>{project.archived?"Archived project · read-only":"Browser-local project"} · {project.documents.length} Parts</span><span>needs_human_review · fabrication_release=false · machine_actuation=false</span></footer>
   </main>;
 }
-type EmptyTreeNode = {id:string;label:string;detail:string;children?:EmptyTreeNode[]};
-function EmptyPartModelTree({document,onSelect}:{document:PartDocument;onSelect:(ref:SelectionReference)=>void}) {
+function DocumentModelTree({projection,onSelect}:{projection:DocumentProjection;onSelect:(ref:SelectionReference)=>void}) {
   // R14 documentTree / initialExpandedTreeNodeIds: root open, Origin collapsed.
   // These reference axes are UI context, never authored datum records or revisions.
   const [expanded,setExpanded]=useState<string[]>(["document"]);
-  const [selected,setSelected]=useState("document"),[focused,setFocused]=useState("document");
+  const [selected,setSelected]=useState("document"),[selectedSource,setSelectedSource]=useState<string|null>(null),[focused,setFocused]=useState("document");
   const rows=useRef(new Map<string,HTMLDivElement>());
-  useEffect(()=>{onSelect({documentId:document.id,revisionId:null,nodeId:selected,label:`${document.name} · ${selected}`,representation:["origin","front","top","right"].includes(selected)?"coordinate-reference":"document-summary"});},[document.id,document.name,selected,onSelect]);
-  const nodes:EmptyTreeNode[]=[{id:"document",label:`${document.name} · Part`,detail:"Empty Part document. No authored geometry, parameters or revisions.",children:[
-    {id:"origin",label:"Origin · reference",detail:"CAD origin (0, 0, 0) mm. Coordinate reference only; not an authored feature.",children:[
-      {id:"front",label:"Front Plane · reference",detail:"CAD XZ plane (Y=0). Coordinate reference only; not an authored feature."},
-      {id:"top",label:"Top Plane · reference",detail:"CAD XY plane (Z=0), the physical grid plane. Coordinate reference only; not an authored feature."},
-      {id:"right",label:"Right Plane · reference",detail:"CAD YZ plane (X=0). Coordinate reference only; not an authored feature."}]},
-    {id:"features",label:"Features (0)",detail:"No authored features yet. Use named-feature source to preview a bounded profile, extrusion and hole."},
-    {id:"bodies",label:"Solid Bodies (0)",detail:"No solid bodies. This Part has no authored geometry or review mesh."}]}];
-  const visible:EmptyTreeNode[]=[],all=new Map<string,EmptyTreeNode>(),parents=new Map<string,string>();
-  const collect=(list:EmptyTreeNode[],parent?:string,shown=true)=>{for(const node of list){all.set(node.id,node);if(parent)parents.set(node.id,parent);if(shown)visible.push(node);if(node.children)collect(node.children,node.id,shown&&expanded.includes(node.id));}};
-  collect(nodes);
+  const chosen=findTreeNode(projection.nodes,selected);
+  const selectedId=chosen&&(chosen.representation==="coordinate-reference"||chosen.representation==="document-summary"||selectedSource===projection.sourceRevisionId)?selected:"document";
+  const visible:DocumentTreeNode[]=[],parents=new Map<string,string>();
+  const collect=(list:DocumentTreeNode[],parent?:string,shown=true)=>{for(const node of list){if(parent)parents.set(node.id,parent);if(shown)visible.push(node);if(node.children)collect(node.children,node.id,shown&&expanded.includes(node.id));}};
+  collect(projection.nodes);
+  const focusedId=visible.some(node=>node.id===focused)?focused:visible.some(node=>node.id===selectedId)?selectedId:"document";
+  useEffect(()=>{const node=findTreeNode(projection.nodes,selectedId)!;const semantic=node.representation!=="coordinate-reference"&&node.representation!=="document-summary";onSelect({documentId:projection.documentId,revisionId:projection.revisionId,nodeId:selectedId,label:node.label,representation:node.representation,...(semantic?{sourceRevisionId:projection.sourceRevisionId}:{})});},[projection.documentId,projection.revisionId,projection.sourceRevisionId,selectedId,onSelect]);
   const focus=(id:string)=>{setFocused(id);rows.current.get(id)?.focus();};
   const toggle=(id:string)=>setExpanded(current=>current.includes(id)?current.filter(value=>value!==id):[...current,id]);
-  const renderNodes=(list:EmptyTreeNode[]):ReactNode=>list.map(node=><div key={node.id} onClick={event=>{event.stopPropagation();focus(node.id);setSelected(node.id);}} role="treeitem" aria-label={node.label} aria-selected={selected===node.id} aria-expanded={node.children?expanded.includes(node.id):undefined} tabIndex={focused===node.id?0:-1} ref={element=>{if(element)rows.current.set(node.id,element);else rows.current.delete(node.id);}} onFocus={event=>{event.stopPropagation();setFocused(node.id);}} onKeyDown={event=>{
+  const select=(id:string)=>{setSelected(id);setSelectedSource(projection.sourceRevisionId);};
+  const renderNodes=(list:DocumentTreeNode[]):ReactNode=>list.map(node=><div key={node.id} onClick={event=>{event.stopPropagation();focus(node.id);select(node.id);}} role="treeitem" aria-label={node.label} aria-selected={selectedId===node.id} aria-expanded={node.children?expanded.includes(node.id):undefined} tabIndex={focusedId===node.id?0:-1} ref={element=>{if(element)rows.current.set(node.id,element);else rows.current.delete(node.id);}} onFocus={event=>{event.stopPropagation();setFocused(node.id);}} onKeyDown={event=>{
     event.stopPropagation();const index=visible.findIndex(row=>row.id===node.id);
     if(!["ArrowDown","ArrowUp","ArrowLeft","ArrowRight","Home","End","Enter"," "].includes(event.key))return;
     event.preventDefault();
@@ -208,20 +219,18 @@ function EmptyPartModelTree({document,onSelect}:{document:PartDocument;onSelect:
     else if(event.key==="Home"||event.key==="End")focus(visible[event.key==="Home"?0:visible.length-1].id);
     else if(event.key==="ArrowRight"&&node.children){if(!expanded.includes(node.id))toggle(node.id);else focus(node.children[0].id);}
     else if(event.key==="ArrowLeft"){if(node.children&&expanded.includes(node.id))toggle(node.id);else if(parents.has(node.id))focus(parents.get(node.id)!);}
-    else if(event.key==="Enter"||event.key===" ")setSelected(node.id);
+    else if(event.key==="Enter"||event.key===" ")select(node.id);
   }}><div className="r7-tree-row"><span className="r7-tree-disclosure" aria-hidden="true" onClick={event=>{if(node.children){event.stopPropagation();focus(node.id);toggle(node.id);}}}>{node.children?(expanded.includes(node.id)?"▾":"▸"):"·"}</span><span>{node.label}</span></div>{node.children&&expanded.includes(node.id)&&<div role="group">{renderNodes(node.children)}</div>}</div>);
-  return <section className="r7-model-tree"><h2 className="r7-panel-head">Model tree</h2><div role="tree" aria-label={`${document.name} model tree`}>{renderNodes(nodes)}</div><section className="r7-tree-details" aria-label="Model selection details"><h3>{document.name} · {all.get(selected)?.label}</h3><p>{all.get(selected)?.detail}</p></section></section>;
+  return <section className="r7-model-tree"><h2 className="r7-panel-head">Model tree · {projection.mode}</h2><div role="tree" aria-label={`${projection.nodes[0].label.split(" · Part")[0]} model tree`}>{renderNodes(projection.nodes)}</div></section>;
 }
 function EmptyProjectViewport({empty,partName}:{empty:boolean;partName?:string}) {
   const host=useRef<HTMLDivElement>(null);
-  const command=useRef<(view:string)=>void>(()=>{});
-  const [available,setAvailable]=useState(false);
-  const [failure,setFailure]=useState("");
+  const [unavailable,setUnavailable]=useState("renderer initializing");
   useEffect(()=>{
     let disposed=false, cleanup=()=>{};
     void (async()=>{
       // No document, geometry worker or authored revision is created here.
-      if(!window.WebGLRenderingContext) {setFailure("3D viewport unavailable in this browser.");return;}
+      if(!window.WebGLRenderingContext) {setUnavailable("WebGL is unavailable in this browser");return;}
       try {
         const THREE=await import("three");
         const {OrbitControls}=await import("three/addons/controls/OrbitControls.js");
@@ -231,40 +240,41 @@ function EmptyProjectViewport({empty,partName}:{empty:boolean;partName?:string})
         renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
         element.appendChild(renderer.domElement);
         const camera=new THREE.PerspectiveCamera(40,1,.1,2000);
+        camera.up.set(0,0,1);
         const controls=new OrbitControls(camera,renderer.domElement);
-        // CAD Z=0 maps to Three.js Y=0, matching the existing Part viewport.
+        // This grid is CAD Z=0 in the same Z-up frame as imported review meshes.
         const grid=new THREE.GridHelper(240,24,0x42647d,0x243c4e);
+        grid.rotation.x=Math.PI/2;
         scene.add(grid);
         const render=()=>renderer.render(scene,camera);
-        const view=(name:string)=>{
-          if(name.includes("Roll")) {
-            const axis=new THREE.Vector3();camera.getWorldDirection(axis);
-            camera.up.applyAxisAngle(axis,(name.startsWith("↶")?-1:1)*Math.PI/12);
-          } else {
-            controls.target.set(0,0,0);camera.up.set(0,1,0);
-            if(name==="Front")camera.position.set(0,0,280);
-            else if(name==="Top"){camera.position.set(0,280,0);camera.up.set(0,0,-1);}
-            else camera.position.set(180,150,200);
-          }
-          camera.lookAt(controls.target);controls.update();render();
+        const referenceBounds=meshBounds([-120,-120,0,120,120,0]);
+        const view=(action:import("./components/ViewControls").CameraAction)=>{
+          const fit=applyCameraAction(camera,controls,referenceBounds,"cad-z-up",action);
+          element.dataset.viewState=action==="fit"||action==="reset"?"fit-to-reference-grid":action;
+          if(fit)element.dataset.fitDistance=fit.distance.toFixed(3);
+          recordCameraPose(element,camera,controls.target);render();
         };
         const resize=()=>{const width=element.clientWidth,height=element.clientHeight;if(!width||!height)return;camera.aspect=width/height;camera.updateProjectionMatrix();renderer.setSize(width,height);render();};
         const observer=new ResizeObserver(resize);observer.observe(element);
-        controls.addEventListener("change",render);command.current=view;resize();view("Iso");setAvailable(true);
-        cleanup=()=>{observer.disconnect();controls.dispose();grid.geometry.dispose();(grid.material as import("three").Material).dispose();renderer.dispose();renderer.domElement.remove();command.current=()=>{};};
-      }catch(e){if(!disposed)setFailure(`3D viewport unavailable: ${e instanceof Error?e.message:String(e)}`);}
+        controls.addEventListener("change",render);
+        const actions=element as ViewHost;
+        actions.resetView=()=>view("reset");actions.fitView=()=>view("fit");actions.setView=preset=>view(preset);actions.rollView=()=>view("roll");
+        resize();view("reset");setUnavailable("");
+        cleanup=()=>{delete actions.resetView;delete actions.fitView;delete actions.setView;delete actions.rollView;observer.disconnect();controls.dispose();grid.geometry.dispose();(grid.material as import("three").Material).dispose();renderer.dispose();renderer.domElement.remove();};
+      }catch(e){if(!disposed)setUnavailable(`renderer failed: ${e instanceof Error?e.message:String(e)}`);}
     })();
     return()=>{disposed=true;cleanup();};
   },[]);
-  return <><div className="r7-toolbar" aria-label="View controls">{["Iso","Front","Top","Fit"].map(name=><button key={name} disabled={!available} onClick={()=>command.current(name)}>{name}</button>)}<button disabled title="Open a document with review geometry to measure">Measure</button><button disabled>Clear measurement</button>{["↶ Roll","Roll ↷"].map(name=><button key={name} disabled={!available} onClick={()=>command.current(name)}>{name}</button>)}</div>
-    <div className="r7-empty-viewport" data-testid="empty-project-viewport" aria-label="Empty CAD viewport"><div className="r7-three" ref={host}/><div className="r7-empty-message"><strong>{partName?"Empty Part":empty?"Empty project":"No open document"}</strong><p>{partName?`${partName} has no authored geometry or revisions. Use named-feature source to preview a Part.`:empty?"Create a Part from the project panel to begin.":"Open a document from the project panel to continue."}</p>{failure&&<p role="status">{failure}</p>}</div><div className="r7-axis">CAD Z ↑<br/><span>grid = physical CAD Z=0 · mm</span></div></div>
+  return <><ViewControls host={host} unavailable={unavailable}/><div role="group" aria-label="Empty viewport inspection"><button disabled title="No review mesh; open a Part and admit review geometry to measure">Measure</button><button disabled title="No review-mesh measurement to clear">Clear measurement</button><span>Fit frames the reference grid only; no model bounds exist.</span></div>
+    <div className="r7-empty-viewport" data-testid="empty-project-viewport" aria-label="Empty CAD viewport"><div className="r7-three" ref={host}/><div className="r7-empty-message"><strong>{partName?"Empty Part":empty?"Empty project":"No open document"}</strong><p>{partName?`${partName} has no authored geometry or revisions. Use named-feature source to preview a Part.`:empty?"Create a Part from the project panel to begin.":"Open a document from the project panel to continue."}</p></div><div className="r7-axis">CAD Z ↑<br/><span>grid = physical CAD Z=0 · mm</span></div></div>
   </>;
 }
-function PartEditor({application,projectId,document,revisionId,archived,refresh,navigate,active,targets,reportDraft}:{application:WorkspaceApplication;projectId:string;document:PartDocument & {part:BrowserProject};revisionId?:string;archived:boolean;refresh:()=>Promise<void>;navigate:(url:string)=>void;active:boolean;targets:WorkbenchTargets;reportDraft?:(id:string,status:DraftStatus)=>void}) {
+function PartEditor({application,projectId,document,revisionId,archived,refresh,navigate,active,targets,reportDraft,reportCandidate}:{application:WorkspaceApplication;projectId:string;document:PartDocument & {part:BrowserProject};revisionId?:string;archived:boolean;refresh:()=>Promise<void>;navigate:(url:string)=>void;active:boolean;targets:WorkbenchTargets;reportDraft?:(id:string,status:DraftStatus)=>void;reportCandidate?:(id:string,candidate?:DocumentCandidate)=>void}) {
   const selected=revisionId?document.revisionIds[revisionId]:document.part.currentRevisionId;
   const revision=document.part.revisions.find(r=>r.id===selected)!;
   const [parameters,setParameters]=useState<LBracketParameters>({...revision.parameters}); const [preview,setPreview]=useState<{proposal:PartProposal;candidate:DesignRevision}|null>(null); const [message,setMessage]=useState(""); const [json,setJson]=useState(""); const [ready,setReady]=useState(false); const [newName,setNewName]=useState(document.name);
   const [mesh,setMesh]=useState<GeometryResult|null>(null);
+  const [measurement,setMeasurement]=useState<{scope:string;value:FixtureReviewMeasurement}|null>(null);
   const proposalGeneration = useRef(0);
   const mounted=useRef(false), operationPending=useRef(false), ownCommit=useRef<string|null>(null);
   const [busy, setBusy] = useState(false);
@@ -274,18 +284,21 @@ function PartEditor({application,projectId,document,revisionId,archived,refresh,
   useEffect(()=>{reportDraft?.(document.id,{dirty,busy,preview:!!preview});},[document.id,dirty,busy,!!preview,reportDraft]);
   const changed=base.revision.id!==revision.id || base.name!==document.name || base.archived!==archived;
   const blocked=conflict || (changed && dirty && ownCommit.current!==revision.id);
+  const basePointer=Object.keys(document.revisionIds).find(id=>document.revisionIds[id]===base.revision.id);
+  useEffect(()=>{if(!revisionId)reportCandidate?.(document.id,preview&&!blocked&&basePointer?{kind:'parameters',documentId:document.id,baseRevisionId:basePointer,id:preview.candidate.id,parameters:preview.candidate.parameters}:undefined);},[revisionId,document.id,preview,blocked,basePointer,reportCandidate]);
   const reload=()=>{
     proposalGeneration.current++;setBase({revision,name:document.name,archived});
     setParameters({...revision.parameters});setNewName(document.name);setJson("");
-    setPreview(null);setReady(false);setMesh(null);setConflict(false);ownCommit.current=null;
+    setPreview(null);setReady(false);setMesh(null);setMeasurement(null);setConflict(false);ownCommit.current=null;
   };
   useEffect(()=>{
     if(!changed)return;
     if(dirty && ownCommit.current!==revision.id) {
-      proposalGeneration.current++;setPreview(null);setReady(false);setMesh(null);setConflict(true);
+      proposalGeneration.current++;setPreview(null);setReady(false);setMesh(null);setMeasurement(null);setConflict(true);
     } else if(!conflict) reload();
   },[document,archived]);
   useEffect(() => {mounted.current=true;return () => { mounted.current=false;proposalGeneration.current += 1; };}, []);
+  useEffect(()=>{if(!active)setMeasurement(null);},[active]);
   const readonly=!!revisionId||archived; const url=`/projects/${projectId}/documents/${document.id}`;
   const run=async(fn:()=>Promise<void>)=>{
     if(operationPending.current || !mounted.current)return;
@@ -297,38 +310,59 @@ function PartEditor({application,projectId,document,revisionId,archived,refresh,
   const propose=async(input:unknown)=>{
     if(blocked||readonly)return;
     const generation = ++proposalGeneration.current;
-    setPreview(null); setReady(false);
+    setPreview(null); setReady(false);setMesh(null);setMeasurement(null);
     const p=await application.propose(input);
     if (generation !== proposalGeneration.current || !mounted.current) return;
     if(p.proposal.projectId!==projectId||p.proposal.documentId!==document.id)throw new Error("Proposal scope mismatch");
     setPreview(p);setParameters(p.proposal.parameters);
   };
   const shown=preview?.candidate??revision;
+  const scope=shown.id;
+  const admitted=active&&ready&&!blocked&&mesh?.sourceRevisionId===scope;
+  const currentMeasurement:FixtureReviewMeasurement=admitted&&measurement?.scope===scope?measurement.value:{phase:"idle"};
+  const clearMeasurement=()=>setMeasurement(null);
+  const point=(picked:FixtureReviewPoint)=>{
+    if(!admitted||!picked.every(Number.isFinite))return;
+    setMeasurement(previous=>{
+      if(previous?.scope!==scope)return previous;
+      if(previous.value.phase==="armed")return {scope,value:{phase:"endpoint-a",endpointA:picked,hoverEndpoint:null}};
+      if(previous.value.phase==="endpoint-a"&&previous.value.endpointA)return {scope,value:{phase:"complete",endpointA:previous.value.endpointA,endpointB:picked}};
+      return previous;
+    });
+  };
+  const hover=(picked:FixtureReviewPoint|null)=>setMeasurement(previous=>previous?.scope===scope&&previous.value.phase==="endpoint-a"?{scope,value:{...previous.value,hoverEndpoint:picked}}:previous);
+  const distance=currentMeasurement.endpointA&&currentMeasurement.endpointB?Math.hypot(...currentMeasurement.endpointA.map((value,index)=>value-currentMeasurement.endpointB![index])):null;
   return <>
-    {active&&createPortal(<div>    <h2 className="r7-panel-head">FeatureManager · Model</h2><section className="r7-section"><h3>{document.name}</h3><nav><button onClick={()=>navigate(`/projects/${projectId}`)}>Project overview</button>{readonly&&<button onClick={()=>navigate(url)}>Open current revision</button>}</nav><p>{readonly?"Historical / archived document — read-only":"Editable Part · L-bracket"}</p><h2>Parameters (mm)</h2>
+    {active&&createPortal(<ImportedPartCommands readonly={readonly}><div role="group" aria-label="Imported review inspection"><button disabled={!admitted} title={admitted?undefined:"Revision-matched admitted review mesh required; wait for geometry or resolve preview/conflict"} onClick={()=>{if(admitted)setMeasurement({scope,value:{phase:"armed"}});}}>Measure</button><button disabled={currentMeasurement.phase==="idle"} title={currentMeasurement.phase==="idle"?"No active review-mesh measurement":undefined} onClick={clearMeasurement}>Clear</button><p data-testid="imported-measurement">{distance!==null?`${distance.toFixed(2)} mm · review-only, not exact B-rep`:currentMeasurement.phase==="armed"?"Select first point on the review mesh":currentMeasurement.phase==="endpoint-a"?"Select second point on the review mesh":admitted?"Choose Measure for a two-point review-mesh distance":"Measurement unavailable until revision-matched review geometry is admitted"}</p></div></ImportedPartCommands>,targets.commands)}
+    {active&&createPortal(<div><section className="r7-section"><nav><button onClick={()=>navigate(`/projects/${projectId}`)}>Project overview</button>{readonly&&<button onClick={()=>navigate(url)}>Open current revision</button>}</nav><p>{readonly?"Historical / archived document — read-only":"Editable imported Part · L-bracket"}</p><h2>Parameters (mm)</h2>
     {blocked&&<p role="alert">Document changed outside this draft. Reload the latest revision before authoring; your unsaved draft has been preserved.</p>}{blocked&&<button disabled={busy} onClick={reload}>Reload latest revision</button>}
-    <fieldset disabled={readonly || busy || blocked}>{Object.entries(parameters).map(([key,value])=><label key={key}>{key}<input aria-label={key} type="number" step="0.1" value={Number.isFinite(value) ? value : ""} onChange={e=>{proposalGeneration.current += 1;setParameters({...parameters,[key]:e.target.valueAsNumber});setPreview(null);setReady(false);}}/></label>)}
+    <fieldset disabled={readonly || busy || blocked}>{Object.entries(parameters).map(([key,value])=><label key={key}>{key}<input aria-label={key} type="number" step="0.1" value={Number.isFinite(value) ? value : ""} onChange={e=>{proposalGeneration.current += 1;setParameters({...parameters,[key]:e.target.valueAsNumber});setPreview(null);setReady(false);setMesh(null);setMeasurement(null);}}/></label>)}
       <button onClick={()=>void run(()=>propose(proposal()))}>Propose and preview</button><button disabled={!preview||!ready||mesh?.sourceRevisionId!==preview.candidate.id} onClick={()=>void run(async()=>{if(blocked||readonly||!preview||!ready||mesh?.sourceRevisionId!==preview.candidate.id)return;ownCommit.current=preview.candidate.id;try {await application.commit(preview.proposal);if(!mounted.current)return;await refresh();if(mounted.current)setMessage("Revision committed; engineering approval not granted.");} catch(e) {ownCommit.current=null;throw e;}})}>Commit revision</button>
-      {preview && <section aria-label="Proposed parameter changes"><h2>Preview only · not committed</h2><ul>{Object.entries(preview.proposal.parameters).filter(([key, value]) => value !== revision.parameters[key as keyof LBracketParameters]).map(([key, value]) => <li key={key}>{key}: {revision.parameters[key as keyof LBracketParameters]} → {value} mm</li>)}</ul><button onClick={() => {proposalGeneration.current += 1;setPreview(null);setParameters({...revision.parameters});setReady(false);}}>Discard preview</button></section>}
+      {preview && <section aria-label="Proposed parameter changes"><h2>Preview only · not committed</h2><ul>{Object.entries(preview.proposal.parameters).filter(([key, value]) => value !== revision.parameters[key as keyof LBracketParameters]).map(([key, value]) => <li key={key}>{key}: {revision.parameters[key as keyof LBracketParameters]} → {value} mm</li>)}</ul><button onClick={() => {proposalGeneration.current += 1;setPreview(null);setParameters({...revision.parameters});setReady(false);setMesh(null);setMeasurement(null);}}>Discard preview</button></section>}
     </fieldset><fieldset disabled={readonly||busy||blocked}>      <label>Part name<input value={newName} onChange={e=>setNewName(e.target.value)}/></label><button onClick={()=>void run(async()=>{if(blocked||readonly)return;await application.renamePart(projectId,document.id,newName);if(!mounted.current)return;setBase(previous=>({...previous,name:newName}));await refresh();})}>Rename Part</button>
 </fieldset></section>
-    <h2 className="r7-panel-head">Outputs · active document</h2><section className="r7-section"><button disabled={!!revisionId} onClick={()=>void run(async()=>downloadPartFile(`${document.id}-custody.json`,JSON.stringify(await application.exportPart(projectId,document.id),null,2),"application/json"))}>Export Part custody</button><button disabled={!mesh||mesh.sourceRevisionId!==shown.id} onClick={()=>void run(async()=>downloadPartFile(`${document.id}-review-unreleased.stl`,reviewPartStl(mesh!,shown.id),"model/stl"))}>Download Part review STL (unreleased)</button><p role="status">{message}</p></section><section className="r7-section"><h2>Revision history</h2>{Object.entries(document.revisionIds).reverse().map(([id,content],index)=><button key={id} onClick={()=>navigate(`${url}/revisions/${id}`)}>Revision {document.part.revisions.length-index}{content===document.part.currentRevisionId?" · current":""}</button>)}
+    <section className="r7-section"><h2>Revision history</h2>{Object.entries(document.revisionIds).reverse().map(([id,content],index)=><button key={id} onClick={()=>navigate(`${url}/revisions/${id}`)}>Revision {document.part.revisions.length-index}{content===document.part.currentRevisionId?" · current":""}</button>)}
     </section></div>,targets.left)}
-    {active&&createPortal(<div><section className="r7-section"><h3>Selected context</h3><p>Active Part and base revision are attached to local parameter proposals. Geometry selection is not connected to an agent.</p><button disabled>Attach selection to agent context</button><h3>Exact attached payload</h3><pre className="r7-context">{JSON.stringify({projectId,documentId:document.id,expectedRevisionId:Object.keys(document.revisionIds).find(id=>document.revisionIds[id]===base.revision.id)},null,2)}</pre></section><section className="r7-section"><fieldset disabled={readonly||busy||blocked}>      <h2>Structured change request</h2><p>Local typed proposal, no LLM backend. Supply the six parameter values as JSON; project, document and base revision are attached automatically.</p><textarea aria-label="Structured change request" value={json} onChange={e=>{proposalGeneration.current+=1;setJson(e.target.value);setPreview(null);setReady(false);}} placeholder={JSON.stringify(parameters,null,2)}/><button onClick={()=>void run(async()=>{setPreview(null);setReady(false);await propose({...proposal(),parameters:JSON.parse(json)});})}>Prepare change proposal</button>
-</fieldset><p>Manual proposal only. {preview?"Prepared locally · preview only, not sent.":"Not prepared or sent."}</p></section></div>,targets.right)}
-    {active&&createPortal(<section className="r7-authored-viewport" data-document-id={document.id} data-revision-id={shown.id}><Viewport onReviewMesh={setMesh} parameters={shown.parameters} authoritativeBase={shown} onBuildStatus={status=>setReady(status.state==="ready")} /></section>
+    {active&&createPortal(<div><p>Imported parameter Part · {revisionId?`historical revision ${revisionId}`:preview?"uncommitted parameter preview":"current committed revision"}. Review only.</p><button disabled={!!revisionId} title={revisionId?"Open current revision to export custody":undefined} onClick={()=>void run(async()=>downloadPartFile(`${document.id}-custody.json`,JSON.stringify(await application.exportPart(projectId,document.id),null,2),"application/json"))}>Export Part custody</button><button disabled={!ready||blocked||!mesh||mesh.sourceRevisionId!==shown.id} title={!ready||blocked||!mesh||mesh.sourceRevisionId!==shown.id?"Revision-matched admitted review geometry required":undefined} onClick={()=>void run(async()=>downloadPartFile(`${document.id}-${preview?"uncommitted-preview-":""}review-unreleased.stl`,reviewPartStl(mesh!,shown.id),"model/stl"))}>Download Part review STL (unreleased)</button><p role="status">{message}</p></div>,targets.outputs)}
+    {active&&createPortal(<details className="r7-section r7-advanced-source"><summary>Advanced · structured change request</summary><fieldset disabled={readonly||busy||blocked}><p>Local typed proposal, no LLM backend. Supply the six parameter values as JSON; project, document and base revision are attached automatically.</p><textarea aria-label="Structured change request" value={json} onChange={e=>{proposalGeneration.current+=1;setJson(e.target.value);setPreview(null);setReady(false);setMesh(null);setMeasurement(null);}} placeholder={JSON.stringify(parameters,null,2)}/><button onClick={()=>void run(async()=>{setPreview(null);setReady(false);setMesh(null);setMeasurement(null);await propose({...proposal(),parameters:JSON.parse(json)});})}>Prepare change proposal</button></fieldset><p>Manual proposal only. {preview?"Prepared locally · preview only, not sent.":"Not prepared or sent."}</p></details>,targets.right)}
+    {active&&createPortal(<section className="r7-authored-viewport" data-document-id={document.id} data-revision-id={shown.id}><Viewport key={scope} viewKey={`${projectId}:${document.id}`} onReviewMesh={setMesh} parameters={shown.parameters} authoritativeBase={shown} onBuildStatus={status=>setReady(status.state==="ready")} measurement={currentMeasurement} onMeasurementPoint={point} onMeasurementHover={hover} onMeasurementCancel={clearMeasurement}/></section>
 ,targets.center)}
   </>;
 }
 /** Canonical bounded source text — kept in sync with src/modeling/source.ts HEADER
  * so users see the exact wire format the application enforces. */
+function ImportedPartCommands({children,readonly}:{children:ReactNode;readonly:boolean}) {
+  const id=useId();const [category,setCategory]=useState<PartCategory>("Inspect");
+  const reason=readonly?"Historical / archived imported Part is read-only; Sketch and feature mutations are unavailable.":"Imported parameter-authority Part has no named-feature history; edit its parameters instead of Sketch or feature mutations.";
+  return <section className="r7-command-ui" aria-label="Part commands"><PartCategoryTabs id={id} category={category} onSelect={setCategory}/><div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${category}`}>{category==="Inspect"?children:<><div className="r7-command-tools">{(category==="Sketch"?["New Sketch","Line","Rectangle","Circle","Dimension"]:["Extrude","Revolve","Hole","Linear Pattern","Fillet","Chamfer"]).map(name=><button key={name} disabled title={reason}>{name}</button>)}</div><p className="r7-section-help">{reason}</p></>}</div></section>;
+}
 const EMPTY_FEATURE_SOURCE_PLACEHOLDER =
   '// Piton browser-typescript/v1; units=mm; restricted named-feature source\n' +
   'part.rectangle({"id":"outline","name":"Plate outline","plane":"XY","width":80,"height":50});\n' +
   'part.extrude({"id":"plate","name":"Plate thickness","profileId":"outline","distance":6});\n' +
   'part.hole({"id":"mount-1","name":"Mounting hole 1","bodyId":"plate","x":15,"y":15,"diameter":5,"extent":"through"});\n';
 /** Both first-feature and subsequent source edits cross the same preview gate. */
-function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pending,archived,revisionId,navigate,targets,reportDraft,openProperties}:{
+function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pending,archived,revisionId,navigate,targets,reportDraft,reportCandidate,openProperties}:{
   active:boolean;
   application: WorkspaceApplication;
   projectId: string;
@@ -340,6 +374,7 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
   navigate?:(url:string)=>void;
   targets?:WorkbenchTargets;
   reportDraft?:(id:string,status:DraftStatus)=>void;
+  reportCandidate:(id:string,candidate?:DocumentCandidate)=>void;
   openProperties:()=>void;
 }) {
   const current = part && isFeaturePart(part.part) ? part.part.revisions.find(r=>r.id===part.part.currentRevisionId) : undefined;
@@ -354,6 +389,8 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
   const [message,setMessage]=useState("");
   const [sketchDirty,setSketchDirty]=useState(false);
   const [sketchVisible,setSketchVisible]=useState(false);
+  const [rendererStatus,setRendererStatus]=useState<FeatureRendererStatus|null>(null);
+  const reportRenderer=useCallback((status:FeatureRendererStatus)=>{setRendererStatus(status);if(status.state!=="ready")setMeasurement(previous=>previous?.scope===status.revisionId?null:previous);},[]);
   const [draftBase,setDraftBase]=useState<string|null>(()=>part&&isFeaturePart(part.part)?Object.keys(part.revisionIds).find(id=>part.revisionIds[id]===part.part.currentRevisionId)??null:null);
   const [conflict,setConflict]=useState(false);
   const [sketchReset,setSketchReset]=useState(0);
@@ -398,13 +435,23 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
   useEffect(()=>{if(part)reportDraft?.(part.id,{dirty:draftDirty,busy,preview:!!preview&&!blocked});},[part?.id,draftDirty,busy,preview,blocked,reportDraft]);
   if (!part) return null;
   const visiblePreview=!revisionId&&!blocked?preview:null;
+  useEffect(()=>{reportCandidate(part.id,visiblePreview?{kind:'features',documentId:part.id,baseRevisionId:draftBase,id:visiblePreview.candidate.id,authored:visiblePreview.candidate.authored}:undefined);},[part.id,draftBase,visiblePreview?.candidate.id,reportCandidate]);
   const scope=visiblePreview?.candidate.id??shown?.id??"";
   const admitted=active&&!!geometry&&geometry.scope===scope;
-  const currentMeasurement=admitted&&measurement?.scope===scope?measurement.value:{phase:"idle"} as FixtureReviewMeasurement;
-  const measure=()=>{if(admitted)setMeasurement({scope,value:{phase:"armed"}});};
+  const pickingReady=admitted&&!sketchVisible&&rendererStatus?.revisionId===scope&&rendererStatus.state==="ready";
+  const measureUnavailableReason=!admitted?"No admitted review mesh to measure":sketchVisible?"Finish or cancel the sketch to inspect review geometry":rendererStatus?.revisionId===scope?rendererStatus.reason??"Review renderer initializing":"Review renderer initializing";
+  const displayedSource=visiblePreview?.candidate.authored??shown?.authored;
+  const sourcePointer=visiblePreview?null:revisionId??currentPointer;
+  const outputMode=revisionId?"Historical committed":visiblePreview?"Uncommitted preview":shown?"Current committed":"Empty Part";
+  let exportable=false;
+  if(displayedSource&&admitted&&geometryState==="ready"&&!blocked) {
+    try {assertFeatureEvaluation(displayedSource,geometry!.mesh);exportable=true;} catch { /* Do not expose rejected or mismatched worker geometry. */ }
+  }
+  const currentMeasurement=pickingReady&&measurement?.scope===scope?measurement.value:{phase:"idle"} as FixtureReviewMeasurement;
+  const measure=()=>{if(pickingReady)setMeasurement({scope,value:{phase:"armed"}});};
   const clearMeasurement=()=>setMeasurement(null);
   const point=(point:FixtureReviewPoint)=>{
-    if(!admitted||!point.every(Number.isFinite))return;
+    if(!pickingReady||!point.every(Number.isFinite))return;
     setMeasurement(previous=>{
       if(previous?.scope!==scope)return previous;
       const value=previous.value;
@@ -438,6 +485,13 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
     finally{operation.current=false;if(mounted.current)setBusy(false);}
   };
   return <>
+    {active&&targets&&createPortal(<div>{displayedSource&&<p>{outputMode} · {sourcePointer?`revision ${sourcePointer} · `:""}{scope} · browser-typescript/v1 · CAD mm.</p>}
+      {draftDirty&&!visiblePreview&&!revisionId&&<p>Uncommitted draft is not displayed here; preview it before reviewing its generated source.</p>}
+      {blocked&&<p>Source draft conflicts with the current revision; reload before exporting review geometry.</p>}
+      <details><summary>Generated source · {outputMode}</summary>{displayedSource?<pre data-testid="generated-feature-source">{displayedSource.source}</pre>:<p>No authored feature source. Preview a named feature first.</p>}</details>
+      <button disabled={!displayedSource} title={displayedSource?undefined:"No authored source to download"} onClick={()=>{if(!displayedSource)return;downloadPartFile(`${part.id}-${revisionId?`historical-${revisionId}`:visiblePreview?"uncommitted-preview":`committed-${sourcePointer}`}-source.txt`,displayedSource.source,"text/plain");}}>Download generated source ({outputMode})</button>
+      <button disabled={!exportable} title={exportable?undefined:!displayedSource?"No authored source or review mesh yet":geometryState==="failed"?"Review geometry rejected by worker":"Admitted, source-matched review geometry required; loading, invalidated or stale meshes cannot be exported"} onClick={()=>{if(!exportable||!displayedSource||!geometry||geometry.scope!==scope)return;try {downloadPartFile(`${part.id}-${revisionId?`historical-${revisionId}`:visiblePreview?"uncommitted-preview":`committed-${sourcePointer}`}-review-unreleased.stl`,featureReviewStl(displayedSource,geometry.mesh),"model/stl");}catch(e){setError(e instanceof Error?e.message:"Review mesh unavailable");}}}>Download feature review STL (unreleased)</button>
+      {displayedSource&&<p>Review mesh only; no fabrication approval or machine actuation.</p>}</div>,targets.outputs)}
     {active&&createPortal(<section className="r7-empty-authoring" data-testid="empty-feature-authoring" aria-label="Part source and revision">
       <h2 className="r7-panel-head">{revisionId?"Historical revision":current?"Current Part":"New Part draft"}</h2>
       <p className="r7-section-help">{part.name} · browser-typescript/v1 · mm · review mesh only. {revisionId?"Read-only historical source.":"Source is authored only on explicit commit."}</p>
@@ -452,9 +506,9 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
       {visiblePreview&&<section data-testid="feature-preview"><strong>Preview only · not committed</strong><p>{visiblePreview.candidate.id} · {visiblePreview.geometry.triangles.length/3} triangles · {visiblePreview.geometry.volumeMm3.toFixed(2)} mm³</p></section>}
       {!revisionId&&message&&<p role="status" data-testid="empty-feature-message">{message}</p>}{error&&<p role="alert" data-testid="empty-feature-error">{error}</p>}
     </section>,targets?.right??globalThis.document.querySelector(".r7-right")??globalThis.document.body)}
-    {targets&&createPortal(<div hidden={!active}><PartCommandUI active={active} context={{projectId,documentId:part.id,revisionId:draftBase}} baseSource={revisionId?shown?.authored??emptyFeatureSource():current?.authored??emptyFeatureSource()} source={revisionId?shown?.authored.source??source:!current&&source===EMPTY_FEATURE_SOURCE_PLACEHOLDER?emptyFeatureSource().source:source} onSource={next=>{invalidate();setSource(next);}} readonly={readonly||blocked} busy={busy||pending} previewReady={!!visiblePreview} onPreview={()=>void submit()} onCommit={()=>void commit()} onSketchDirty={setSketchDirty} onSketchVisible={setSketchVisible} onOpenProperties={openProperties} propertyTarget={targets.right} viewportTarget={targets.center} resetToken={sketchReset} measureAvailable={admitted} measurement={currentMeasurement} onMeasure={measure} onClearMeasurement={clearMeasurement}/></div>,targets.commands)}
-    {active&&current&&targets&&createPortal(<section className="r7-section" aria-label="Named feature tree"><h2>Model tree</h2><p>{readFeatures(shown?.authored??current.authored).length} named features · 1 review body</p><ul>{readFeatures(shown?.authored??current.authored).map(f=><li key={f.id}>{f.name} · {f.kind}</li>)}</ul></section>,targets.left)}
-    {active&&!sketchVisible&&admitted&&geometry&&targets&&createPortal(<FeatureMeshViewport key={scope} geometry={geometry.mesh} revisionId={scope} measurement={currentMeasurement} onMeasurementPoint={point} onMeasurementHover={hover} onMeasurementCancel={clearMeasurement}/>,targets.center)}
+    {targets&&createPortal(<div hidden={!active}><PartCommandUI active={active} context={{projectId,documentId:part.id,revisionId:draftBase}} baseSource={revisionId?shown?.authored??emptyFeatureSource():current?.authored??emptyFeatureSource()} source={revisionId?shown?.authored.source??source:!current&&source===EMPTY_FEATURE_SOURCE_PLACEHOLDER?emptyFeatureSource().source:source} onSource={next=>{invalidate();setSource(next);}} readonly={readonly||blocked} busy={busy||pending} previewReady={!!visiblePreview} onPreview={()=>void submit()} onCommit={()=>void commit()} onSketchDirty={setSketchDirty} onSketchVisible={setSketchVisible} onOpenProperties={openProperties} propertyTarget={targets.right} viewportTarget={targets.center} resetToken={sketchReset} measureAvailable={pickingReady} measureUnavailableReason={measureUnavailableReason} measurement={currentMeasurement} onMeasure={measure} onClearMeasurement={clearMeasurement}/></div>,targets.commands)}
+
+    {active&&!sketchVisible&&admitted&&geometry&&targets&&createPortal(<FeatureMeshViewport key={scope} viewKey={`${projectId}:${part.id}:${scope}`} geometry={geometry.mesh} revisionId={scope} measurement={currentMeasurement} onMeasurementPoint={point} onMeasurementHover={hover} onMeasurementCancel={clearMeasurement} onRendererStatus={reportRenderer}/>,targets.center)}
     {active&&!sketchVisible&&!admitted&&targets&&createPortal(shown||busy||geometryState==="failed"?<section className="r7-empty-viewport r7-geometry-status" data-testid="feature-geometry-status" role={geometryState==="failed"?"alert":"status"}>
       <strong>{geometryState==="failed"?"Review geometry unavailable":geometryState==="invalidated"?"Review preview invalidated":revisionId?"Loading historical review geometry":"Loading review geometry"}</strong>
       <p>{shown?"Saved Part source and revision history remain available; this is not an empty Part.":"Draft is not committed; no saved geometry was created."}</p>
