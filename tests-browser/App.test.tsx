@@ -135,6 +135,12 @@ describe("Piton workbench", () => {
     expect(screen.getByRole("button", { name: "Assembly fixture" })).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(screen.getByRole("button", { name: "Part fixture" }));
     expect(screen.getByRole("button", { name: "Part fixture" })).toHaveAttribute("aria-pressed", "true");
+    const partCategories = screen.getByRole("group", { name: "Review command categories" });
+    expect(within(partCategories).getAllByRole("button").map(button => button.textContent)).toEqual(["Sketch", "Features", "Inspect"]);
+    fireEvent.click(within(partCategories).getByRole("button", { name: "Sketch" }));
+    expect(screen.getByRole("button", { name: "New Sketch" })).toBeDisabled();
+    fireEvent.click(within(partCategories).getByRole("button", { name: "Features" }));
+    expect(screen.queryByRole("button", { name: "New Sketch" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Assembly fixture" }));
     expect(screen.getByText(/review-only interaction evidence/i)).toBeVisible();
     expect(screen.getByText(/cannot author occurrences, mates, transforms, or Assembly revisions/i)).toBeVisible();

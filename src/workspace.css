@@ -128,6 +128,16 @@
 .r7-empty-authoring .r7-feature-source-label { display:flex; flex-direction:column; gap:5px; font-size:11px; color:#a9bac9; }
 .r7-empty-authoring textarea { min-height:120px; font:11px/1.45 ui-monospace,monospace; }
 .r7-empty-authoring .r7-feature-source-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.r7-editor-target { display:flex; flex-direction:column; flex:1; min-height:0; max-height:none; overflow:hidden; }
+.r7-editor-target > div:not([hidden]) { flex:none; max-height:45%; overflow:auto; }
+.r7-editor-target > .r7-authored-viewport { flex:1; height:auto; min-height:0; }
+.r7-command-ui { border-bottom:1px solid var(--r7-line); background:#111d29; padding:6px 9px; }
+.r7-command-tabs,.r7-command-tools,.r7-command-preview,.r7-sketch-state { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:4px 0; }
+.r7-command-tabs button[aria-selected="true"] { border-color:#59d8ff; color:#59d8ff; }
+.r7-command-editor { display:flex; flex-wrap:wrap; gap:8px; align-items:end; padding:7px 0; }
+.r7-command-editor label { width:92px; font-size:11px; }
+.r7-command-preview small { color:#a9bac9; }
+.r7-sketch-preview { width:120px; height:120px; color:#59d8ff; border:1px solid var(--r7-line); background:#09141d; }
 .r7-workbench .r7-drawer-toggle,.r7-workbench .r7-drawer-close { display:none; }
 .project-workspace .workspace-primary { background:#f47a35; border-color:#f47a35; color:#071019; font-weight:750; padding:12px 22px; }
 .project-workspace > article { position:relative; max-width:1000px; margin:10px 0; border:1px solid #2a3c4f; border-radius:6px; background:#101b27; }

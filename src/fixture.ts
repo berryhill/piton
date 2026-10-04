@@ -405,7 +405,7 @@ export function flattenFixtureTree(nodes: readonly FixtureTreeNode[]): readonly 
 
 export function fixtureCommandCategories(documentId: FixtureDocumentId): readonly FixtureCommandCategory[] {
   return fixtureDocument(documentId).kind === "part"
-    ? ["features", "sketch", "inspect"]
+    ? ["sketch", "features", "inspect"]
     : ["assembly", "mates", "inspect"];
 }
 

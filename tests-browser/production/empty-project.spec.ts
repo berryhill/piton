@@ -80,7 +80,7 @@ test("two genuinely empty Parts stay in project tabs and survive close, reload a
   expect(await page.evaluate(() => window.pitonWorkspace.read())).toEqual(beforeTree);
   const secondUrl = await createEmptyPart(page, "Second empty Part");
   await expectActivePart(page, projectName, "Second empty Part");
-  await expect(page.getByRole("tab")).toHaveCount(2);
+  await expect(page.getByRole("tablist", { name: "Open documents", exact: true }).getByRole("tab")).toHaveCount(2);
   expect(await shell!.evaluate(element => element.isConnected)).toBe(true);
   await expectEmptyParts(page, projectName, ["First empty Part", "Second empty Part"]);
   await page.getByRole("tab", { name: "First empty Part", exact: true }).click();
@@ -92,7 +92,7 @@ test("two genuinely empty Parts stay in project tabs and survive close, reload a
   await expectActivePart(page, projectName, "Second empty Part");
   await page.getByRole("button", { name: "Close Second empty Part", exact: true }).click();
   await expect(page).toHaveURL(projectUrl);
-  await expect(page.getByRole("tab")).toHaveCount(0);
+  await expect(page.getByRole("tablist", { name: "Open documents", exact: true }).getByRole("tab")).toHaveCount(0);
   expect(await shell!.evaluate(element => element.isConnected)).toBe(true);
   await expect(page.getByTestId("empty-project-viewport")).toBeVisible();
   await expectEmptyParts(page, projectName, ["First empty Part", "Second empty Part"]);

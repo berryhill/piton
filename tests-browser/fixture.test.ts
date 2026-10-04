@@ -218,7 +218,7 @@ describe("accepted R14 Bench Clamp fixture", () => {
   });
 
   it("admits command categories by active document kind and preserves independent category state", () => {
-    expect(fixtureCommandCategories("base-plate.part")).toEqual(["features", "sketch", "inspect"]);
+    expect(fixtureCommandCategories("base-plate.part")).toEqual(["sketch", "features", "inspect"]);
     expect(fixtureCommandCategories("bench-clamp.assembly")).toEqual(["assembly", "mates", "inspect"]);
     let session = createFixtureSession();
     const unchanged = session;

@@ -39,7 +39,7 @@ export function assertFeatureRevision(value: FeatureRevision): void {
     || typeof value.createdAt !== "string" || !Number.isFinite(Date.parse(value.createdAt)) || value.authorityProfile !== "browser-typescript/v1"
     || Object.entries(SAFETY_TRUTH).some(([key, truth]) => value[key as keyof FeatureRevision] !== truth)) throw new Error("Invalid feature revision integrity");
   readFeatures(value.authored);
-  if (!readFeatures(value.authored).some(f => f.kind === "extrude")) throw new Error("Feature revision must define a solid extrusion");
+  if (!readFeatures(value.authored).some(f => f.kind === "extrude" || f.kind === "revolve")) throw new Error("Feature revision must define a solid extrusion or revolve");
   if (value.id !== `rev-${sha256Hex(bodyJson(value))}`) throw new Error("Feature revision digest mismatch");
 }
 export function assertFeaturePart(part: FeaturePart): void {
