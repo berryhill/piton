@@ -9,6 +9,8 @@
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc --noEmit && pnpm typecheck:server",
     "typecheck:server": "tsc -p server/chat/tsconfig.json",
+    "build:chat": "tsc -p server/chat/tsconfig.build.json",
+    "start:chat": "node .piton/chat/main.js",
     "test": "vitest run && pnpm test:server",
     "test:server": "vitest run --config server/chat/vitest.config.ts",
     "test:e2e": "playwright test",

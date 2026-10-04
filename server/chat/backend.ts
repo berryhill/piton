@@ -29,10 +29,11 @@
  */
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { constants } from 'node:fs';
-import { mkdir, open, rename, lstat } from 'node:fs/promises';
+import { mkdir, open, rename, lstat, link, unlink } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { createChatHandler, type ChatOptions as BridgeOptions } from './bridge.js';
+import { BusyError, SessionStore } from './store.js';
 
 type BackendProfile = 'nick-mercer';
 
@@ -97,12 +98,12 @@ const conflict = (code: string) => new HttpError(409, code);
 const unavailable = () => new HttpError(503, 'unavailable');
 
 type AuthRecord = { tokenHash: string; csrf: string; principal: string; expires: number };
-type ProjectRecord = { id: string; principal: string; nativeSessionId: string | null; status: 'idle' | 'running' | 'interrupted'; updatedAt: number };
+type ProjectRecord = { id: string; principal: string; nativeSessionId: string | null; status: 'idle' | 'running' | 'interrupted'; updatedAt: number; bridgeBaseline?: string; expectedTurn?: { runId: string; requestId: string } };
 type RequestRecord = { id: string; projectId: string; fingerprint: string };
 type Message = { role: 'user' | 'assistant'; content: string };
 
 /** Project-scoped visible transcript storage. Distinct from bridge SessionStore. */
-class ConversationLedger {
+export class ConversationLedger {
   constructor(private readonly directory: string) {
     if (!isAbsolute(directory)) throw new Error('Private absolute storage directory required');
   }
@@ -138,15 +139,24 @@ class ConversationLedger {
   async append(projectId: string, documentId: string | null, message: Message): Promise<Message[]> {
     const current = await this.load(projectId, documentId);
     const trimmed = [...current.slice(-199), message];
-    await this.write(projectId, documentId, trimmed);
+    const updatedAt = now();
+    const serialize = () => JSON.stringify({ messages: trimmed, updatedAt });
+    let serialized = serialize();
+    // Bound the exact UTF-8 envelope that read() accepts, retaining newest records.
+    while (Buffer.byteLength(serialized, 'utf8') > MAX_RECORD_BYTES && trimmed.length > 1) {
+      trimmed.shift();
+      serialized = serialize();
+    }
+    if (Buffer.byteLength(serialized, 'utf8') > MAX_RECORD_BYTES) throw new Error('Conversation message too large');
+    await this.write(projectId, documentId, serialized);
     return trimmed;
   }
-  private async write(projectId: string, documentId: string | null, messages: Message[]): Promise<void> {
+  private async write(projectId: string, documentId: string | null, serialized: string): Promise<void> {
     const target = this.key(projectId, documentId);
     const temporary = target + '.' + randomUUID() + '.tmp';
     const file = await open(temporary, constants.O_EXCL | constants.O_CREAT | constants.O_WRONLY, 0o600);
     try {
-      await file.writeFile(JSON.stringify({ messages, updatedAt: now() }));
+      await file.writeFile(serialized);
       await file.sync();
     } finally { await file.close(); }
     await rename(temporary, target);
@@ -254,31 +264,35 @@ class IdempotencyStore {
   }
   private async ready() { await mkdir(this.directory, { recursive: true, mode: 0o700 }); }
   private path(id: string) { return join(this.directory, createHash('sha256').update(id).digest('hex') + '.json'); }
-  async check(id: string, projectId: string, fingerprint: string): Promise<{ status: 'new' } | { status: 'duplicate' } | { status: 'conflict' }> {
-    await this.ready();
-    try {
-      const file = await open(this.path(id), constants.O_RDONLY | constants.O_NOFOLLOW);
-      try {
-        const text = await file.readFile('utf8');
-        const existing = JSON.parse(text) as RequestRecord;
-        if (existing.projectId === projectId && existing.fingerprint === fingerprint) return { status: 'duplicate' };
-        return { status: 'conflict' };
-      } finally { await file.close(); }
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
-      return { status: 'new' };
-    }
-  }
-  async record(record: RequestRecord): Promise<void> {
+  async reserve(record: RequestRecord): Promise<{ status: 'new' | 'duplicate' | 'conflict' }> {
     await this.ready();
     const target = this.path(record.id);
     const temporary = target + '.' + randomUUID() + '.tmp';
     const file = await open(temporary, constants.O_EXCL | constants.O_CREAT | constants.O_WRONLY, 0o600);
     try {
-      await file.writeFile(JSON.stringify(record));
-      await file.sync();
-    } finally { await file.close(); }
-    await rename(temporary, target);
+      try {
+        await file.writeFile(JSON.stringify(record));
+        await file.sync();
+      } finally { await file.close(); }
+      try {
+        // Publish a complete immutable reservation without replacing another owner.
+        // The filesystem arbitrates globally, including across backend instances.
+        await link(temporary, target);
+        return { status: 'new' };
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        const existingFile = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+        try {
+          const stat = await existingFile.stat();
+          if (!stat.isFile() || stat.size > 4096 || stat.uid !== process.getuid?.() || (stat.mode & 0o077)) throw new Error('Unsafe request record');
+          const existing = JSON.parse(await existingFile.readFile('utf8')) as RequestRecord;
+          return { status: existing.id === record.id && existing.projectId === record.projectId && existing.fingerprint === record.fingerprint ? 'duplicate' : 'conflict' };
+        } finally { await existingFile.close(); }
+      }
+    } finally {
+      // Never release the published reservation: upstream submission may be uncertain.
+      await unlink(temporary);
+    }
   }
 }
 
@@ -304,6 +318,8 @@ export function createBackendService(options: BackendOptions): BackendService {
   const ledger = new ConversationLedger(join(stateRoot, 'conversations'));
   const idem = new IdempotencyStore(join(stateRoot, 'requests'));
   const activeRuns = new ActiveRuns();
+  const projectLocks = new SessionStore(join(stateRoot, 'project-locks'));
+  const bridgeStore = new SessionStore(join(stateRoot, 'bridge'));
   const isLoopback = ['127.0.0.1', '[::1]', 'localhost'].includes(origin.hostname);
   const allowLocalBootstrap = Boolean(options.allowLocalBootstrap) && isLoopback;
   const tailscaleLogin = options.tailscaleLogin;
@@ -535,7 +551,9 @@ export function createBackendService(options: BackendOptions): BackendService {
     const project = await projectStore.get(projectId);
     if (!project || project.principal !== auth.principal) throw forbidden('project_not_owned');
     const messages = await ledger.load(projectId, null);
-    jsonResponse(res, 200, { messages, blocked: project.status === 'interrupted', status: project.status });
+    const lockState = project.status === 'running' ? await projectLocks.lockState(projectId) : undefined;
+    const crashed = project.status === 'running' && (lockState === 'dead' || lockState === 'absent');
+    jsonResponse(res, 200, { messages, blocked: project.status === 'interrupted' || crashed, status: crashed ? 'interrupted' : project.status, recoveryRequired: crashed || project.status === 'interrupted' });
   }
 
   async function stopControl(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -550,7 +568,7 @@ export function createBackendService(options: BackendOptions): BackendService {
     const project = await projectStore.get(projectId);
     if (!project || project.principal !== auth.principal) throw forbidden('project_not_owned');
     const stopped = activeRuns.stop(projectId);
-    jsonResponse(res, 200, { stopped });
+    jsonResponse(res, 200, { stopped, upstreamCancellationConfirmed: false });
   }
 
   async function recoverControl(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -562,11 +580,34 @@ export function createBackendService(options: BackendOptions): BackendService {
     if (!body || typeof body !== 'object') throw badRequest();
     const projectId = body.projectId;
     if (typeof projectId !== 'string' || !UUID_RE.test(projectId)) throw badRequest();
-    const next = await projectStore.update(projectId, (record) => {
-      if (record.principal !== auth.principal) throw forbidden('project_not_owned');
-      return { ...record, nativeSessionId: null, status: 'idle' };
-    });
-    jsonResponse(res, 200, { recovered: true, status: next.status });
+    activeRuns.limit(projectId);
+    const owned = await projectStore.get(projectId);
+    if (!owned || owned.principal !== auth.principal) throw forbidden('project_not_owned');
+    await projectLocks.locked(projectId, async () => {
+      const record = await projectStore.get(projectId);
+      if (!record || record.principal !== auth.principal) throw forbidden('project_not_owned');
+      const key = bridgeStore.key(auth.principal, projectId, PROJECT_NULL);
+      await bridgeStore.locked(key, async () => {
+        // Bridge saves a validated completed turn before emitting assistant.completed.
+        // Reconcile only the exact durable completed turn, never transcript equality or a stale reply.
+        let messages = await ledger.load(projectId, null);
+        const receipt = await bridgeStore.load(key);
+        const assistant = receipt.messages.at(-1);
+        const user = receipt.messages.at(-2);
+        if (record.expectedTurn && receipt.completedTurn?.projectId === projectId &&
+            receipt.completedTurn.documentId === PROJECT_NULL &&
+            receipt.completedTurn.runId === record.expectedTurn.runId &&
+            receipt.completedTurn.requestId === record.expectedTurn.requestId &&
+            receipt.sessionId && receipt.uncertain === false && assistant?.role === 'assistant' &&
+            user?.role === 'user' && messages.at(-1)?.role === 'user' && messages.at(-1)?.content === user.content) {
+          messages = await ledger.append(projectId, null, assistant);
+        }
+        await bridgeStore.archive(key);
+        await bridgeStore.save(key, { version: 1, messages });
+      }, true);
+      await projectStore.update(projectId, current => ({ ...current, nativeSessionId: null, status: 'idle', bridgeBaseline: undefined, expectedTurn: undefined }));
+    }, true);
+    jsonResponse(res, 200, { recovered: true, status: 'idle', nativeSession: 'replacement_on_next_send' });
   }
 
   type BridgeProxyFrame = { event: string; data: Record<string, unknown> };
@@ -574,6 +615,8 @@ export function createBackendService(options: BackendOptions): BackendService {
   function proxyConversationToBridge(input: {
     projectId: string;
     documentId: string;
+    runId: string;
+    requestId: string;
     message: string;
     context: string | undefined;
     cookie: string | undefined;
@@ -582,7 +625,7 @@ export function createBackendService(options: BackendOptions): BackendService {
   }): Promise<{ status: number; frames: AsyncIterable<BridgeProxyFrame> }> {
     return new Promise((resolve, reject) => {
       if (!bridgeOrigin) { reject(unavailable()); return; }
-      const payload = JSON.stringify({ projectId: input.projectId, documentId: input.documentId, message: input.message, context: input.context });
+      const payload = JSON.stringify({ projectId: input.projectId, documentId: input.documentId, message: input.message, context: input.context, runId: input.runId, requestId: input.requestId });
       const url = new URL(bridgeOrigin + '/api/chat/conversation');
       const req = httpRequest(url, {
         method: 'POST',
@@ -626,9 +669,14 @@ export function createBackendService(options: BackendOptions): BackendService {
         }
         resolve({ status, frames: frames() });
       });
+      const abort = () => { req.destroy(); reject(unavailable()); };
       req.on('error', () => reject(unavailable()));
-      req.on('close', () => { if (!input.signal.aborted) reject(unavailable()); });
-      input.signal.addEventListener('abort', () => { try { req.destroy(); } catch { /* ignore */ } });
+      req.on('close', () => {
+        input.signal.removeEventListener('abort', abort);
+        if (!input.signal.aborted) reject(unavailable());
+      });
+      input.signal.addEventListener('abort', abort, { once: true });
+      if (input.signal.aborted) { abort(); return; }
       req.end(payload);
     });
   }
@@ -649,37 +697,41 @@ export function createBackendService(options: BackendOptions): BackendService {
     if (context !== undefined && (typeof context !== 'string' || context.length > 24_000)) throw badRequest();
     if (documentId !== undefined && documentId !== null && (typeof documentId !== 'string' || !UUID_RE.test(documentId))) throw badRequest();
     const requestId = typeof body.requestId === 'string' && UUID_RE.test(body.requestId) ? body.requestId : randomUUID();
+    if (body.requestId !== undefined && (typeof body.requestId !== 'string' || !UUID_RE.test(body.requestId))) throw badRequest();
+    return await projectLocks.locked(projectId, async () => {
     const project = await projectStore.get(projectId);
     if (!project || project.principal !== auth.principal) throw forbidden('project_not_owned');
     if (!await isolationVerified()) throw unavailable();
     activeRuns.limit(projectId);
-    if (project.status === 'interrupted') throw conflict('conversation_requires_recovery');
+    if (project.status !== 'idle') throw conflict('conversation_requires_recovery');
     const fingerprint = createHash('sha256').update(JSON.stringify({ message, context: context ?? '' })).digest('hex');
-    const idemResult = await idem.check(requestId, projectId, fingerprint);
+    const idemResult = await idem.reserve({ id: requestId, projectId, fingerprint });
     if (idemResult.status === 'duplicate') throw conflict('duplicate_request');
     if (idemResult.status === 'conflict') throw conflict('idempotency_conflict');
-    await idem.record({ id: requestId, projectId, fingerprint });
     const runController = new AbortController();
-    const scopeDocumentId = (documentId ?? PROJECT_NULL) as string;
-    activeRuns.start(projectId, runController);
-    await projectStore.update(projectId, (record) => ({ ...record, status: 'running' }));
-    await ledger.append(projectId, scopeDocumentId, { role: 'user', content: message });
-
-    if (!bridgeOrigin) {
-      await projectStore.update(projectId, (record) => ({ ...record, status: 'interrupted' }));
-      activeRuns.end(projectId);
-      throw unavailable();
-    }
-
-    const send = (event: string, payload: Record<string, unknown>): Promise<void> => new Promise((resolve, reject) => {
-      if (res.destroyed || runController.signal.aborted) { reject(new Error('aborted')); return; }
-      const frame = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
-      res.write(frame, error => error ? reject(error) : resolve());
-    });
-
+    // documentId is frozen reference context only; conversation identity is the project.
+    const scopeDocumentId = PROJECT_NULL;
+    const disconnect = () => { runController.abort(); };
     let committed = false;
+    let upstreamCompleted = false;
     let fullAssistant = '';
+    activeRuns.start(projectId, runController);
     try {
+      req.on('aborted', disconnect);
+      res.on('close', disconnect);
+      if (req.aborted || res.destroyed) runController.abort();
+      const runId = randomUUID();
+      await projectStore.update(projectId, (record) => ({ ...record, status: 'running', bridgeBaseline: undefined, expectedTurn: { runId, requestId } }));
+      await ledger.append(projectId, scopeDocumentId, { role: 'user', content: message });
+
+      if (!bridgeOrigin || runController.signal.aborted) throw unavailable();
+
+      const send = (event: string, payload: Record<string, unknown>): Promise<void> => new Promise((resolve, reject) => {
+        if (res.destroyed || runController.signal.aborted) { reject(new Error('aborted')); return; }
+        const frame = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+        res.write(frame, error => error ? reject(error) : resolve());
+      });
+
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-store',
@@ -688,11 +740,12 @@ export function createBackendService(options: BackendOptions): BackendService {
         'Connection': 'keep-alive',
       });
       res.flushHeaders?.();
-      const runId = randomUUID();
       await send('run.started', { runId });
       const proxy = await proxyConversationToBridge({
         projectId,
         documentId: scopeDocumentId,
+        runId,
+        requestId,
         message,
         context: context ?? undefined,
         cookie: req.headers.cookie,
@@ -707,16 +760,17 @@ export function createBackendService(options: BackendOptions): BackendService {
           await send('assistant.delta', { delta: frame.data.delta });
         } else if (frame.event === 'assistant.completed' && typeof frame.data.content === 'string') {
           fullAssistant = frame.data.content;
-          await send('assistant.completed', { content: fullAssistant });
-          committed = true;
+          upstreamCompleted = true;
           break;
         } else if (frame.event === 'assistant.completed' || frame.event === 'error' || frame.event === 'done') {
           break;
         }
       }
-      if (!committed) throw unavailable();
+      if (!upstreamCompleted) throw unavailable();
       await ledger.append(projectId, scopeDocumentId, { role: 'assistant', content: fullAssistant });
-      await projectStore.update(projectId, (record) => ({ ...record, status: 'idle' }));
+      await projectStore.update(projectId, (record) => ({ ...record, status: 'idle', bridgeBaseline: undefined, expectedTurn: undefined }));
+      committed = true;
+      await send('assistant.completed', { content: fullAssistant });
       await send('done', {});
       res.end();
     } catch (error) {
@@ -724,16 +778,20 @@ export function createBackendService(options: BackendOptions): BackendService {
         try { await projectStore.update(projectId, (record) => ({ ...record, status: 'interrupted' })); } catch { /* ignore */ }
       }
       if (res.headersSent) {
-        try { await send('error', { error: error instanceof HttpError ? error.code : 'unavailable' }); await send('done', {}); res.end(); } catch { /* ignore */ }
+        // A stopped transport still needs a terminal browser frame; send() rejects aborted runs.
+        if (!res.destroyed) res.end(`event: error\ndata: ${JSON.stringify({ error: runController.signal.aborted ? 'transport_interrupted' : error instanceof HttpError ? error.code : 'unavailable' })}\n\nevent: done\ndata: {}\n\n`);
       } else {
         const status = error instanceof HttpError ? error.status : 503;
         const code = error instanceof HttpError ? error.code : 'unavailable';
         jsonResponse(res, status, { error: code });
       }
     } finally {
+      req.off('aborted', disconnect);
+      res.off('close', disconnect);
       activeRuns.end(projectId);
       runController.abort();
     }
+    });
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -751,6 +809,7 @@ export function createBackendService(options: BackendOptions): BackendService {
       if (req.method === 'POST' && url.pathname === '/api/chat/conversation') { await conversation(req, res); return; }
       jsonResponse(res, 404, { error: 'not_found' });
     } catch (error) {
+      if (error instanceof BusyError) { jsonResponse(res, 409, { error: 'conversation_busy' }); return; }
       if (error instanceof HttpError) { jsonResponse(res, error.status, { error: error.code }); return; }
       jsonResponse(res, 503, { error: 'unavailable' });
     }

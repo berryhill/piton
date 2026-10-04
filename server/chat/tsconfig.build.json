@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": ".",
+    "outDir": "../../.piton/chat"
+  },
+  "include": ["main.ts", "host.ts", "backend.ts", "bridge.ts", "store.ts"]
+}
