@@ -28,6 +28,12 @@ async function setup() {
   return { app, store, projectId, documentId };
 }
 
+function openAdvanced() {
+  const section=screen.getByTestId("empty-feature-authoring");
+  const details=section.querySelector("details")!;
+  if(!details.open)fireEvent.click(within(section).getByText(/^Advanced ·/));
+}
+
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 beforeEach(() => {
@@ -48,13 +54,15 @@ it("renders the named first-feature source affordance only on an empty Part", as
   // request panel and stays a real, enabled button, never a placeholder.
   fireEvent.click(screen.getByRole("button", { name: "Plate" }));
   const section = await screen.findByTestId("empty-feature-authoring");
-  expect(section).toHaveAttribute("aria-label", "First feature source");
-  expect(within(section).getByRole("heading", { name: "First feature source" })).toBeVisible();
+  expect(section).toHaveAttribute("aria-label", "Part source and revision");
+  expect(within(section).getByRole("heading", { name: "New Part draft" })).toBeVisible();
+  expect(section.querySelector("details")).not.toHaveAttribute("open");
+  openAdvanced();
   const textarea = screen.getByTestId("feature-source-input");
   expect(textarea).toBeInTheDocument();
   expect(textarea).not.toBeDisabled();
   const button = screen.getByTestId("submit-first-feature");
-  expect(button).toHaveTextContent("Preview features");
+  expect(button).toHaveTextContent("Preview source draft");
   expect(button).not.toBeDisabled();
   // The canonical placeholder source must be visible to the user.
   expect((textarea as HTMLTextAreaElement).value).toMatch(/part\.rectangle/);
@@ -66,7 +74,7 @@ it("previews without committing until explicit confirmation", async () => {
   history.replaceState(null, "", `/projects/${projectId}/documents/${documentId}`);
   render(<ProjectWorkspace application={app} />);
   await screen.findByTestId("empty-feature-authoring");
-
+  openAdvanced();
   const propose = vi.spyOn(app, "proposeFeatures").mockResolvedValue({
     proposal: {
       projectId, documentId,
@@ -101,6 +109,7 @@ it("shows an error alert when the source cannot be parsed into features", async 
   history.replaceState(null, "", `/projects/${projectId}/documents/${documentId}`);
   render(<ProjectWorkspace application={app} />);
   await screen.findByTestId("empty-feature-authoring");
+  openAdvanced();
   // Replace the canonical placeholder with text that has no part.<kind>({...}) calls.
   fireEvent.change(screen.getByTestId("feature-source-input"), { target: { value: "// not a feature source\n" } });
   fireEvent.click(screen.getByTestId("submit-first-feature"));
@@ -116,6 +125,7 @@ it("keeps first-feature source drafts document-local when switching Parts", asyn
   history.replaceState(null, "", `/projects/${projectId}/documents/${documentId}`);
   render(<ProjectWorkspace application={app} />);
   const firstSource = await screen.findByTestId("feature-source-input");
+  openAdvanced();
   const original = (firstSource as HTMLTextAreaElement).value;
   const draft = original.replace('"width":80', '"width":90');
   fireEvent.change(firstSource, { target: { value: draft } });
@@ -132,6 +142,7 @@ it("rejects a malformed operation rather than silently previewing a valid subset
   history.replaceState(null, "", `/projects/${projectId}/documents/${documentId}`);
   render(<ProjectWorkspace application={app} />);
   const input = await screen.findByTestId("feature-source-input");
+  openAdvanced();
   fireEvent.change(input, { target: { value: (input as HTMLTextAreaElement).value + 'part.hole({broken});\n' } });
   fireEvent.click(screen.getByTestId("submit-first-feature"));
   await screen.findByTestId("empty-feature-error");

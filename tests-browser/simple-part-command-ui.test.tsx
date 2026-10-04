@@ -10,8 +10,9 @@ import { PartCommandUI } from "../src/modeling/PartCommandUI";
 
 vi.mock("../src/components/Viewport",()=>({default:()=>null}));
 let kernel:ManifoldToplevel;
+const standaloneTargets:HTMLElement[]=[];
 beforeAll(async()=>{kernel=await Module();kernel.setup();});
-afterEach(()=>{cleanup();vi.restoreAllMocks();});
+afterEach(()=>{cleanup();vi.restoreAllMocks();standaloneTargets.splice(0).forEach(target=>target.remove());});
 class Store implements WorkspaceStore {
   row:{version:number;json:string}|null=null;
   async readWorkspace(){return structuredClone(this.row);}
@@ -26,6 +27,8 @@ async function setup(){
   return {app,store,projectId,documentId};
 }
 function commands(){return screen.getByRole("region",{name:"Part commands"});}
+function properties(){return screen.getByRole("complementary",{name:"Change request"});}
+function drawing(){return screen.getByTestId("workbench-viewport-body");}
 function chooseCategory(name:string){fireEvent.click(within(commands()).getByRole("tab",{name}));}
 function startSketch(bar=commands()){
   fireEvent.change(within(bar).getByRole("combobox",{name:"Sketch plane"}),{target:{value:"XY"}});
@@ -46,22 +49,36 @@ it("places accessible Sketch, Features, Inspect in order and commands in the cen
   expect([...within(bar).getByLabelText("Inspect tools").querySelectorAll("button")].map(node=>node.textContent)).toEqual(["Measure","Clear"]);
   expect(within(bar).getByRole("button",{name:"Measure"})).toBeDisabled();
 });
+it("uses one drawing region and projects the sketch outside compact commands",async()=>{
+  await setup();const bar=commands();
+  const body=screen.getByTestId("workbench-viewport-body");
+  expect(bar.closest("[data-testid=workbench-command-slot]")).toBeInTheDocument();
+  expect(body.contains(bar)).toBe(false);
+  expect(screen.getAllByTestId("empty-project-viewport")).toHaveLength(1);
+  startSketch(bar);
+  fireEvent.click(within(bar).getByRole("button",{name:"Rectangle"}));
+  fireEvent.click(screen.getByRole("form",{name:"Rectangle parameters"}).querySelector("button")!);
+  expect(within(body).getByRole("img",{name:"Sketch-only 2D preview"})).toBeInTheDocument();
+  expect(within(bar).queryByRole("img",{name:"Sketch-only 2D preview"})).not.toBeInTheDocument();
+  expect(screen.queryByTestId("empty-project-viewport")).not.toBeInTheDocument();
+  expect(screen.getByRole("form",{name:"Rectangle parameters"}).closest(".r7-right")).toBeInTheDocument();
+});
 it("authors a rectangle plate via sketch, explicit review preview and immutable commit without source typing",async()=>{
   const {app,store}=await setup();const bar=commands();
   const initial=await app.read();
   startSketch(bar);
   fireEvent.click(within(bar).getByRole("button",{name:"Rectangle"}));
-  fireEvent.change(within(bar).getByLabelText("width"),{target:{value:"80"}});
-  fireEvent.change(within(bar).getByLabelText("height"),{target:{value:"50"}});
-  fireEvent.click(within(bar).getByRole("button",{name:"Apply to sketch"}));
-  expect(within(bar).getByRole("img",{name:"Sketch-only 2D preview"})).toBeInTheDocument();
+  fireEvent.change(within(properties()).getByLabelText("width"),{target:{value:"80"}});
+  fireEvent.change(within(properties()).getByLabelText("height"),{target:{value:"50"}});
+  fireEvent.click(within(properties()).getByRole("button",{name:"Apply to sketch"}));
+  expect(within(drawing()).getByRole("img",{name:"Sketch-only 2D preview"})).toBeInTheDocument();
   expect(await app.read()).toEqual(initial);
   fireEvent.click(within(bar).getByRole("button",{name:"Finish Sketch"}));
   expect(await app.read()).toEqual(initial);
   chooseCategory("Features");
   fireEvent.click(within(bar).getByRole("button",{name:"Extrude"}));
-  fireEvent.change(within(bar).getByLabelText("distance"),{target:{value:"6"}});
-  fireEvent.click(within(bar).getByRole("button",{name:"Add feature"}));
+  fireEvent.change(within(properties()).getByLabelText("distance"),{target:{value:"6"}});
+  fireEvent.click(within(properties()).getByRole("button",{name:"Add feature"}));
   expect((screen.getByTestId("feature-source-input") as HTMLTextAreaElement).value).toMatch(/part\.extrude/);
   expect(await app.read()).toEqual(initial);
   fireEvent.click(within(bar).getByRole("button",{name:"Preview features"}));
@@ -80,12 +97,12 @@ it("preserves a sketch per tab and blocks unsupported operations",async()=>{
   const propose=vi.spyOn(app,"proposeFeatures");
   startSketch();
   fireEvent.click(within(commands()).getByRole("button",{name:"Circle"}));
-  fireEvent.click(within(commands()).getByRole("button",{name:"Apply to sketch"}));
+  fireEvent.click(within(properties()).getByRole("button",{name:"Apply to sketch"}));
   const second=await act(async()=>app.createPart(projectId,"Other"));
   fireEvent.click(within(screen.getByRole("navigation",{name:"Project Files"})).getByRole("button",{name:"Other"}));
   await waitFor(()=>expect(location.pathname).toContain(second));
   fireEvent.click(screen.getByRole("tab",{name:"Plate"}));
-  expect(within(commands()).getByRole("img",{name:"Sketch-only 2D preview"})).toBeInTheDocument();
+  expect(within(drawing()).getByRole("img",{name:"Sketch-only 2D preview"})).toBeInTheDocument();
   chooseCategory("Features");
   expect(within(commands()).getByRole("button",{name:"Revolve"})).toBeDisabled();
   expect(propose).not.toHaveBeenCalled();
@@ -100,6 +117,12 @@ it("gates New Sketch on explicit XY choice and marks unsupported planes unavaila
   expect(within(plane).getByRole("option",{name:/YZ plane/})).toBeDisabled();
   startSketch(bar);
   expect(within(bar).getByText(/XY sketch · drawing/)).toBeInTheDocument();
+});
+
+it("keeps an empty New Sketch workplane in the primary viewport before drawing a profile",async()=>{
+  await setup();startSketch();
+  expect(within(drawing()).getByTestId("sketch-workplane")).toBeInTheDocument();
+  expect(screen.queryByTestId("empty-project-viewport")).not.toBeInTheDocument();
 });
 
 it("roves category focus and selection with arrows, Home and End and associates the panel",async()=>{
@@ -120,25 +143,25 @@ it("roves category focus and selection with arrows, Home and End and associates 
 it("prefills dimensions from the edited rectangle and preserves an untouched dimension",async()=>{
   await setup();const bar=commands();startSketch(bar);
   fireEvent.click(within(bar).getByRole("button",{name:"Rectangle"}));
-  fireEvent.change(within(bar).getByLabelText("width"),{target:{value:"125"}});
-  fireEvent.change(within(bar).getByLabelText("height"),{target:{value:"73"}});
-  fireEvent.click(within(bar).getByRole("button",{name:"Apply to sketch"}));
+  fireEvent.change(within(properties()).getByLabelText("width"),{target:{value:"125"}});
+  fireEvent.change(within(properties()).getByLabelText("height"),{target:{value:"73"}});
+  fireEvent.click(within(properties()).getByRole("button",{name:"Apply to sketch"}));
   fireEvent.click(within(bar).getByRole("button",{name:"Dimension"}));
-  expect(within(bar).getByLabelText("width")).toHaveValue(125);
-  expect(within(bar).getByLabelText("height")).toHaveValue(73);
-  fireEvent.change(within(bar).getByLabelText("width"),{target:{value:"140"}});
-  fireEvent.click(within(bar).getByRole("button",{name:"Apply to sketch"}));
+  expect(within(properties()).getByLabelText("width")).toHaveValue(125);
+  expect(within(properties()).getByLabelText("height")).toHaveValue(73);
+  fireEvent.change(within(properties()).getByLabelText("width"),{target:{value:"140"}});
+  fireEvent.click(within(properties()).getByRole("button",{name:"Apply to sketch"}));
   fireEvent.click(within(bar).getByRole("button",{name:"Dimension"}));
-  expect(within(bar).getByLabelText("height")).toHaveValue(73);
-  expect(within(bar).getByRole("img",{name:"Sketch-only 2D preview"}).querySelector("polygon")).toHaveAttribute("points","0,0 140,0 140,73 0,73");
+  expect(within(properties()).getByLabelText("height")).toHaveValue(73);
+  expect(within(drawing()).getByRole("img",{name:"Sketch-only 2D preview"}).querySelector("polygon")).toHaveAttribute("points","0,0 140,0 140,73 0,73");
 });
 
 it("renders a large circle using its actual radius and bounds",async()=>{
   await setup();const bar=commands();startSketch(bar);
   fireEvent.click(within(bar).getByRole("button",{name:"Circle"}));
-  fireEvent.change(within(bar).getByLabelText("diameter"),{target:{value:"800"}});
-  fireEvent.click(within(bar).getByRole("button",{name:"Apply to sketch"}));
-  const svg=within(bar).getByRole("img",{name:"Sketch-only 2D preview"});
+  fireEvent.change(within(properties()).getByLabelText("diameter"),{target:{value:"800"}});
+  fireEvent.click(within(properties()).getByRole("button",{name:"Apply to sketch"}));
+  const svg=within(drawing()).getByRole("img",{name:"Sketch-only 2D preview"});
   expect(svg.querySelector("circle")).toHaveAttribute("r","400");
   expect(svg).toHaveAttribute("viewBox","-440 -440 880 880");
 });
@@ -147,20 +170,20 @@ it("preloads selected polygon vertex coordinates and rejects an invalid vertex",
   await setup();const bar=commands();startSketch(bar);
   for(const [x,y] of [[10,20],[110,20],[10,90]]){
     fireEvent.click(within(bar).getByRole("button",{name:"Line"}));
-    fireEvent.change(within(bar).getByLabelText("x"),{target:{value:String(x)}});
-    fireEvent.change(within(bar).getByLabelText("y"),{target:{value:String(y)}});
-    fireEvent.click(within(bar).getByRole("button",{name:"Apply to sketch"}));
+    fireEvent.change(within(properties()).getByLabelText("x"),{target:{value:String(x)}});
+    fireEvent.change(within(properties()).getByLabelText("y"),{target:{value:String(y)}});
+    fireEvent.click(within(properties()).getByRole("button",{name:"Apply to sketch"}));
   }
   fireEvent.click(within(bar).getByRole("button",{name:"Close Line"}));
-  const svg=within(bar).getByRole("img",{name:"Sketch-only 2D preview"});
+  const svg=within(drawing()).getByRole("img",{name:"Sketch-only 2D preview"});
   expect(svg.querySelector("polygon")).toHaveAttribute("points","10,20 110,20 10,90");
   expect(svg).toHaveAttribute("viewBox","5 15 110 80");
   fireEvent.click(within(bar).getByRole("button",{name:"Dimension"}));
-  fireEvent.change(within(bar).getByLabelText("Vertex index"),{target:{value:"1"}});
-  expect(within(bar).getByLabelText("vertexX")).toHaveValue(110);
-  expect(within(bar).getByLabelText("vertexY")).toHaveValue(20);
-  fireEvent.change(within(bar).getByLabelText("Vertex index"),{target:{value:"99"}});
-  fireEvent.submit(within(bar).getByRole("form",{name:"Dimension parameters"}));
+  fireEvent.change(within(properties()).getByLabelText("Vertex index"),{target:{value:"1"}});
+  expect(within(properties()).getByLabelText("vertexX")).toHaveValue(110);
+  expect(within(properties()).getByLabelText("vertexY")).toHaveValue(20);
+  fireEvent.change(within(properties()).getByLabelText("Vertex index"),{target:{value:"99"}});
+  fireEvent.submit(within(properties()).getByRole("form",{name:"Dimension parameters"}));
   expect(within(bar).getByRole("alert")).toHaveTextContent(/existing vertex index/);
   expect(svg.querySelector("polygon")).toHaveAttribute("points","10,20 110,20 10,90");
 });
@@ -173,9 +196,10 @@ it("allocates a second pattern ID against retained feature IDs",()=>{
     {kind:"linearPattern",id:"pattern1",name:"First pattern",bodyId:"plate",sourceHoleId:"hole1",count:2,spacingX:15,spacingY:0},
   ]);
   let updated="";
-  render(<PartCommandUI context={{projectId:"p",documentId:"d",revisionId:"r"}} baseSource={base} source={base.source} onSource={value=>{updated=value;}} readonly={false} busy={false} previewReady={false} onPreview={()=>{}} onCommit={()=>{}} onSketchDirty={()=>{}}/>);
+  const propertyTarget=document.createElement("aside");propertyTarget.setAttribute("aria-label","Change request");document.body.appendChild(propertyTarget);standaloneTargets.push(propertyTarget);
+  render(<PartCommandUI propertyTarget={propertyTarget} context={{projectId:"p",documentId:"d",revisionId:"r"}} baseSource={base} source={base.source} onSource={value=>{updated=value;}} readonly={false} busy={false} previewReady={false} onPreview={()=>{}} onCommit={()=>{}} onSketchDirty={()=>{}}/>);
   chooseCategory("Features");fireEvent.click(within(commands()).getByRole("button",{name:"Linear Pattern"}));
-  fireEvent.change(within(commands()).getByLabelText("spacingY"),{target:{value:"20"}});
-  fireEvent.click(within(commands()).getByRole("button",{name:"Add feature"}));
+  fireEvent.change(within(properties()).getByLabelText("spacingY"),{target:{value:"20"}});
+  fireEvent.click(within(properties()).getByRole("button",{name:"Add feature"}));
   expect(readFeatures({...base,source:updated}).map(feature=>feature.id)).toEqual(["outline","plate","hole1","pattern1","pattern2"]);
 });

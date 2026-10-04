@@ -35,11 +35,11 @@ async function preview(commands:()=>HTMLElement){
   fireEvent.change(within(commands()).getByRole("combobox",{name:"Sketch plane"}),{target:{value:"XY"}});
   fireEvent.click(within(commands()).getByRole("button",{name:"New Sketch"}));
   fireEvent.click(within(commands()).getByRole("button",{name:"Rectangle"}));
-  fireEvent.click(within(commands()).getByRole("button",{name:"Apply to sketch"}));
+  fireEvent.click(screen.getByRole("form",{name:"Rectangle parameters"}).querySelector("button")!);
   fireEvent.click(within(commands()).getByRole("button",{name:"Finish Sketch"}));
   fireEvent.click(within(commands()).getByRole("tab",{name:"Features"}));
   fireEvent.click(within(commands()).getByRole("button",{name:"Extrude"}));
-  fireEvent.click(within(commands()).getByRole("button",{name:"Add feature"}));
+  fireEvent.click(screen.getByRole("form",{name:"Extrude parameters"}).querySelector("button")!);
   fireEvent.click(within(commands()).getByRole("button",{name:"Preview features"}));
   await screen.findByTestId("feature-preview");
   fireEvent.click(within(commands()).getByRole("tab",{name:"Inspect"}));
@@ -84,6 +84,7 @@ it("removes measurement across tabs and when preview geometry is invalidated",as
   fireEvent.click(screen.getByRole("tab",{name:"Plate"}));
   fireEvent.click(within(commands()).getByRole("tab",{name:"Inspect"}));
   expect(within(commands()).getByTestId("feature-measurement")).not.toHaveTextContent("5.00 mm");
+  fireEvent.click(screen.getByText(/^Advanced ·/));
   fireEvent.change(screen.getByRole("textbox",{name:"Named feature source"}),{target:{value:"// invalidated draft"}});
   expect(screen.queryByTestId("feature-mesh-viewport")).toBeNull();
   expect(within(commands()).getByRole("button",{name:"Measure"})).toBeDisabled();

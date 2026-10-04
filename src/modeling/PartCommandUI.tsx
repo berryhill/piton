@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { appendFeatures, emptyFeatureSource, readFeatures, type PartFeature, type FeatureSource } from "./source";
 import { reduceSketchDraft, sketchPreview, sketchSource, type SketchContext, type SketchDraft } from "./sketchDraft";
 import type { FixtureReviewMeasurement } from "../fixture";
@@ -11,9 +12,11 @@ const defaults: Record<string, number> = { width: 80, height: 50, diameter: 20, 
 const categories = ["Sketch", "Features", "Inspect"] as const;
 
 /** Transient document-local controls; only canonical source crosses the application gate. */
-export function PartCommandUI({context,baseSource,source,onSource,readonly,busy,previewReady,onPreview,onCommit,onSketchDirty,resetToken,measureAvailable=false,measurement={phase:"idle"},onMeasure,onClearMeasurement}:{
+export function PartCommandUI({active=true,context,baseSource,source,onSource,readonly,busy,previewReady,onPreview,onCommit,onSketchDirty,onSketchVisible,onOpenProperties,propertyTarget,viewportTarget,resetToken,measureAvailable=false,measurement={phase:"idle"},onMeasure,onClearMeasurement}:{
+  active?:boolean;
   context:SketchContext; baseSource:FeatureSource; source:string; onSource:(source:string)=>void;
   readonly:boolean;busy:boolean;previewReady:boolean;onPreview:()=>void;onCommit:()=>void;onSketchDirty:(dirty:boolean)=>void;
+  onSketchVisible?:(visible:boolean)=>void;onOpenProperties?:()=>void;propertyTarget?:HTMLElement;viewportTarget?:HTMLElement;
   resetToken?:number;
   measureAvailable?:boolean;measurement?:FixtureReviewMeasurement;onMeasure?:()=>void;onClearMeasurement?:()=>void;
 }) {
@@ -48,6 +51,7 @@ export function PartCommandUI({context,baseSource,source,onSource,readonly,busy,
       ...(profile.kind==="rectangle"?{width:profile.width,height:profile.height}:profile.kind==="circle"?{diameter:profile.diameter}:{vertexX:profile.vertices[0][0],vertexY:profile.vertices[0][1]}),
     }:{...defaults});
     setError("");setNotice("");
+    onOpenProperties?.();
   };
   const n=(key:string)=>values[key];
   const addFeature=(name:FeatureTool)=>{
@@ -94,12 +98,13 @@ export function PartCommandUI({context,baseSource,source,onSource,readonly,busy,
     }
     update(next);
   });
-  const view=sketch&&!stale?sketchPreview(sketch,context):null;
+  const view=sketch&&!stale&&!readonly?sketchPreview(sketch,context):null;
+  useEffect(()=>{onSketchVisible?.(!!sketch&&!readonly&&!stale);},[!!sketch,readonly,stale,onSketchVisible]);
   const bounds=view?view.kind==="circle"?
     [view.center[0]-view.diameter/2,view.center[1]-view.diameter/2,view.center[0]+view.diameter/2,view.center[1]+view.diameter/2]:
     [Math.min(...view.outline.map(p=>p[0])),Math.min(...view.outline.map(p=>p[1])),Math.max(...view.outline.map(p=>p[0])),Math.max(...view.outline.map(p=>p[1]))]:null;
   const margin=bounds?Math.max(1,Math.max(bounds[2]-bounds[0],bounds[3]-bounds[1])*0.05):0;
-  const viewBox=bounds?`${bounds[0]-margin} ${bounds[1]-margin} ${Math.max(bounds[2]-bounds[0],1)+2*margin} ${Math.max(bounds[3]-bounds[1],1)+2*margin}`:undefined;
+  const viewBox=bounds?`${bounds[0]-margin} ${bounds[1]-margin} ${Math.max(bounds[2]-bounds[0],1)+2*margin} ${Math.max(bounds[3]-bounds[1],1)+2*margin}`:"-50 -35 100 70";
   const selectCategory=(item:typeof categories[number])=>{setCategory(item);setTool(null);setError("");};
   const chooseVertex=(value:string)=>{
     setPoints(value);
@@ -116,8 +121,9 @@ export function PartCommandUI({context,baseSource,source,onSource,readonly,busy,
       {category==="Features"&&features.map(item=><button key={item} disabled={readonly||busy||stale||finished|| (item==="Extrude"||item==="Revolve"?!((sketch?.status==="finished"&&sketch.profile)||profile)||!!body : item==="Hole"?!body||body.kind!=="extrude"||profile?.kind==="polygon":item==="Linear Pattern"?!hole:!body||body.kind!=="extrude"||profile?.kind!=="rectangle")} title={item==="Revolve"?"Full Z revolve only; circle profile unsupported":item==="Hole"?"Through holes on extruded rectangles/circles only":item==="Linear Pattern"?"Requires a through-hole; 2–16 instances":item==="Fillet"||item==="Chamfer"?"Rectangular extruded plate outer vertical corners only":undefined} onClick={()=>choose(item)}>{item}</button>)}
       {category==="Inspect"&&<><button disabled={!measureAvailable} onClick={onMeasure} title={!measureAvailable?"Admitted review mesh required":undefined}>Measure</button><button disabled={measurement.phase==="idle"} onClick={onClearMeasurement}>Clear</button><output aria-live="polite" data-testid="feature-measurement">{!measureAvailable?"No admitted review mesh to measure":measurement.phase==="armed"?"Select first point on review mesh (click or focus mesh and press Enter)":measurement.phase==="endpoint-a"?"Select second point on review mesh; Escape cancels":measurement.phase==="complete"&&measurement.endpointA&&measurement.endpointB?`Approx. review-mesh distance ${Math.hypot(...measurement.endpointA.map((value,index)=>value-measurement.endpointB![index])).toFixed(2)} mm · review-only, not exact B-rep`:"Review-mesh distance · choose Measure"}</output></>}
     </div></div>
-    {sketch&&<div className="r7-sketch-state"><strong>XY sketch · {sketch.status} · 2D only</strong>{stale&&<p role="alert">Stale sketch context. Cancel and start against the current revision.</p>}{view&&<svg role="img" aria-label="Sketch-only 2D preview" viewBox={viewBox} className="r7-sketch-preview">{view.kind==="circle"?<circle cx={view.center[0]} cy={view.center[1]} r={view.diameter/2} fill="none" stroke="currentColor"/>:view.closed?<polygon points={view.outline.map(([x,y])=>`${x},${y}`).join(" ")} fill="none" stroke="currentColor"/>:<polyline points={view.outline.map(([x,y])=>`${x},${y}`).join(" ")} fill="none" stroke="currentColor"/>}</svg>}{sketch.linePoints.length>0&&!sketch.profile&&<button onClick={()=>attempt(()=>update(reduceSketchDraft(sketch,{type:"closeLine",context})))} disabled={stale||readonly}>Close Line</button>}{sketch.status==="drawing"&&<button disabled={readonly||stale||!sketch.profile} onClick={()=>attempt(()=>update(reduceSketchDraft(sketch,{type:"finishSketch",context})))}>Finish Sketch</button>}<button disabled={readonly} onClick={()=>attempt(()=>update(reduceSketchDraft(sketch,{type:"cancelSketch",context:sketch.context})))}>Cancel Sketch</button></div>}
-    {tool&&<form className="r7-command-editor" aria-label={`${tool} parameters`} onSubmit={event=>{event.preventDefault();if(readonly||busy)return;tool==="Revolve"||features.includes(tool as FeatureTool)?attempt(()=>addFeature(tool as FeatureTool)):applySketch();}}><strong>{tool} · mm</strong>{fields.map(key=><label key={key}>{key}<input type="number" step={key==="count"?1:"any"} value={values[key]} onChange={event=>setValues(current=>({...current,[key]:event.target.valueAsNumber}))}/></label>)}{tool==="Dimension"&&sketch?.profile?.kind==="polygon"&&<label>Vertex index<input type="number" min="0" max={sketch.profile.vertices.length-1} step="1" value={points} onChange={e=>chooseVertex(e.target.value)}/></label>}<button disabled={readonly||busy||stale}>{sketches.includes(tool as SketchTool)?"Apply to sketch":"Add feature"}</button></form>}
+    {sketch&&!readonly&&<div className="r7-sketch-state"><strong>XY sketch · {sketch.status} · 2D only</strong>{stale&&<p role="alert">Stale sketch context. Cancel and start against the current revision.</p>}{sketch.linePoints.length>0&&!sketch.profile&&<button onClick={()=>attempt(()=>update(reduceSketchDraft(sketch,{type:"closeLine",context})))} disabled={stale||readonly}>Close Line</button>}{sketch.status==="drawing"&&<button disabled={readonly||stale||!sketch.profile} onClick={()=>attempt(()=>update(reduceSketchDraft(sketch,{type:"finishSketch",context})))}>Finish Sketch</button>}<button disabled={readonly} onClick={()=>attempt(()=>update(reduceSketchDraft(sketch,{type:"cancelSketch",context:sketch.context})))}>Cancel Sketch</button></div>}
+    {active&&sketch&&!stale&&!readonly&&viewportTarget&&createPortal(<div className="r7-sketch-workplane" data-testid="sketch-workplane"><div className="r7-workplane-caption">XY workplane · {sketch.status} · mm · sketch only</div><svg role="img" aria-label="Sketch-only 2D preview" viewBox={viewBox} preserveAspectRatio="xMidYMid meet" className="r7-sketch-preview">{view&&(view.kind==="circle"?<circle cx={view.center[0]} cy={view.center[1]} r={view.diameter/2} fill="none" stroke="currentColor"/>:view.closed?<polygon points={view.outline.map(([x,y])=>`${x},${y}`).join(" ")} fill="none" stroke="currentColor"/>:<polyline points={view.outline.map(([x,y])=>`${x},${y}`).join(" ")} fill="none" stroke="currentColor"/>)}</svg><div className="r7-axis">CAD XY · mm</div></div>,viewportTarget)}
+    {active&&tool&&!readonly&&propertyTarget&&createPortal(<form className="r7-command-editor" aria-label={`${tool} parameters`} onSubmit={event=>{event.preventDefault();if(readonly||busy)return;tool==="Revolve"||features.includes(tool as FeatureTool)?attempt(()=>addFeature(tool as FeatureTool)):applySketch();}}><strong>{tool} · mm</strong>{fields.map(key=><label key={key}>{key}<input type="number" step={key==="count"?1:"any"} value={values[key]} onChange={event=>setValues(current=>({...current,[key]:event.target.valueAsNumber}))}/></label>)}{tool==="Dimension"&&sketch?.profile?.kind==="polygon"&&<label>Vertex index<input type="number" min="0" max={sketch.profile.vertices.length-1} step="1" value={points} onChange={e=>chooseVertex(e.target.value)}/></label>}<button disabled={readonly||busy||stale}>{sketches.includes(tool as SketchTool)?"Apply to sketch":"Add feature"}</button></form>,propertyTarget)}
     {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
     <div className="r7-command-preview"><button disabled={readonly||busy||!!sketch||!body} onClick={onPreview}>Preview features</button><button disabled={readonly||busy||!previewReady} onClick={onCommit}>Commit feature revision</button><small>Review mesh only · explicit immutable commit · needs_human_review</small></div>
   </section>;

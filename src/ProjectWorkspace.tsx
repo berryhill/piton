@@ -104,7 +104,7 @@ export default function ProjectWorkspace({application}: {application: WorkspaceA
 
   </main>;
 }
-type WorkbenchTargets = {left:HTMLDivElement;center:HTMLDivElement;right:HTMLDivElement};
+type WorkbenchTargets = {left:HTMLDivElement;center:HTMLDivElement;commands:HTMLDivElement;right:HTMLDivElement};
 type DraftStatus = {dirty:boolean;busy:boolean;preview?:boolean};
 function ProjectWorkbench({application,project,document,revisionId,path,navigate,refresh,act,pending,error}:{application: WorkspaceApplication;project: WorkspaceProject;document?:PartDocument;revisionId?:string;path:string;navigate:(url:string)=>void;refresh:()=>Promise<void>;act:(fn:(go:(url:string)=>void)=>Promise<unknown>)=>Promise<void>;pending:boolean;error:string}) {
   // Open tabs are UI state, never authored revisions or stored document membership.
@@ -112,7 +112,7 @@ function ProjectWorkbench({application,project,document,revisionId,path,navigate
   const [label,setLabel]=useState("");
   const [panel,setPanel]=useState<"project"|"change"|null>(null);
   const [tabError,setTabError]=useState("");
-  const [leftTarget,setLeftTarget]=useState<HTMLDivElement|null>(null),[centerTarget,setCenterTarget]=useState<HTMLDivElement|null>(null),[rightTarget,setRightTarget]=useState<HTMLDivElement|null>(null);
+  const [leftTarget,setLeftTarget]=useState<HTMLDivElement|null>(null),[centerTarget,setCenterTarget]=useState<HTMLDivElement|null>(null),[commandTarget,setCommandTarget]=useState<HTMLDivElement|null>(null),[rightTarget,setRightTarget]=useState<HTMLDivElement|null>(null);
   const drafts=useRef(new Map<string,DraftStatus>());
   const [draftStatuses,setDraftStatuses]=useState<Record<string,DraftStatus>>({});
   const [selections,setSelections]=useState<Record<string,SelectionReference>>({});
@@ -135,7 +135,7 @@ function ProjectWorkbench({application,project,document,revisionId,path,navigate
       if(next)globalThis.document.getElementById(`tab-${next.id}`)?.focus();
       else globalThis.document.getElementById(`file-${id}`)?.focus();}
   };
-  const targets=leftTarget&&centerTarget&&rightTarget?{left:leftTarget,center:centerTarget,right:rightTarget}:null;
+  const targets=leftTarget&&centerTarget&&commandTarget&&rightTarget?{left:leftTarget,center:centerTarget,commands:commandTarget,right:rightTarget}:null;
   return <main className="project-workspace r7-workbench">
     <header className="r7-header"><span className="r7-dot"/><strong>Piton</strong><span className="r7-container-label">Project container</span><h1>{project.name}</h1><span className="r7-execution">Browser local · Project conversation</span><button onClick={()=>navigate("/projects")}>All projects</button></header>
     <div className="r7-workspace">
@@ -166,15 +166,17 @@ function ProjectWorkbench({application,project,document,revisionId,path,navigate
         }}>{d.name}</button>)}</div>{!tabs.length&&<span>No open document</span>}
         {document&&<button className="r7-close-tab" aria-label={`Close ${document.name}`} onClick={()=>closeDocument(document.id)}>×</button>}</div>
         <div className="r7-document-panel" id={`panel-${project.id}`} role={document?"tabpanel":undefined} aria-labelledby={document?`tab-${document.id}`:undefined} tabIndex={document?0:undefined}>
-          <div className={`r7-mobile-tools ${document&&isAuthoredPart(document.part)?"has-authored-part":""}`}><button className="r7-drawer-toggle" aria-expanded={panel==="project"} onClick={()=>setPanel(panel==="project"?null:"project")}>☰ Project</button><button className="r7-drawer-toggle" aria-expanded={panel==="change"} onClick={()=>setPanel(panel==="change"?null:"change")}>Change Request</button></div>
-          <div className="r7-editor-target" ref={setCenterTarget}/>
-          {(!document || (document.part.currentRevisionId===null&&!draftStatuses[document.id]?.preview))&&<EmptyProjectViewport empty={!project.documents.length} partName={document?.name} panel={panel} togglePanel={value=>setPanel(panel===value?null:value)}/>}
+          <div className="r7-mobile-tools"><button className="r7-drawer-toggle" aria-expanded={panel==="project"} onClick={()=>setPanel(panel==="project"?null:"project")}>☰ Project</button><button className="r7-drawer-toggle" aria-expanded={panel==="change"} onClick={()=>setPanel(panel==="change"?null:"change")}>Change Request</button></div>
+          <div className="r7-command-slot" data-testid="workbench-command-slot" ref={setCommandTarget}/>
+          <div className="r7-editor-target" data-testid="workbench-viewport-body" ref={setCenterTarget}>
+            {!document&&<EmptyProjectViewport empty={!project.documents.length}/>}
+          </div>
         </div>{(error||tabError)&&<p className="r7-error" role="alert">{error||tabError}</p>}
       </section>
       <aside className={`r7-right ${panel==="change"?"is-open":""}`} aria-label="Change request"><button className="r7-drawer-close" onClick={()=>setPanel(null)}>Close Change Request</button><h2 className="r7-panel-head">Change Request</h2><ConversationPanel project={project} documentId={document?.id} revisionId={revisionId} selection={document&&selections[document.id]?[selections[document.id]]:[]} draft={!revisionId&&!!(document&&draftStatuses[document.id]?.dirty)} preview={!revisionId&&!!(document&&draftStatuses[document.id]?.preview)}/><div ref={setRightTarget}/></aside>
       {targets&&tabs.map(d=>isAuthoredPart(d.part)?<PartEditor key={d.id} application={application} projectId={project.id} document={{...d,part:d.part}} archived={project.archived} refresh={refresh} navigate={navigate} active={document?.id===d.id&&!revisionId} targets={targets} reportDraft={reportDraft}/>:null)}
       {targets&&document&&isAuthoredPart(document.part)&&revisionId&&<PartEditor key={`${document.id}:${revisionId}`} application={application} projectId={project.id} document={{...document,part:document.part}} revisionId={revisionId} archived={project.archived} refresh={refresh} navigate={navigate} active targets={targets}/>}
-      {targets&&tabs.filter(d=>d.part.currentRevisionId===null||isFeaturePart(d.part)).map(d=><EmptyFeatureAuthoring key={`features-${d.id}`} active={document?.id===d.id} application={application} projectId={project.id} part={d} refresh={refresh} pending={pending} archived={project.archived} revisionId={document?.id===d.id?revisionId:undefined} navigate={navigate} targets={targets} reportDraft={reportDraft}/>)}
+      {targets&&tabs.filter(d=>d.part.currentRevisionId===null||isFeaturePart(d.part)).map(d=><EmptyFeatureAuthoring key={`features-${d.id}`} active={document?.id===d.id} application={application} projectId={project.id} part={d} refresh={refresh} pending={pending} archived={project.archived} revisionId={document?.id===d.id?revisionId:undefined} navigate={navigate} targets={targets} reportDraft={reportDraft} openProperties={()=>setPanel("change")}/>)}
     </div><footer className="r7-status"><span>{project.archived?"Archived project · read-only":"Browser-local project"} · {project.documents.length} Parts</span><span>needs_human_review · fabrication_release=false · machine_actuation=false</span></footer>
   </main>;
 }
@@ -210,7 +212,7 @@ function EmptyPartModelTree({document,onSelect}:{document:PartDocument;onSelect:
   }}><div className="r7-tree-row"><span className="r7-tree-disclosure" aria-hidden="true" onClick={event=>{if(node.children){event.stopPropagation();focus(node.id);toggle(node.id);}}}>{node.children?(expanded.includes(node.id)?"▾":"▸"):"·"}</span><span>{node.label}</span></div>{node.children&&expanded.includes(node.id)&&<div role="group">{renderNodes(node.children)}</div>}</div>);
   return <section className="r7-model-tree"><h2 className="r7-panel-head">Model tree</h2><div role="tree" aria-label={`${document.name} model tree`}>{renderNodes(nodes)}</div><section className="r7-tree-details" aria-label="Model selection details"><h3>{document.name} · {all.get(selected)?.label}</h3><p>{all.get(selected)?.detail}</p></section></section>;
 }
-function EmptyProjectViewport({empty,partName,panel,togglePanel}:{empty:boolean;partName?:string;panel:"project"|"change"|null;togglePanel:(panel:"project"|"change")=>void}) {
+function EmptyProjectViewport({empty,partName}:{empty:boolean;partName?:string}) {
   const host=useRef<HTMLDivElement>(null);
   const command=useRef<(view:string)=>void>(()=>{});
   const [available,setAvailable]=useState(false);
@@ -254,7 +256,7 @@ function EmptyProjectViewport({empty,partName,panel,togglePanel}:{empty:boolean;
     })();
     return()=>{disposed=true;cleanup();};
   },[]);
-  return <><div className="r7-toolbar" aria-label="View controls"><button className="r7-drawer-toggle" aria-expanded={panel==="project"} onClick={()=>togglePanel("project")}>☰ Project</button>{["Iso","Front","Top","Fit"].map(name=><button key={name} disabled={!available} onClick={()=>command.current(name)}>{name}</button>)}<button disabled title="Open a document with review geometry to measure">Measure</button><button disabled>Clear measurement</button>{["↶ Roll","Roll ↷"].map(name=><button key={name} disabled={!available} onClick={()=>command.current(name)}>{name}</button>)}<button className="r7-drawer-toggle" aria-expanded={panel==="change"} onClick={()=>togglePanel("change")}>Agent</button></div>
+  return <><div className="r7-toolbar" aria-label="View controls">{["Iso","Front","Top","Fit"].map(name=><button key={name} disabled={!available} onClick={()=>command.current(name)}>{name}</button>)}<button disabled title="Open a document with review geometry to measure">Measure</button><button disabled>Clear measurement</button>{["↶ Roll","Roll ↷"].map(name=><button key={name} disabled={!available} onClick={()=>command.current(name)}>{name}</button>)}</div>
     <div className="r7-empty-viewport" data-testid="empty-project-viewport" aria-label="Empty CAD viewport"><div className="r7-three" ref={host}/><div className="r7-empty-message"><strong>{partName?"Empty Part":empty?"Empty project":"No open document"}</strong><p>{partName?`${partName} has no authored geometry or revisions. Use named-feature source to preview a Part.`:empty?"Create a Part from the project panel to begin.":"Open a document from the project panel to continue."}</p>{failure&&<p role="status">{failure}</p>}</div><div className="r7-axis">CAD Z ↑<br/><span>grid = physical CAD Z=0 · mm</span></div></div>
   </>;
 }
@@ -326,7 +328,7 @@ const EMPTY_FEATURE_SOURCE_PLACEHOLDER =
   'part.extrude({"id":"plate","name":"Plate thickness","profileId":"outline","distance":6});\n' +
   'part.hole({"id":"mount-1","name":"Mounting hole 1","bodyId":"plate","x":15,"y":15,"diameter":5,"extent":"through"});\n';
 /** Both first-feature and subsequent source edits cross the same preview gate. */
-function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pending,archived,revisionId,navigate,targets,reportDraft}:{
+function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pending,archived,revisionId,navigate,targets,reportDraft,openProperties}:{
   active:boolean;
   application: WorkspaceApplication;
   projectId: string;
@@ -338,6 +340,7 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
   navigate?:(url:string)=>void;
   targets?:WorkbenchTargets;
   reportDraft?:(id:string,status:DraftStatus)=>void;
+  openProperties:()=>void;
 }) {
   const current = part && isFeaturePart(part.part) ? part.part.revisions.find(r=>r.id===part.part.currentRevisionId) : undefined;
   const shown = part && isFeaturePart(part.part) && revisionId ? part.part.revisions.find(r=>r.id===part.revisionIds[revisionId]) : current;
@@ -346,9 +349,11 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
   const [error,setError]=useState("");
   const [preview,setPreview]=useState<Awaited<ReturnType<WorkspaceApplication["proposeFeatures"]>>|null>(null);
   const [geometry,setGeometry]=useState<{mesh:FeatureEvaluation;scope:string}|null>(null);
+  const [geometryState,setGeometryState]=useState<"idle"|"loading"|"ready"|"failed"|"invalidated">("idle");
   const [measurement,setMeasurement]=useState<{scope:string;value:FixtureReviewMeasurement}|null>(null);
   const [message,setMessage]=useState("");
   const [sketchDirty,setSketchDirty]=useState(false);
+  const [sketchVisible,setSketchVisible]=useState(false);
   const [draftBase,setDraftBase]=useState<string|null>(()=>part&&isFeaturePart(part.part)?Object.keys(part.revisionIds).find(id=>part.revisionIds[id]===part.part.currentRevisionId)??null:null);
   const [conflict,setConflict]=useState(false);
   const [sketchReset,setSketchReset]=useState(0);
@@ -370,13 +375,13 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
   useEffect(()=>{
     if(!shown)return;
     const token=++geometryGeneration.current;
-    setGeometry(null);
+    setGeometry(null);setGeometryState("loading");
     if(!revisionId&&preview&&draftBase===(currentPointer??null)) {
-      setGeometry({mesh:preview.geometry,scope:preview.candidate.id});
+      setGeometry({mesh:preview.geometry,scope:preview.candidate.id});setGeometryState("ready");
       return;
     }
-    void evaluateFeatureSourceInWorker(shown.authored).then(result=>{if(mounted.current&&token===geometryGeneration.current)setGeometry({mesh:result,scope:shown.id});}).catch(e=>{if(mounted.current&&token===geometryGeneration.current)setError(e instanceof Error?e.message:"Review mesh unavailable");});
-  },[shown?.id,revisionId]);
+    void evaluateFeatureSourceInWorker(shown.authored).then(result=>{if(mounted.current&&token===geometryGeneration.current){setGeometry({mesh:result,scope:shown.id});setGeometryState("ready");}}).catch(e=>{if(mounted.current&&token===geometryGeneration.current){setGeometryState("failed");setError(e instanceof Error?e.message:"Review mesh unavailable");}});
+  },[shown?.id,revisionId,sketchReset]);
   const previousCurrent=useRef(current?.authored.source??EMPTY_FEATURE_SOURCE_PLACEHOLDER);
   useEffect(()=>{
     if(draftBase===(currentPointer??null))return;
@@ -409,20 +414,20 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
     });
   };
   const hover=(point:FixtureReviewPoint|null)=>setMeasurement(previous=>previous?.scope===scope&&previous.value.phase==="endpoint-a"?{scope,value:{...previous.value,hoverEndpoint:point}}:previous);
-  const invalidate=()=>{generation.current++;geometryGeneration.current++;if(preview)application.cancelFeatureProposal(preview.proposal);setPreview(null);setGeometry(null);setMeasurement(null);};
+  const invalidate=()=>{generation.current++;geometryGeneration.current++;if(preview)application.cancelFeatureProposal(preview.proposal);setPreview(null);setGeometry(null);setGeometryState("invalidated");setMeasurement(null);};
   const submit=async()=>{
     if(operation.current||readonly||pending||blocked)return;
     invalidate();
     const token=++generation.current;
-    operation.current=true;setBusy(true);setError("");setMessage("");
+    operation.current=true;setBusy(true);setGeometryState("loading");setError("");setMessage("");
     try {
       const features=parseFeatureSource(source);
       if (!features.length) throw new Error("No named features parsed from source. Use part.rectangle / circle / extrude / hole calls.");
       const proposal:FeatureProposal={projectId,documentId:part.id,expectedRevisionId:draftBase,idempotencyKey:crypto.randomUUID(),units:"mm",features,...(current?{operation:"replace" as const}:{})};
       const result=await application.proposeFeatures(proposal);
-      if(mounted.current&&token===generation.current){setPreview(result);setGeometry({mesh:result.geometry,scope:result.candidate.id});setMessage("Preview only · not committed. Inspect the review mesh, then explicitly commit.");}
+      if(mounted.current&&token===generation.current){setPreview(result);setGeometry({mesh:result.geometry,scope:result.candidate.id});setGeometryState("ready");setMessage("Preview only · not committed. Inspect the review mesh, then explicitly commit.");}
       else application.cancelFeatureProposal(result.proposal);
-    }catch(e){if(mounted.current)setError(e instanceof Error?e.message:"Preview failed");}
+    }catch(e){if(mounted.current){setGeometryState("failed");setError(e instanceof Error?e.message:"Preview failed");}}
     finally{operation.current=false;if(mounted.current)setBusy(false);}
   };
   const commit=async()=>{
@@ -433,21 +438,27 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
     finally{operation.current=false;if(mounted.current)setBusy(false);}
   };
   return <>
-    {active&&createPortal(<section className="r7-empty-authoring" data-testid="empty-feature-authoring" aria-label="First feature source">
-      <h2 className="r7-panel-head">{current?"Named features":"First feature source"}</h2>
-      <p className="r7-section-help">{part.name} · browser-typescript/v1 · mm · review mesh only. Source is authored only on explicit commit.</p>
+    {active&&createPortal(<section className="r7-empty-authoring" data-testid="empty-feature-authoring" aria-label="Part source and revision">
+      <h2 className="r7-panel-head">{revisionId?"Historical revision":current?"Current Part":"New Part draft"}</h2>
+      <p className="r7-section-help">{part.name} · browser-typescript/v1 · mm · review mesh only. {revisionId?"Read-only historical source.":"Source is authored only on explicit commit."}</p>
       {current&&<nav aria-label="Feature revision history">{part.part.revisions.map((revision,index)=>{const pointer=Object.keys(part.revisionIds).find(id=>part.revisionIds[id]===revision.id);return <button key={revision.id} onClick={()=>navigate?.(`/projects/${projectId}/documents/${part.id}/revisions/${pointer}`)}>Revision {index+1}</button>;})}{revisionId&&<button onClick={()=>navigate?.(`/projects/${projectId}/documents/${part.id}`)}>Open current revision</button>}</nav>}
       {!revisionId&&blocked&&<><p role="alert">Part changed since this draft began. Local draft preserved; reload the latest revision or reconcile before preview or commit.</p><button type="button" disabled={busy} onClick={reload}>Reload latest revision</button></>}
-      <label className="r7-feature-source-label">Named feature source<textarea aria-label="Named feature source" data-testid="feature-source-input" value={revisionId?shown?.authored.source??source:source} onChange={e=>{invalidate();setSource(e.target.value);}} disabled={busy||readonly} spellCheck={false} /></label>
-      <div className="r7-feature-source-actions"><button type="button" className="workspace-primary" data-testid="submit-first-feature" disabled={busy||readonly||blocked||!source.trim()||pending} onClick={()=>void submit()}>{busy?"Evaluating…":"Preview features"}</button>
-        <button type="button" disabled={busy||readonly} onClick={reload}>Discard draft</button>
-        </div>
+      <details className="r7-advanced-source"><summary>Advanced · {revisionId?"historical source":current?"current source and draft":"example recipe and draft source"}</summary>
+        {!current&&<p>Example recipe only; edit before preview. No example geometry is saved automatically.</p>}
+        <label className="r7-feature-source-label">Named feature source<textarea aria-label="Named feature source" data-testid="feature-source-input" value={revisionId?shown?.authored.source??source:source} onChange={e=>{invalidate();setSource(e.target.value);}} disabled={busy||readonly||blocked} spellCheck={false} /></label>
+        <div className="r7-feature-source-actions"><button type="button" data-testid="submit-first-feature" disabled={busy||readonly||blocked||!source.trim()||pending} onClick={()=>void submit()}>{busy?"Evaluating…":"Preview source draft"}</button>
+          <button type="button" disabled={busy||readonly} onClick={reload}>Discard draft</button></div>
+      </details>
       {visiblePreview&&<section data-testid="feature-preview"><strong>Preview only · not committed</strong><p>{visiblePreview.candidate.id} · {visiblePreview.geometry.triangles.length/3} triangles · {visiblePreview.geometry.volumeMm3.toFixed(2)} mm³</p></section>}
       {!revisionId&&message&&<p role="status" data-testid="empty-feature-message">{message}</p>}{error&&<p role="alert" data-testid="empty-feature-error">{error}</p>}
     </section>,targets?.right??globalThis.document.querySelector(".r7-right")??globalThis.document.body)}
-    {targets&&createPortal(<div hidden={!active}><PartCommandUI context={{projectId,documentId:part.id,revisionId:draftBase}} baseSource={revisionId?shown?.authored??emptyFeatureSource():current?.authored??emptyFeatureSource()} source={revisionId?shown?.authored.source??source:!current&&source===EMPTY_FEATURE_SOURCE_PLACEHOLDER?emptyFeatureSource().source:source} onSource={next=>{invalidate();setSource(next);}} readonly={readonly||blocked} busy={busy||pending} previewReady={!!visiblePreview} onPreview={()=>void submit()} onCommit={()=>void commit()} onSketchDirty={setSketchDirty} resetToken={sketchReset} measureAvailable={admitted} measurement={currentMeasurement} onMeasure={measure} onClearMeasurement={clearMeasurement}/></div>,targets.center)}
+    {targets&&createPortal(<div hidden={!active}><PartCommandUI active={active} context={{projectId,documentId:part.id,revisionId:draftBase}} baseSource={revisionId?shown?.authored??emptyFeatureSource():current?.authored??emptyFeatureSource()} source={revisionId?shown?.authored.source??source:!current&&source===EMPTY_FEATURE_SOURCE_PLACEHOLDER?emptyFeatureSource().source:source} onSource={next=>{invalidate();setSource(next);}} readonly={readonly||blocked} busy={busy||pending} previewReady={!!visiblePreview} onPreview={()=>void submit()} onCommit={()=>void commit()} onSketchDirty={setSketchDirty} onSketchVisible={setSketchVisible} onOpenProperties={openProperties} propertyTarget={targets.right} viewportTarget={targets.center} resetToken={sketchReset} measureAvailable={admitted} measurement={currentMeasurement} onMeasure={measure} onClearMeasurement={clearMeasurement}/></div>,targets.commands)}
     {active&&current&&targets&&createPortal(<section className="r7-section" aria-label="Named feature tree"><h2>Model tree</h2><p>{readFeatures(shown?.authored??current.authored).length} named features · 1 review body</p><ul>{readFeatures(shown?.authored??current.authored).map(f=><li key={f.id}>{f.name} · {f.kind}</li>)}</ul></section>,targets.left)}
-    {admitted&&geometry&&targets&&createPortal(<FeatureMeshViewport key={scope} geometry={geometry.mesh} revisionId={scope} measurement={currentMeasurement} onMeasurementPoint={point} onMeasurementHover={hover} onMeasurementCancel={clearMeasurement}/>,targets.center)}
+    {active&&!sketchVisible&&admitted&&geometry&&targets&&createPortal(<FeatureMeshViewport key={scope} geometry={geometry.mesh} revisionId={scope} measurement={currentMeasurement} onMeasurementPoint={point} onMeasurementHover={hover} onMeasurementCancel={clearMeasurement}/>,targets.center)}
+    {active&&!sketchVisible&&!admitted&&targets&&createPortal(shown||busy||geometryState==="failed"?<section className="r7-empty-viewport r7-geometry-status" data-testid="feature-geometry-status" role={geometryState==="failed"?"alert":"status"}>
+      <strong>{geometryState==="failed"?"Review geometry unavailable":geometryState==="invalidated"?"Review preview invalidated":revisionId?"Loading historical review geometry":"Loading review geometry"}</strong>
+      <p>{shown?"Saved Part source and revision history remain available; this is not an empty Part.":"Draft is not committed; no saved geometry was created."}</p>
+    </section>:<EmptyProjectViewport empty={false} partName={part.name}/>,targets.center)}
   </>;
 }
 /** Never drop invalid lines: parse through the same strict canonical source reader. */
