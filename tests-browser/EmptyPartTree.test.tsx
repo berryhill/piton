@@ -16,12 +16,14 @@ async function setup(){
   await screen.findByRole("tab",{name:"Alpha"});return app;
 }
 const item=(name:string)=>within(screen.getByRole("tree")).getByRole("treeitem",{name});
-it("shows a real document root with truthful empty collections before files and outputs",async()=>{
+it("shows Files, Outputs, then a truthful document tree",async()=>{
   const app=await setup(),before=await app.read();
   const tree=screen.getByRole("tree",{name:"Alpha model tree"});
   expect(item("Alpha · Part")).toHaveAttribute("aria-expanded","true");
   expect(item("Features (0)")).toBeVisible();expect(item("Solid Bodies (0)")).toBeVisible();
-  expect(tree.compareDocumentPosition(screen.getByRole("navigation",{name:"Project Files"})) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const files=screen.getByRole("navigation",{name:"Project Files"}),outputs=screen.getByRole("region",{name:"Active document outputs"});
+  expect(files.compareDocumentPosition(outputs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(outputs.compareDocumentPosition(tree) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(screen.getByText("Project settings & recovery").closest("details")).not.toHaveAttribute("open");
   expect(screen.getByRole("button",{name:"New Sketch"})).toBeDisabled();
   fireEvent.click(item("Features (0)"));expect(screen.getByRole("region",{name:"Model selection details"})).toHaveTextContent("No authored features");
@@ -49,7 +51,7 @@ it("keeps selection and expansion local to each open Part and clears on close",a
   expect(item("Beta · Part")).toHaveAttribute("aria-selected","true");expect(item("Origin · reference")).toHaveAttribute("aria-expanded","false");
   fireEvent.click(item("Solid Bodies (0)"));
   fireEvent.click(screen.getByRole("tab",{name:"Alpha"}));expect(item("Features (0)")).toHaveAttribute("aria-selected","true");expect(item("Origin · reference")).toHaveAttribute("aria-expanded","true");
-  expect(screen.getByRole("region",{name:"Model selection details"})).toHaveTextContent("Alpha");
+  expect(screen.getByRole("region",{name:"Model selection details"})).toHaveTextContent("Features (0)");
   fireEvent.click(screen.getByRole("button",{name:"Close Alpha"}));fireEvent.click(files.getByRole("button",{name:"Alpha"}));
   expect(item("Alpha · Part")).toHaveAttribute("aria-selected","true");
 });

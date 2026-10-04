@@ -101,7 +101,8 @@ test("production empty-Part authoring commits a named feature source through the
   const first = await readPart();
   expect(first.revisions).toHaveLength(1);
   expect(first.currentRevisionId).toBe(previewId);
-  await expect(page.getByRole("region", { name: "Named feature tree" })).toContainText("Plate outline");
+  await page.getByRole("treeitem", { name: "Features (4)" }).press("ArrowRight");
+  await expect(page.getByRole("tree", { name: "Plate model tree" })).toContainText("Plate outline");
   await page.reload();
   await expect(page.getByTestId("feature-mesh-viewport").locator("canvas")).toBeVisible();
   expect(await readPart()).toEqual(first);

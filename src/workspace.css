@@ -64,6 +64,10 @@
 .r7-authored-viewport .viewport-shell { display:grid; grid-template-rows:auto minmax(0,1fr); min-height:0; }
 .r7-authored-viewport .view-actions { position:static; order:-1; display:flex; justify-content:flex-start; flex-wrap:wrap; gap:3px; padding:5px 8px; min-height:41px; background:#111d29; border-bottom:1px solid var(--r7-line); }
 .r7-authored-viewport .view-actions button { margin:0; }
+.r7-editor-target > .view-actions { position:static; display:flex; flex-wrap:wrap; gap:3px; padding:5px 8px; background:#111d29; border-bottom:1px solid var(--r7-line); }
+.r7-authored-viewport[data-testid="feature-mesh-viewport"] { display:grid; grid-template-rows:auto minmax(0,1fr); }
+.r7-authored-viewport[data-testid="feature-mesh-viewport"] > .view-actions { grid-row:1; }
+.r7-authored-viewport[data-testid="feature-mesh-viewport"] > .r7-three { position:relative; inset:auto; grid-row:2; min-height:0; overflow:hidden; }
 .r7-authored-viewport .viewport { min-height:0; overflow:hidden; }
 .r7-authored-viewport .viewport-status { top:58px; right:12px; width:fit-content; max-width:calc(100% - 24px); pointer-events:none; }
 .r7-context { white-space:pre-wrap; overflow-wrap:anywhere; color:#b8c8d6; font:10px/1.5 ui-monospace,monospace; }

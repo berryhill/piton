@@ -7,7 +7,8 @@ import type { FixtureReviewMeasurement, FixtureReviewPoint } from "../fixture";
 import { clearReviewMeasurementOverlay, updateReviewMeasurementOverlay } from "./reviewMeasurement";
 import { deriveGeometryBinding, type GeometryAuthorityBinding } from "../geometry/binding";
 import { GeometryResultGate, installReplacement, type GeometryRequestIdentity, type GeometryResult } from "../geometry/gate";
-import { cameraPresetDirection, fitCameraToBounds, meshBounds, rolledCameraUp, selectedLegZone, type CameraPreset, type MeshBounds } from "../geometry/view";
+import { fitCameraToBounds, meshBounds, selectedLegZone, type CameraPreset, type MeshBounds } from "../geometry/view";
+import { applyCameraAction, recordCameraPose, rememberCamera, restoreCamera, ViewControls, type ViewHost } from "./ViewControls";
 import {
   constructGeometryWorker,
   geometryWorkerGeneration,
@@ -30,6 +31,7 @@ interface PreviewBuildStatus {
 interface Props {
   parameters: LBracketParameters;
   authoritativeBase: DesignRevision;
+  viewKey?: string;
   disabled?: boolean;
   semanticSelection?: SemanticSelectionId | null;
   onBuildStatus?: (status: PreviewBuildStatus) => void;
@@ -44,6 +46,7 @@ interface Props {
 export default function Viewport({
   parameters,
   authoritativeBase,
+  viewKey,
   disabled = false,
   semanticSelection = null,
   onBuildStatus,
@@ -69,6 +72,7 @@ export default function Viewport({
   const meshSink = useRef(onReviewMesh);
   meshSink.current = onReviewMesh;
   const [status, setStatus] = useState(disabled ? "Geometry disabled in component test" : "Initializing Manifold WASM…");
+  const [cameraUnavailable, setCameraUnavailable] = useState(disabled ? "geometry disabled" : "renderer initializing");
 
   useEffect(() => { statusSink.current = onBuildStatus; }, [onBuildStatus]);
   useEffect(() => { geometrySink.current = onGeometryAdmitted; }, [onGeometryAdmitted]);
@@ -81,7 +85,14 @@ export default function Viewport({
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 2000);
     camera.position.set(145, -150, 115);
     camera.up.set(0, 0, 1);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    let renderer: THREE.WebGLRenderer;
+    try { renderer = new THREE.WebGLRenderer({ antialias: true }); }
+    catch (error) {
+      const reason = `renderer failed: ${error instanceof Error ? error.message : String(error)}`;
+      setStatus(`3D preview unavailable: ${reason}`);
+      setCameraUnavailable(reason);
+      return;
+    }
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     element.appendChild(renderer.domElement);
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -189,24 +200,19 @@ export default function Viewport({
     }
     let part: InstalledReviewMesh | null = null;
     let admittedBounds: MeshBounds | null = null;
+    let admittedViewKey: string | undefined;
     const disposePart = (installed: InstalledReviewMesh) => {
       installed.mesh.geometry.dispose();
       const materials = Array.isArray(installed.mesh.material) ? installed.mesh.material : [installed.mesh.material];
       materials.forEach((material) => material.dispose());
     };
-    const fitCurrentMesh = (preset: CameraPreset = "iso") => {
+    const fitCurrentMesh = (action: CameraPreset | "fit" | "reset" = "reset") => {
       if (!admittedBounds) return;
-      const fit = fitCameraToBounds(admittedBounds, camera.fov, camera.aspect, cameraPresetDirection(preset));
-      camera.position.set(...fit.position);
-      camera.up.set(0, 0, 1);
-      camera.near = fit.near;
-      camera.far = fit.far;
-      camera.updateProjectionMatrix();
-      controls.target.set(...fit.target);
-      controls.update();
-      element.dataset.cameraPreset = preset;
-      element.dataset.fitDistance = fit.distance.toFixed(3);
-      element.dataset.fitTarget = fit.target.join(",");
+      const fit = applyCameraAction(camera, controls, admittedBounds, "cad-z-up", action);
+      if (action !== "fit") element.dataset.cameraPreset = action === "reset" ? "iso" : action;
+      if (fit) element.dataset.fitDistance = fit.distance.toFixed(3);
+      element.dataset.fitTarget = admittedBounds.center.join(",");
+      recordCameraPose(element, camera, controls.target);
     };
     updateMesh.current = (result) => {
       const replacement = installReplacement(
@@ -233,7 +239,11 @@ export default function Viewport({
       );
       part = replacement;
       admittedBounds = replacement.bounds;
+      admittedViewKey = viewKey ? `${viewKey}:${result.sourceRevisionId}` : undefined;
       fitCurrentMesh();
+      restoreCamera(admittedViewKey, camera, controls);
+      recordCameraPose(element, camera, controls.target);
+      setCameraUnavailable("");
       element.dataset.cadZMin = String(admittedBounds.min[2]);
       element.dataset.buildPlaneZ = "0";
       element.dataset.renderedBbox = admittedBounds.size.join(" × ");
@@ -303,7 +313,7 @@ export default function Viewport({
       renderer.setSize(width, height);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
-      fitCurrentMesh();
+      // Resizing must not discard the current direction or roll.
     };
     resize();
     const observer = new ResizeObserver(resize);
@@ -311,31 +321,34 @@ export default function Viewport({
     let frame = 0;
     const draw = () => {
       controls.update();
+      if (admittedBounds) { rememberCamera(admittedViewKey, camera, controls.target); recordCameraPose(element, camera, controls.target); }
       renderer.render(scene, camera);
       frame = requestAnimationFrame(draw);
     };
     draw();
-    const actions = element as HTMLDivElement & { resetView?: () => void; rollView?: () => void; setView?: (preset: CameraPreset) => void; fitView?: () => void };
+    const actions = element as ViewHost;
     actions.resetView = () => {
       fitCurrentMesh("iso");
       element.dataset.viewState = "fit-to-rendered-bbox";
     };
     actions.fitView = () => {
-      fitCurrentMesh((element.dataset.cameraPreset as CameraPreset | undefined) ?? "iso");
+      fitCurrentMesh("fit");
       element.dataset.viewState = "fit-to-rendered-bbox";
     };
     actions.setView = (preset) => {
       fitCurrentMesh(preset);
+      rememberCamera(admittedViewKey, camera, controls.target);
       element.dataset.viewState = preset;
     };
     actions.rollView = () => {
-      const sightLine = controls.target.clone().sub(camera.position).normalize();
-      const rolled = rolledCameraUp(camera.up, sightLine, Math.PI / 12);
-      camera.up.set(rolled.x, rolled.y, rolled.z).normalize();
-      controls.update();
+      if (!admittedBounds) return;
+      applyCameraAction(camera, controls, admittedBounds, "cad-z-up", "roll");
+      recordCameraPose(element, camera, controls.target);
       element.dataset.viewState = "rolled";
+      rememberCamera(admittedViewKey, camera, controls.target);
     };
     return () => {
+      delete actions.resetView; delete actions.fitView; delete actions.setView; delete actions.rollView;
       cancelAnimationFrame(frame);
       observer.disconnect();
       renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
@@ -454,11 +467,6 @@ export default function Viewport({
       aria-label="Part review viewport"
     />
     <div className="viewport-status">{status}</div>
-    <div className="view-actions" aria-label="Review camera controls">
-      {(["iso", "front", "top"] as const).map((preset) => <button key={preset} onClick={() => (host.current as HTMLDivElement & { setView?: (value: CameraPreset) => void })?.setView?.(preset)}>{preset[0].toUpperCase() + preset.slice(1)}</button>)}
-      <button onClick={() => (host.current as HTMLDivElement & { fitView?: () => void })?.fitView?.()}>Fit</button>
-      <button onClick={() => (host.current as HTMLDivElement & { rollView?: () => void })?.rollView?.()}>Roll 15°</button>
-      <button onClick={() => (host.current as HTMLDivElement & { resetView?: () => void })?.resetView?.()}>Reset / fit</button>
-    </div>
+    <ViewControls host={host} unavailable={disabled ? "geometry disabled" : cameraUnavailable} />
   </div>;
 }

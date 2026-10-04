@@ -34,6 +34,7 @@ test("project backup restores original document bookmark in another browser stor
 
 test("editing or invalidating structured request revokes previous commit readiness", async ({page}) => {
   await importBracketFixture(page, "Request check", "Part");
+  await page.getByText("Advanced · structured change request", { exact: true }).click();
   const input=page.getByRole("textbox",{name:"Structured change request",exact:true});
   await input.fill(JSON.stringify({leg_length_mm:100,leg_width_mm:40,base_length_mm:120,base_thickness_mm:8,leg_thickness_mm:8,hole_diameter_mm:6.5}));
   await page.getByRole("button",{name:"Prepare change proposal",exact:true}).click();

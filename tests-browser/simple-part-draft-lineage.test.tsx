@@ -47,7 +47,9 @@ it("retains a dirty source's original revision and blocks silent replacement aft
     const external = await app.proposeFeatures(proposal([externalHole], pointer));
     await app.commitFeatures(external.proposal);
   });
-  await waitFor(() => expect(screen.getByRole("region", { name: "Named feature tree" })).toHaveTextContent("External hole"));
+  const features = await screen.findByRole("treeitem", { name: "Features (3)" });
+  fireEvent.keyDown(features, { key: "ArrowRight" });
+  expect(screen.getByRole("tree", { name: "Plate model tree" })).toHaveTextContent("External hole");
   expect(screen.getByTestId("feature-source-input")).toHaveValue(localSource);
   expect(screen.getByTestId("submit-first-feature")).toBeDisabled();
   expect(screen.getByRole("alert")).toHaveTextContent(/changed|stale|conflict/i);

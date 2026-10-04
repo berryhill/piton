@@ -59,6 +59,7 @@ test("unknown resources never seed; structured changes validate; archived docume
   await page.getByRole("button", { name: "All projects", exact: true }).click();
   await expect(page.getByText("No projects yet.", { exact: false })).toBeVisible();
   await importBracketFixture(page, "Draft project", "Draft part");
+  await page.getByText("Advanced · structured change request", { exact: true }).click();
   await page.getByRole("textbox", { name: "Structured change request", exact: true }).fill(JSON.stringify({leg_length_mm:120,leg_width_mm:60,base_length_mm:140,base_thickness_mm:9,leg_thickness_mm:10,hole_diameter_mm:7}));
   await page.getByRole("button", { name: "Prepare change proposal", exact: true }).click();
   await expect(page.getByRole("button", { name: "Commit revision", exact: true })).toBeEnabled();
