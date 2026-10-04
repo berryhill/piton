@@ -44,6 +44,7 @@ for(const viewport of [{width:1920,height:1080},{width:1280,height:720},{width:3
     await expect(page.getByRole('region',{name:'Model selection details'})).toContainText('Plate outline');await expect(page.getByRole('heading',{name:'Selected context',exact:true})).toHaveCount(1);await close(page);
     const mesh=page.getByTestId('feature-mesh-viewport');await cameras(page,mesh.locator('.r7-three'),mesh.locator('.view-actions'));
     await left(page);const outputs=page.getByRole('region',{name:'Active document outputs'});await outputs.locator('summary').click();await expect(page.getByTestId('generated-feature-source')).toContainText('"width":80');
+    expect(await page.getByTestId('generated-feature-source').evaluate(node=>node.scrollWidth<=node.clientWidth+1)).toBe(true);
     const download=page.waitForEvent('download');await outputs.getByRole('button',{name:'Download feature review STL (unreleased)',exact:true}).click();expect((await download).suggestedFilename()).toMatch(/unreleased.*\.stl$/);await close(page);
     await page.screenshot({path:info.outputPath(`sidebar-solid-${viewport.width}.png`),fullPage:true});
     if(viewport.width<940)await page.getByRole('button',{name:'Change Request',exact:true}).first().click();await page.getByRole('button',{name:'Revision 1',exact:true}).click();await close(page);await expect(mesh).toHaveAttribute('data-revision-id',ids.content);await hierarchy(page,'Plate');await expect(page.getByRole('heading',{name:'Model tree · historical',exact:true})).toBeVisible();
