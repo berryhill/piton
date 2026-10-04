@@ -102,6 +102,8 @@
 .r7-right { border-left:1px solid var(--r7-line); }
 .r7-workbench .r7-panel-head { margin:0; padding:8px 10px; border-bottom:1px solid var(--r7-line); font-size:10px; font-weight:800; letter-spacing:.1em; color:#91a6b9; }
 .r7-section { padding:10px; border-bottom:1px solid var(--r7-line); }
+.r7-section[aria-label="Active document outputs"] p { margin:4px 0; font-size:10px; }
+.r7-section[aria-label="Active document outputs"] button { padding:4px 7px; font-size:10px; }
 .r7-section h3 { margin:0 0 8px; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#b8c8d6; }
 .r7-workbench p { font-size:11px; color:#91a6b9; }
 .r7-workbench button { margin:3px 3px 3px 0; padding:6px 9px; border:1px solid var(--r7-line); border-radius:5px; background:#1b2b3a; font:inherit; color:inherit; }

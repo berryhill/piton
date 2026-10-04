@@ -476,13 +476,13 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
     finally{operation.current=false;if(mounted.current)setBusy(false);}
   };
   return <>
-    {active&&targets&&createPortal(<div><p>{outputMode} · {sourcePointer?`revision ${sourcePointer} · `:""}{scope||"no source identity"} · browser-typescript/v1 · CAD mm.</p>
+    {active&&targets&&createPortal(<div>{displayedSource&&<p>{outputMode} · {sourcePointer?`revision ${sourcePointer} · `:""}{scope} · browser-typescript/v1 · CAD mm.</p>}
       {draftDirty&&!visiblePreview&&!revisionId&&<p>Uncommitted draft is not displayed here; preview it before reviewing its generated source.</p>}
       {blocked&&<p>Source draft conflicts with the current revision; reload before exporting review geometry.</p>}
       <details><summary>Generated source · {outputMode}</summary>{displayedSource?<pre data-testid="generated-feature-source">{displayedSource.source}</pre>:<p>No authored feature source. Preview a named feature first.</p>}</details>
       <button disabled={!displayedSource} title={displayedSource?undefined:"No authored source to download"} onClick={()=>{if(!displayedSource)return;downloadPartFile(`${part.id}-${revisionId?`historical-${revisionId}`:visiblePreview?"uncommitted-preview":`committed-${sourcePointer}`}-source.txt`,displayedSource.source,"text/plain");}}>Download generated source ({outputMode})</button>
       <button disabled={!exportable} title={exportable?undefined:!displayedSource?"No authored source or review mesh yet":geometryState==="failed"?"Review geometry rejected by worker":"Admitted, source-matched review geometry required; loading, invalidated or stale meshes cannot be exported"} onClick={()=>{if(!exportable||!displayedSource||!geometry||geometry.scope!==scope)return;try {downloadPartFile(`${part.id}-${revisionId?`historical-${revisionId}`:visiblePreview?"uncommitted-preview":`committed-${sourcePointer}`}-review-unreleased.stl`,featureReviewStl(displayedSource,geometry.mesh),"model/stl");}catch(e){setError(e instanceof Error?e.message:"Review mesh unavailable");}}}>Download feature review STL (unreleased)</button>
-      <p>Review mesh only; no fabrication approval or machine actuation.</p></div>,targets.outputs)}
+      {displayedSource&&<p>Review mesh only; no fabrication approval or machine actuation.</p>}</div>,targets.outputs)}
     {active&&createPortal(<section className="r7-empty-authoring" data-testid="empty-feature-authoring" aria-label="Part source and revision">
       <h2 className="r7-panel-head">{revisionId?"Historical revision":current?"Current Part":"New Part draft"}</h2>
       <p className="r7-section-help">{part.name} · browser-typescript/v1 · mm · review mesh only. {revisionId?"Read-only historical source.":"Source is authored only on explicit commit."}</p>
