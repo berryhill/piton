@@ -33,6 +33,7 @@ async function setup() {
   history.replaceState(null, "", `/projects/${projectId}/documents/${documentId}`);
   render(<ProjectWorkspace application={app} />);
   await screen.findByTestId("feature-source-input");
+  fireEvent.click(screen.getByText(/^Advanced ·/));
   await waitFor(() => expect(screen.getByTestId("feature-mesh-viewport")).toHaveAttribute("data-revision-id", initial.candidate.id));
   const localSource = appendFeatures(initial.candidate.authored, [localHole]).source;
   return { app, proposal, pointer, initial, localSource };

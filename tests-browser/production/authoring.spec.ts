@@ -84,8 +84,9 @@ test("production empty-Part authoring commits a named feature source through the
   await expect(page.getByRole("tab", { name: "Plate", exact: true })).toHaveAttribute("aria-selected", "true");
   const affordance = page.getByTestId("empty-feature-authoring");
   await expect(affordance).toBeVisible();
-  await expect(affordance).toHaveAttribute("aria-label", "First feature source");
-  // The default source produces a real mounting plate — submit it directly.
+  await expect(affordance).toHaveAttribute("aria-label", "Part source and revision");
+  // Explicitly enter the advanced recipe path; it is not the normal sketch UI.
+  await affordance.locator("summary").click();
   const submit = page.getByTestId("submit-first-feature");
   await expect(submit).toBeEnabled();
   await submit.click();
@@ -105,6 +106,7 @@ test("production empty-Part authoring commits a named feature source through the
   await expect(page.getByTestId("feature-mesh-viewport").locator("canvas")).toBeVisible();
   expect(await readPart()).toEqual(first);
   const source = page.getByTestId("feature-source-input");
+  await page.getByTestId("empty-feature-authoring").locator("summary").click();
   await source.fill((await source.inputValue()).replace('"width":80', '"width":90'));
   await page.getByTestId("submit-first-feature").click();
   await expect(page.getByTestId("feature-preview")).toBeVisible();

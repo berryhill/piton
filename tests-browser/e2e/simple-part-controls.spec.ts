@@ -28,7 +28,7 @@ async function start(page: Page, project: string, part: string) {
 async function tool(page: Page, name: string, values: Record<string, string> = {}) {
   const bar = commands(page);
   await bar.getByRole("button", { name, exact: true }).click();
-  const editor = bar.getByRole("form", { name: `${name} parameters` });
+  const editor = page.getByRole("complementary", { name: "Change request" }).getByRole("form", { name: `${name} parameters` });
   for (const [key, value] of Object.entries(values)) await editor.getByRole("spinbutton", { name: key }).fill(value);
   await editor.getByRole("button", { name: name === "Rectangle" || name === "Line" || name === "Circle" || name === "Dimension" ? "Apply to sketch" : "Add feature" }).click();
 }
