@@ -35,7 +35,7 @@ describe("canonical named-feature source", () => {
   it("rejects unknown fields, units, plane, features and duplicate IDs", () => {
     expect(() => readFeatures({ ...plate(), units: "in" } as never)).toThrow();
     expect(() => appendFeatures(emptyFeatureSource(), [{ ...plateFeatures[0], surprise: true } as never])).toThrow();
-    expect(() => appendFeatures(emptyFeatureSource(), [{ ...plateFeatures[0], plane: "XZ" } as never])).toThrow();
+    expect(() => appendFeatures(emptyFeatureSource(), [{ ...plateFeatures[0], plane: "INVALID" } as never])).toThrow();
     expect(() => appendFeatures(plate(), [{ kind: "fillet", id: "bad", name: "Unsupported edge set", bodyId: "plate", edgeSet: "allEdges", radius: 2 } as never])).toThrow(/vertical outer perimeter/);
     expect(() => appendFeatures(plate(), [{ ...plateFeatures[2] }])).toThrow(/Duplicate/);
   });

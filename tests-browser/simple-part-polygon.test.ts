@@ -52,13 +52,13 @@ describe("bounded XY polygon Line profile", () => {
   ])("rejects %s before source custody", (_case, vertices) => {
     expect(() => source(vertices)).toThrow();
   });
-  it("rejects unsupported plane, unknown fields, arbitrary text, second profile and polygon holes", () => {
-    expect(() => appendFeatures(emptyFeatureSource(), [{ ...outline(notch), plane: "XZ" } as never])).toThrow();
+  it("admits a second profile but rejects invalid planes, fields, text and polygon holes", () => {
+    expect(() => appendFeatures(emptyFeatureSource(), [{ ...outline(notch), plane: "INVALID" } as never])).toThrow();
     expect(() => appendFeatures(emptyFeatureSource(), [{ ...outline(notch), bogus: 1 } as never])).toThrow();
     const authored = source();
     expect(() => readFeatures({ ...authored, source: authored.source + "globalThis.bad = true;\n" })).toThrow();
     expect(() => readFeatures({ ...authored, source: authored.source.replace("part.polygon(", "part.polygon(\"vertices\":[] ,") })).toThrow();
-    expect(() => appendFeatures(authored, [{ ...outline(notch), id: "second" }])).toThrow(/one profile/);
+    expect(readFeatures(appendFeatures(authored, [{ ...outline(notch), id: "second" }])).at(-1)?.id).toBe("second");
     expect(() => appendFeatures(authored, [{ kind: "hole", id: "hole", name: "Hole", bodyId: "body", x: 0, y: 0, diameter: 1, extent: "through" }])).toThrow(/Polygon holes/);
   });
 });

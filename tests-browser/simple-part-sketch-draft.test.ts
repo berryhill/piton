@@ -12,9 +12,9 @@ function rectangle() {
 }
 
 describe("transient XY sketch command draft", () => {
-  it("starts only on XY and binds project, document and revision identity", () => {
+  it("rejects invalid planes and binds project, document and revision identity", () => {
     expect(start()).toMatchObject({ status: "drawing", context, draftId: "draft-a", generation: 0, profile: null });
-    expect(() => reduceSketchDraft(null, { type: "newSketch", context, draftId: "draft-b", plane: "XZ" as never })).toThrow(/XY/);
+    expect(() => reduceSketchDraft(null, { type: "newSketch", context, draftId: "draft-b", plane: "INVALID" as never })).toThrow();
     expect(() => reduceSketchDraft(start(), { type: "newSketch", context, draftId: "draft-b", plane: "XY" })).toThrow(/active/);
     expect(() => reduceSketchDraft(start(), { type: "circle", context: other, diameter: 8 })).toThrow(/stale/i);
     expect(() => reduceSketchDraft(start(), { type: "circle", context: { ...context, revisionId: "rev-next" }, diameter: 8 })).toThrow(/stale/i);

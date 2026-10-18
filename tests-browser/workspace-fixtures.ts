@@ -57,7 +57,15 @@ export async function expectEmptyParts(page: Page, projectName: string, names: s
   }, projectName);
   expect(documents).toEqual(names.map(name => ({ name, current: null, accepted: null, revisions: [], revisionIds: {} })));
   await expect(page.locator(".r7-authored-viewport")).toHaveCount(0);
-  await expect(page.getByRole("spinbutton")).toHaveCount(0);
+  // Sketch placement is transient command input, not saved Part parameters.
+  await expect(page.locator('.r7-left,.r7-right').getByRole("spinbutton")).toHaveCount(0);
+  const sketchOffset = page.getByRole("spinbutton", { name: "Sketch offset", exact: true });
+  if (new URL(page.url()).pathname.includes("/documents/")) {
+    await expect(sketchOffset).toHaveValue("0");
+  } else {
+    // Project-only routes have no active Part or sketch placement controls.
+    await expect(sketchOffset).toHaveCount(0);
+  }
   await expect(page.getByRole("button", { name: /^Revision \d/ })).toHaveCount(0);
   await expect(page.getByText("Bench Clamp Fixture", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Editable Part · L-bracket", { exact: true })).toHaveCount(0);

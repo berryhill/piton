@@ -11,11 +11,12 @@ import type { GeometryResult } from "./geometry/gate";
 import { downloadPartFile, featureReviewStl, reviewPartStl } from "./partExport";
 import { ConversationPanel } from "./chat/ConversationPanel";
 import type { SelectionReference } from "./chat/context";
-import { readFeatures, type PartFeature } from "./modeling/source";
+import { featureSourceDigest, readFeatures, type PartFeature, type PrincipalPlane } from "./modeling/source";
 import type { FeatureEvaluation } from "./modeling/evaluator";
-import FeatureMeshViewport, {type FeatureRendererStatus} from "./modeling/FeatureMeshViewport";
+import FeatureMeshViewport, {resolveCapFacePick,type FeatureRendererStatus} from "./modeling/FeatureMeshViewport";
 import { assertFeatureEvaluation, evaluateFeatureSourceInWorker } from "./modeling/client";
-import { PartCommandUI, PartCategoryTabs, type PartCategory } from "./modeling/PartCommandUI";
+import { PartCommandUI, PartCategoryTabs, type CapFaceSelection, type PartCategory } from "./modeling/PartCommandUI";
+import { enumerateSurvivingCaps } from "./modeling/capFaces";
 import { emptyFeatureSource } from "./modeling/source";
 import type { FeatureSource } from "./modeling/source";
 import type { FixtureReviewMeasurement, FixtureReviewPoint } from "./fixture";
@@ -191,7 +192,7 @@ function ProjectWorkbench({application,project,document,revisionId,path,navigate
       <aside className={`r7-right ${panel==="change"?"is-open":""}`} aria-label="Change request"><button className="r7-drawer-close" onClick={()=>setPanel(null)}>Close Change Request</button><h2 className="r7-panel-head">Change Request</h2><ConversationPanel project={project} documentId={document?.id} revisionId={revisionId} selection={selected?[selected]:[]} selectionLabel={visibleNode?.label} selectionDetail={visibleNode?.detail} projectionMode={projection?.mode} unavailableReason={previewSemantic?"Uncommitted feature/parameter reference unavailable until commit; preview highlight only.":undefined} draft={!revisionId&&!!(document&&draftStatuses[document.id]?.dirty)} preview={!revisionId&&!!(document&&draftStatuses[document.id]?.preview)}/><div ref={setRightTarget}/></aside>
       {targets&&tabs.map(d=>isAuthoredPart(d.part)?<PartEditor key={d.id} application={application} projectId={project.id} document={{...d,part:d.part}} archived={project.archived} refresh={refresh} navigate={navigate} active={document?.id===d.id&&!revisionId} targets={targets} reportDraft={reportDraft} reportCandidate={reportCandidate}/>:null)}
       {targets&&document&&isAuthoredPart(document.part)&&revisionId&&<PartEditor key={`${document.id}:${revisionId}`} application={application} projectId={project.id} document={{...document,part:document.part}} revisionId={revisionId} archived={project.archived} refresh={refresh} navigate={navigate} active targets={targets}/>}
-      {targets&&tabs.filter(d=>d.part.currentRevisionId===null||isFeaturePart(d.part)).map(d=><EmptyFeatureAuthoring key={`features-${d.id}`} active={document?.id===d.id} application={application} projectId={project.id} part={d} refresh={refresh} pending={pending} archived={project.archived} revisionId={document?.id===d.id?revisionId:undefined} navigate={navigate} targets={targets} reportDraft={reportDraft} reportCandidate={reportCandidate} openProperties={()=>setPanel("change")}/>)}
+      {targets&&tabs.filter(d=>d.part.currentRevisionId===null||isFeaturePart(d.part)).map(d=><EmptyFeatureAuthoring key={`features-${d.id}`} active={document?.id===d.id} application={application} projectId={project.id} part={d} refresh={refresh} pending={pending} archived={project.archived} revisionId={document?.id===d.id?revisionId:undefined} selectedFeatureId={document?.id===d.id&&!revisionId&&projection?.mode==='committed'&&selected?.sourceRevisionId===projection.sourceRevisionId&&selected.representation==='feature'&&selected.nodeId.startsWith('feature:')?selected.nodeId.slice('feature:'.length):undefined} navigate={navigate} targets={targets} reportDraft={reportDraft} reportCandidate={reportCandidate} openProperties={()=>setPanel("change")}/>)}
     </div><footer className="r7-status"><span>{project.archived?"Archived project · read-only":"Browser-local project"} · {project.documents.length} Parts</span><span>needs_human_review · fabrication_release=false · machine_actuation=false</span></footer>
   </main>;
 }
@@ -362,7 +363,7 @@ const EMPTY_FEATURE_SOURCE_PLACEHOLDER =
   'part.extrude({"id":"plate","name":"Plate thickness","profileId":"outline","distance":6});\n' +
   'part.hole({"id":"mount-1","name":"Mounting hole 1","bodyId":"plate","x":15,"y":15,"diameter":5,"extent":"through"});\n';
 /** Both first-feature and subsequent source edits cross the same preview gate. */
-function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pending,archived,revisionId,navigate,targets,reportDraft,reportCandidate,openProperties}:{
+function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pending,archived,revisionId,selectedFeatureId,navigate,targets,reportDraft,reportCandidate,openProperties}:{
   active:boolean;
   application: WorkspaceApplication;
   projectId: string;
@@ -371,6 +372,7 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
   pending:boolean;
   archived?:boolean;
   revisionId?:string;
+  selectedFeatureId?:string;
   navigate?:(url:string)=>void;
   targets?:WorkbenchTargets;
   reportDraft?:(id:string,status:DraftStatus)=>void;
@@ -390,7 +392,9 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
   const [sketchDirty,setSketchDirty]=useState(false);
   const [sketchVisible,setSketchVisible]=useState(false);
   const [rendererStatus,setRendererStatus]=useState<FeatureRendererStatus|null>(null);
-  const reportRenderer=useCallback((status:FeatureRendererStatus)=>{setRendererStatus(status);if(status.state!=="ready")setMeasurement(previous=>previous?.scope===status.revisionId?null:previous);},[]);
+  const [capSelection,setCapSelection]=useState<CapFaceSelection|null>(null);
+  const [capPickReason,setCapPickReason]=useState("");
+  const reportRenderer=useCallback((status:FeatureRendererStatus)=>{setRendererStatus(status);if(status.state!=="ready"){setMeasurement(previous=>previous?.scope===status.revisionId?null:previous);setCapSelection(previous=>previous?.scope===status.revisionId?null:previous);}},[]);
   const [draftBase,setDraftBase]=useState<string|null>(()=>part&&isFeaturePart(part.part)?Object.keys(part.revisionIds).find(id=>part.revisionIds[id]===part.part.currentRevisionId)??null:null);
   const [conflict,setConflict]=useState(false);
   const [sketchReset,setSketchReset]=useState(0);
@@ -402,17 +406,17 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
   const reload=()=>{
     generation.current++;geometryGeneration.current++;
     if(preview)application.cancelFeatureProposal(preview.proposal);
-    setPreview(null);setGeometry(null);setMeasurement(null);
+    setPreview(null);setGeometry(null);setMeasurement(null);setCapSelection(null);
     setSource(current?.authored.source??EMPTY_FEATURE_SOURCE_PLACEHOLDER);
     setDraftBase(currentPointer??null);setConflict(false);setSketchReset(value=>value+1);
     setSketchDirty(false);setError("");setMessage("");
   };
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;generation.current++;geometryGeneration.current++;};},[]);
-  useEffect(()=>{if(!active)setMeasurement(null);},[active]);
+  useEffect(()=>{if(!active){setMeasurement(null);setCapSelection(null);}},[active]);
   useEffect(()=>{
     if(!shown)return;
     const token=++geometryGeneration.current;
-    setGeometry(null);setGeometryState("loading");
+    setGeometry(null);setCapSelection(null);setGeometryState("loading");
     if(!revisionId&&preview&&draftBase===(currentPointer??null)) {
       setGeometry({mesh:preview.geometry,scope:preview.candidate.id});setGeometryState("ready");
       return;
@@ -425,7 +429,7 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
     if(sketchDirty||preview||source!==previousCurrent.current) {
       generation.current++;
       if(preview)application.cancelFeatureProposal(preview.proposal);
-      setPreview(null);setGeometry(null);setMeasurement(null);setConflict(true);
+      setPreview(null);setGeometry(null);setMeasurement(null);setCapSelection(null);setConflict(true);
     } else {
       setDraftBase(currentPointer??null);
       setSource(current?.authored.source??EMPTY_FEATURE_SOURCE_PLACEHOLDER);
@@ -441,6 +445,25 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
   const pickingReady=admitted&&!sketchVisible&&rendererStatus?.revisionId===scope&&rendererStatus.state==="ready";
   const measureUnavailableReason=!admitted?"No admitted review mesh to measure":sketchVisible?"Finish or cancel the sketch to inspect review geometry":rendererStatus?.revisionId===scope?rendererStatus.reason??"Review renderer initializing":"Review renderer initializing";
   const displayedSource=visiblePreview?.candidate.authored??shown?.authored;
+  const effectiveSource=revisionId?shown?.authored.source??source:!current&&source===EMPTY_FEATURE_SOURCE_PLACEHOLDER?emptyFeatureSource().source:source;
+  const capSource=displayedSource&&effectiveSource===displayedSource.source?displayedSource:undefined;
+  const capCandidates=useMemo(()=>{
+    if(!capSource||!admitted||!geometry||geometryState!=="ready"||blocked)return undefined;
+    try {return enumerateSurvivingCaps(capSource,geometry.mesh);}catch{return undefined;}
+  },[capSource?.source,geometry,admitted,geometryState,blocked]);
+  const capDigest=capSource?featureSourceDigest(capSource):"";
+  const currentCapSelection=capSelection&&capCandidates&&capSelection.projectId===projectId&&capSelection.documentId===part.id&&capSelection.revisionId===draftBase&&capSelection.scope===scope&&capSelection.sourceDigest===capDigest&&capCandidates.some(c=>c.featureId===capSelection.featureId&&c.side===capSelection.side)?capSelection:null;
+  const pickScope=useRef<{mesh:FeatureEvaluation;scope:string;source:string;revisionId:string|null}|null>(null);
+  pickScope.current=active&&admitted&&geometry&&capSource&&capCandidates&&!blocked&&!sketchVisible?{mesh:geometry.mesh,scope,source:capSource.source,revisionId:draftBase}:null;
+  const facePick=(faceIndex:number|null)=>{
+    if(!geometry||!capSource||!capCandidates||!pickScope.current||pickScope.current.mesh!==geometry.mesh||pickScope.current.scope!==scope||pickScope.current.source!==capSource.source||pickScope.current.revisionId!==draftBase)return;
+    const result=resolveCapFacePick(capCandidates,faceIndex);
+    if("reason" in result){setCapSelection(null);setCapPickReason(result.reason);return;}
+    const parent=readFeatures(capSource).find(f=>f.id===result.featureId);
+    const profile=parent?.kind==="extrude"?readFeatures(capSource).find(f=>f.id===parent.profileId):undefined;
+    if(!profile||!("plane" in profile)){setCapSelection(null);setCapPickReason("Named cap profile unavailable");return;}
+    setCapPickReason("");setCapSelection({projectId,documentId:part.id,revisionId:draftBase,sourceDigest:capDigest,scope,featureId:result.featureId,side:result.side,plane:profile.plane as PrincipalPlane});
+  };
   const sourcePointer=visiblePreview?null:revisionId??currentPointer;
   const outputMode=revisionId?"Historical committed":visiblePreview?"Uncommitted preview":shown?"Current committed":"Empty Part";
   let exportable=false;
@@ -461,7 +484,8 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
     });
   };
   const hover=(point:FixtureReviewPoint|null)=>setMeasurement(previous=>previous?.scope===scope&&previous.value.phase==="endpoint-a"?{scope,value:{...previous.value,hoverEndpoint:point}}:previous);
-  const invalidate=()=>{generation.current++;geometryGeneration.current++;if(preview)application.cancelFeatureProposal(preview.proposal);setPreview(null);setGeometry(null);setGeometryState("invalidated");setMeasurement(null);};
+  const invalidate=()=>{pickScope.current=null;generation.current++;geometryGeneration.current++;if(preview)application.cancelFeatureProposal(preview.proposal);setPreview(null);setGeometry(null);setGeometryState("invalidated");setMeasurement(null);setCapSelection(null);setCapPickReason("");};
+  useEffect(()=>{if(sketchDirty)invalidate();},[sketchDirty]);
   const submit=async()=>{
     if(operation.current||readonly||pending||blocked)return;
     invalidate();
@@ -478,9 +502,9 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
     finally{operation.current=false;if(mounted.current)setBusy(false);}
   };
   const commit=async()=>{
-    if(!preview||operation.current||readonly||pending||blocked)return;
+    if(!preview||operation.current||readonly||pending||blocked||sketchDirty)return;
     operation.current=true;setBusy(true);setError("");
-    try {const id=await application.commitFeatures(preview.proposal);if(!mounted.current)return;setDraftBase(id);setSource(preview.candidate.authored.source);previousCurrent.current=preview.candidate.authored.source;setPreview(null);setGeometry(null);setMeasurement(null);setMessage(`Revision committed: ${id} · engineering approval not granted.`);await refresh();}
+    try {const id=await application.commitFeatures(preview.proposal);if(!mounted.current)return;setDraftBase(id);setSource(preview.candidate.authored.source);previousCurrent.current=preview.candidate.authored.source;setPreview(null);setGeometry(null);setMeasurement(null);setCapSelection(null);setMessage(`Revision committed: ${id} · engineering approval not granted.`);await refresh();}
     catch(e){if(mounted.current)setError(e instanceof Error?e.message:"Commit failed");}
     finally{operation.current=false;if(mounted.current)setBusy(false);}
   };
@@ -506,9 +530,9 @@ function EmptyFeatureAuthoring({active,application,projectId,part,refresh,pendin
       {visiblePreview&&<section data-testid="feature-preview"><strong>Preview only · not committed</strong><p>{visiblePreview.candidate.id} · {visiblePreview.geometry.triangles.length/3} triangles · {visiblePreview.geometry.volumeMm3.toFixed(2)} mm³</p></section>}
       {!revisionId&&message&&<p role="status" data-testid="empty-feature-message">{message}</p>}{error&&<p role="alert" data-testid="empty-feature-error">{error}</p>}
     </section>,targets?.right??globalThis.document.querySelector(".r7-right")??globalThis.document.body)}
-    {targets&&createPortal(<div hidden={!active}><PartCommandUI active={active} context={{projectId,documentId:part.id,revisionId:draftBase}} baseSource={revisionId?shown?.authored??emptyFeatureSource():current?.authored??emptyFeatureSource()} source={revisionId?shown?.authored.source??source:!current&&source===EMPTY_FEATURE_SOURCE_PLACEHOLDER?emptyFeatureSource().source:source} onSource={next=>{invalidate();setSource(next);}} readonly={readonly||blocked} busy={busy||pending} previewReady={!!visiblePreview} onPreview={()=>void submit()} onCommit={()=>void commit()} onSketchDirty={setSketchDirty} onSketchVisible={setSketchVisible} onOpenProperties={openProperties} propertyTarget={targets.right} viewportTarget={targets.center} resetToken={sketchReset} measureAvailable={pickingReady} measureUnavailableReason={measureUnavailableReason} measurement={currentMeasurement} onMeasure={measure} onClearMeasurement={clearMeasurement}/></div>,targets.commands)}
+    {targets&&createPortal(<div hidden={!active}><PartCommandUI active={active} selectedFeatureId={active&&!blocked?selectedFeatureId:undefined} context={{projectId,documentId:part.id,revisionId:draftBase}} baseSource={revisionId?shown?.authored??emptyFeatureSource():current?.authored??emptyFeatureSource()} source={effectiveSource} onSource={next=>{invalidate();setSource(next);}} readonly={readonly||blocked} busy={busy||pending} previewReady={!!visiblePreview} onPreview={()=>void submit()} onCommit={()=>void commit()} onSketchDirty={setSketchDirty} onSketchVisible={setSketchVisible} onOpenProperties={openProperties} propertyTarget={targets.right} viewportTarget={targets.center} resetToken={sketchReset} measureAvailable={pickingReady} measureUnavailableReason={measureUnavailableReason} measurement={currentMeasurement} onMeasure={measure} onClearMeasurement={clearMeasurement} capCandidates={capCandidates} capSelection={currentCapSelection} onClearCapSelection={()=>{setCapSelection(null);setCapPickReason("");}}/></div>,targets.commands)}
 
-    {active&&!sketchVisible&&admitted&&geometry&&targets&&createPortal(<FeatureMeshViewport key={scope} viewKey={`${projectId}:${part.id}:${scope}`} geometry={geometry.mesh} revisionId={scope} measurement={currentMeasurement} onMeasurementPoint={point} onMeasurementHover={hover} onMeasurementCancel={clearMeasurement} onRendererStatus={reportRenderer}/>,targets.center)}
+    {active&&!sketchVisible&&admitted&&geometry&&targets&&createPortal(<><FeatureMeshViewport key={scope} viewKey={`${projectId}:${part.id}:${scope}`} geometry={geometry.mesh} revisionId={scope} measurement={currentMeasurement} onMeasurementPoint={point} onMeasurementHover={hover} onMeasurementCancel={clearMeasurement} onRendererStatus={reportRenderer} onFacePick={facePick}/>{capPickReason&&<p role="status">{capPickReason}</p>}</>,targets.center)}
     {active&&!sketchVisible&&!admitted&&targets&&createPortal(shown||busy||geometryState==="failed"?<section className="r7-empty-viewport r7-geometry-status" data-testid="feature-geometry-status" role={geometryState==="failed"?"alert":"status"}>
       <strong>{geometryState==="failed"?"Review geometry unavailable":geometryState==="invalidated"?"Review preview invalidated":revisionId?"Loading historical review geometry":"Loading review geometry"}</strong>
       <p>{shown?"Saved Part source and revision history remain available; this is not an empty Part.":"Draft is not committed; no saved geometry was created."}</p>

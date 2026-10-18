@@ -40,10 +40,10 @@ it("places accessible Sketch, Features, Inspect in order and commands in the cen
   const bar=commands();
   expect(bar.closest(".r7-center")).not.toBeNull();
   expect(within(bar).getAllByRole("tab").map(node=>node.textContent)).toEqual(["Sketch","Features","Inspect"]);
-  expect(within(bar).getByLabelText("Sketch tools").querySelectorAll("button")).toHaveLength(5);
-  expect([...within(bar).getByLabelText("Sketch tools").querySelectorAll("button")].map(node=>node.textContent)).toEqual(["New Sketch","Line","Rectangle","Circle","Dimension"]);
+  expect(within(bar).getByLabelText("Sketch tools").querySelectorAll("button")).toHaveLength(7);
+  expect([...within(bar).getByLabelText("Sketch tools").querySelectorAll("button")].map(node=>node.textContent)).toEqual(["New Sketch","Line","Rectangle","Circle","Dimension","Mirror","Trim"]);
   chooseCategory("Features");
-  expect([...within(bar).getByLabelText("Features tools").querySelectorAll("button")].map(node=>node.textContent)).toEqual(["Extrude","Revolve","Hole","Linear Pattern","Fillet","Chamfer"]);
+  expect([...within(bar).getByLabelText("Features tools").querySelectorAll("button")].map(node=>node.textContent)).toEqual(["Extrude","Cut Extrude","Revolve","Hole","Linear Pattern","Fillet","Chamfer"]);
   expect(within(bar).getByRole("button",{name:"Extrude"})).toBeDisabled();
   chooseCategory("Inspect");
   expect([...within(bar).getByLabelText("Inspect tools").querySelectorAll("button")].map(node=>node.textContent)).toEqual(["Measure","Clear"]);
@@ -109,12 +109,12 @@ it("preserves a sketch per tab and blocks unsupported operations",async()=>{
   expect((await app.read()).projects[0].documents.find(d=>d.id===documentId)?.part.currentRevisionId).toBeNull();
 });
 
-it("gates New Sketch on explicit XY choice and marks unsupported planes unavailable",async()=>{
+it("gates New Sketch on explicit principal-plane choice",async()=>{
   await setup();const bar=commands();
   expect(within(bar).getByRole("button",{name:"New Sketch"})).toBeDisabled();
   const plane=within(bar).getByRole("combobox",{name:"Sketch plane"});
-  expect(within(plane).getByRole("option",{name:/XZ plane/})).toBeDisabled();
-  expect(within(plane).getByRole("option",{name:/YZ plane/})).toBeDisabled();
+  expect(within(plane).getByRole("option",{name:/XZ plane/})).toBeEnabled();
+  expect(within(plane).getByRole("option",{name:/YZ plane/})).toBeEnabled();
   startSketch(bar);
   expect(within(bar).getByText(/XY sketch · drawing/)).toBeInTheDocument();
 });

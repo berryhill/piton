@@ -1,6 +1,7 @@
 import type { CrossSection, Manifold, ManifoldToplevel } from "manifold-3d";
 import { SAFETY_TRUTH, sha256Hex } from "../domain";
-import { featureSourceDigest, FILLET_CORNER_SEGMENTS, ModelingError, readFeatures, type FeatureSource, type HoleFeature } from "./source";
+import { featureSourceDigest, FILLET_CORNER_SEGMENTS, isOrderedSource, ModelingError, readFeatures, type FeatureSource, type HoleFeature } from "./source";
+import { evaluateOrderedSource } from "./orderedEvaluator";
 
 export const CIRCULAR_SEGMENTS = 256;
 /** Four quarter arcs with 64 chords each; other perimeter surfaces stay planar. */
@@ -64,6 +65,7 @@ function finishedRectangle(width: number, height: number, kind: "fillet" | "cham
  * state is read/written here; callers bind sourceDigest to their revision/build. */
 export function evaluateFeatureSource(source: FeatureSource, kernel: ManifoldToplevel): FeatureEvaluation {
   const features = readFeatures(source);
+  if (isOrderedSource(features)) return evaluateOrderedSource(source, features, kernel);
   const profile = features.find(f => f.kind === "rectangle" || f.kind === "circle" || f.kind === "polygon");
   const extrusion = features.find(f => f.kind === "extrude");
   const revolve = features.find(f => f.kind === "revolve");
@@ -79,11 +81,13 @@ export function evaluateFeatureSource(source: FeatureSource, kernel: ManifoldTop
   const resources: (Manifold | CrossSection)[] = [];
   function own<T extends Manifold | CrossSection>(object: T): T { resources.push(object); return object; }
   try {
-    const crossSection = own(profile.kind === "rectangle"
+    const outline = own(profile.kind === "rectangle"
       ? finish ? new kernel.CrossSection([finishedRectangle(profile.width, profile.height, finish.kind, finish.kind === "fillet" ? finish.radius : finish.distance)])
         : kernel.CrossSection.square([profile.width, profile.height])
       : profile.kind === "circle" ? kernel.CrossSection.circle(profile.diameter / 2, CIRCULAR_SEGMENTS)
       : new kernel.CrossSection([profile.vertices.map(v => [v[0], v[1]] as [number, number])]));
+    const crossSection = profile.kind === "circle" && profile.innerDiameter !== undefined
+      ? own(outline.subtract(own(kernel.CrossSection.circle(profile.innerDiameter / 2, CIRCULAR_SEGMENTS)))) : outline;
     let solid = own(revolve ? crossSection.revolve(CIRCULAR_SEGMENTS, 360) : crossSection.extrude(extrusion!.distance));
     for (const hole of holes) {
       // Extend beyond both surfaces so coplanar cutter faces cannot cap a hole.
@@ -110,7 +114,7 @@ export function evaluateFeatureSource(source: FeatureSource, kernel: ManifoldTop
         ? { min: [0, 0, 0], max: [profile.width, profile.height, extrusion!.distance] }
         : polygonBounds ?? { min: [-radius, -radius, 0], max: [radius, radius, extrusion!.distance] };
     const finishSize = finish ? finish.kind === "fillet" ? finish.radius : finish.distance : 0;
-    const analyticArea = profile.kind === "rectangle" ? profile.width * profile.height - (finish?.kind === "fillet" ? (4 - Math.PI) * finishSize ** 2 : finish?.kind === "chamfer" ? 2 * finishSize ** 2 : 0) : profile.kind === "circle" ? Math.PI * radius ** 2
+    const analyticArea = profile.kind === "rectangle" ? profile.width * profile.height - (finish?.kind === "fillet" ? (4 - Math.PI) * finishSize ** 2 : finish?.kind === "chamfer" ? 2 * finishSize ** 2 : 0) : profile.kind === "circle" ? Math.PI * (radius ** 2 - (profile.innerDiameter ?? 0) ** 2 / 4)
       : profile.vertices.slice(1, -1).reduce((sum, vertex, i) => {
         const origin = profile.vertices[0], next = profile.vertices[i + 2];
         return sum + ((vertex[0] - origin[0]) * (next[1] - origin[1]) - (vertex[1] - origin[1]) * (next[0] - origin[0])) / 2;
@@ -126,7 +130,7 @@ export function evaluateFeatureSource(source: FeatureSource, kernel: ManifoldTop
     // Declared error bound from each circle's regular inscribed polygon area;
     // use sum, not net volume, so thin annuli retain a meaningful bound.
     const polygonError = 1 - CIRCULAR_SEGMENTS * Math.sin(2 * Math.PI / CIRCULAR_SEGMENTS) / (2 * Math.PI);
-    const curvedArea = (profile.kind === "circle" ? analyticArea : 0) + holes.reduce((sum, h) => sum + Math.PI * (h.diameter / 2) ** 2, 0);
+    const curvedArea = (profile.kind === "circle" ? Math.PI * (radius ** 2 + (profile.innerDiameter ?? 0) ** 2 / 4) : 0) + holes.reduce((sum, h) => sum + Math.PI * (h.diameter / 2) ** 2, 0);
     // Four quarter-arc chord area shortfall relative to analytic circular arcs.
     const cornerErrorArea = finish?.kind === "fillet" ? finishSize ** 2 * (Math.PI - 2 * CORNER_SEGMENTS * Math.sin(Math.PI / (2 * CORNER_SEGMENTS))) : 0;
     const volumeTolerance = (revolve ? analyticVolume : curvedArea * extrusion!.distance) * polygonError * 1.02
