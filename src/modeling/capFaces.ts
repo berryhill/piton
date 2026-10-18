@@ -170,7 +170,9 @@ function inspectCaps(source: FeatureSource, geometry: Pick<FeatureEvaluation, "s
     if (!profile || profile.support) continue; // Nested support is outside this bounded slice.
     for (const side of ["start", "end"] as const) {
       const frame = expectedFrame(parent, profile, features.slice(0, i), side);
-      const shape = footprint(profile, frame, resolveWorkplane(profile, features.slice(0, i)));
+      const basis = resolveWorkplane(profile, features.slice(0, i));
+      const displacement: Vector3 = [parent.x ?? 0, parent.y ?? 0, parent.z ?? 0];
+      const shape = footprint(profile, frame, { ...basis, origin: add3(basis.origin, displacement) });
       result.set(`${parent.id}:${side}`, capOnMesh(frame, vertices, triangles, parent.id, side, shape.regions, shape.holes));
     }
   }

@@ -17,6 +17,19 @@ const source = (...features: PartFeature[]) => appendFeatures(emptyFeatureSource
 const evaluate = (...features: PartFeature[]) => evaluateFeatureSource(source(...features), kernel);
 
 describe("named cap footprint identity on WASM mesh", () => {
+  it.each(["XY", "XZ", "YZ"] as const)("retains translated parent caps and contained support on %s", plane => {
+    for (const shift of [5, 100]) {
+      const profile: ProfileFeature = { ...outline, plane };
+      const parent: PartFeature = { ...base, x: shift, y: shift, z: shift };
+      const authored = source(profile, parent);
+      const geometry = evaluateFeatureSource(authored, kernel);
+      expect(enumerateSurvivingCaps(authored, geometry).map(cap => `${cap.featureId}:${cap.side}`).sort())
+        .toEqual(["base:end", "base:start"]);
+      const contained: ProfileFeature = { ...support, plane, origin: [5, 5] };
+      const grown = evaluate(profile, parent, contained, { ...boss, targetBodyId: "base" });
+      expect(grown.volumeMm3).toBeCloseTo(geometry.volumeMm3 + 8, 5);
+    }
+  });
   it("does not claim adjoining or straddling coplanar triangles as base:end", () => {
     const authored = source(outline, base, extension, add);
     const mesh = evaluateFeatureSource(authored, kernel);
