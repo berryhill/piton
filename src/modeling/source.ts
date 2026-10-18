@@ -1,4 +1,5 @@
 import { sha256Hex } from "../domain";
+import { assertSketchConstraints } from "./sketchConstraints";
 
 /** The only authored value is restricted TypeScript source. Features are parsed
  * read-only projections, not a second persisted/writable mechanical graph.
@@ -9,11 +10,23 @@ export interface FeatureSource {
   readonly source: string;
 }
 interface Named { readonly id: string; readonly name: string }
+export type PrincipalPlane = "XY" | "XZ" | "YZ";
+export type ProfilePlacement = { readonly plane: PrincipalPlane; readonly offset?: number; readonly support?: { readonly kind: "extrusionCap"; readonly featureId: string; readonly side: "start" | "end" } };
+export type SketchConstraint =
+  | { readonly id: string; readonly kind: "origin" | "fixedProfile" }
+  | { readonly id: string; readonly kind: "fixedPoint"; readonly vertex: number; readonly point?: readonly [number, number] }
+  | { readonly id: string; readonly kind: "horizontal" | "vertical"; readonly edge: number }
+  | { readonly id: string; readonly kind: "dimension"; readonly target: "width" | "height" | "diameter" | "innerDiameter" | "centerX" | "centerY" | "vertexX" | "vertexY"; readonly value: number; readonly vertex?: number };
+export type SketchIntent = { readonly constraints: readonly SketchConstraint[] };
+type ProfileIntent = { readonly sketchIntent?: SketchIntent };
+type LocalOrigin = { readonly origin?: readonly [number, number] };
 export type ProfileFeature =
-  | (Named & { readonly kind: "rectangle"; readonly plane: "XY"; readonly width: number; readonly height: number })
-  | (Named & { readonly kind: "circle"; readonly plane: "XY"; readonly diameter: number })
-  | (Named & { readonly kind: "polygon"; readonly plane: "XY"; readonly vertices: readonly (readonly [number, number])[] });
-export type ExtrudeFeature = Named & { readonly kind: "extrude"; readonly profileId: string; readonly distance: number };
+  | (Named & ProfilePlacement & ProfileIntent & LocalOrigin & { readonly kind: "rectangle"; readonly width: number; readonly height: number })
+  | (Named & ProfilePlacement & ProfileIntent & LocalOrigin & { readonly kind: "circle"; readonly diameter: number; readonly innerDiameter?: number })
+  | (Named & ProfilePlacement & ProfileIntent & { readonly kind: "polygon"; readonly vertices: readonly (readonly [number, number])[] });
+/** Optional located +Z extrusion: a first body omits operation/targetBodyId;
+ * subsequent add/cut operations name the immediately preceding body result. */
+export type ExtrudeFeature = Named & { readonly kind: "extrude"; readonly profileId: string; readonly distance: number; readonly targetBodyId?: string; readonly operation?: "add" | "cut"; readonly direction?: "forward" | "reverse" | "symmetric"; readonly endCondition?: "blind" | "throughAll"; readonly x?: number; readonly y?: number; readonly z?: number };
 /** XY profile is a radial/axial section: X is nonnegative radius from the
  * Z axis, Y is the resulting Z height. Only a complete turn is supported. */
 export type RevolveFeature = Named & { readonly kind: "revolve"; readonly profileId: string; readonly axis: "Z"; readonly angleDegrees: 360 };
@@ -68,15 +81,40 @@ function polygonVertices(value: unknown): asserts value is readonly (readonly [n
   for (let i = 1; i < n - 1; i++) twiceArea += cross(origin, vertices[i], vertices[i + 1]);
   if (twiceArea <= 0) fail("invalid_feature", "Polygon requires positive counterclockwise winding area");
 }
+/** Bounded extra annular driver; the existing constraint graph handles the other axes. */
+export function assertProfileConstraints(profile: ProfileFeature): void {
+  const inner = profile.sketchIntent?.constraints.filter(c => c.kind === "dimension" && c.target === "innerDiameter") ?? [];
+  if (inner.length) {
+    if (profile.kind !== "circle" || profile.innerDiameter === undefined || inner.length !== 1 || inner[0].kind !== "dimension" || inner[0].value !== profile.innerDiameter)
+      fail("invalid_feature", "Driving inner diameter conflicts with geometry");
+    const remaining = profile.sketchIntent!.constraints.filter(c => c !== inner[0]);
+    assertSketchConstraints({ ...profile, sketchIntent: { constraints: remaining } });
+  } else assertSketchConstraints(profile);
+}
 function parseFeature(value: unknown): PartFeature {
   if (!value || typeof value !== "object") return fail("invalid_feature", "Feature must be an object");
   const f = value as Record<string, unknown>;
   const common = ["id", "name", "kind"];
   switch (f.kind) {
-    case "rectangle": keys(f, [...common, "plane", "width", "height"]); dimension(f.width); dimension(f.height); break;
-    case "circle": keys(f, [...common, "plane", "diameter"]); dimension(f.diameter); break;
-    case "polygon": keys(f, [...common, "plane", "vertices"]); polygonVertices(f.vertices); break;
-    case "extrude": keys(f, [...common, "profileId", "distance"]); identity(f.profileId); dimension(f.distance); break;
+    case "rectangle": keys(f, [...common, "plane", "width", "height", ...["offset", "support", "origin", "sketchIntent"].filter(key => Object.hasOwn(f, key))]); dimension(f.width); dimension(f.height); break;
+    case "circle":
+      keys(f, [...common, "plane", "diameter", ...["offset", "support", "origin", "sketchIntent", "innerDiameter"].filter(key => Object.hasOwn(f, key))]);
+      dimension(f.diameter);
+      if (Object.hasOwn(f, "innerDiameter")) {
+        dimension(f.innerDiameter);
+        if (f.innerDiameter >= f.diameter || (f.diameter - f.innerDiameter) / 2 < MODELING_LIMITS.minWall) fail("invalid_feature", "Inner diameter requires a positive annular wall");
+      }
+      break;
+    case "polygon": keys(f, [...common, "plane", "vertices", ...["offset", "support", "sketchIntent"].filter(key => Object.hasOwn(f, key))]); polygonVertices(f.vertices); break;
+    case "extrude":
+      keys(f, [...common, "profileId", "distance", ...["targetBodyId", "operation", "direction", "endCondition", "x", "y", "z"].filter(key => Object.hasOwn(f, key))]);
+      identity(f.profileId); dimension(f.distance);
+      if (f.targetBodyId !== undefined) identity(f.targetBodyId);
+      if (f.operation !== undefined && f.operation !== "add" && f.operation !== "cut") fail("invalid_feature", "Invalid extrusion operation");
+      if (f.direction !== undefined && !["forward", "reverse", "symmetric"].includes(f.direction as string)) fail("invalid_feature", "Invalid extrusion direction");
+      if (f.endCondition !== undefined && f.endCondition !== "blind" && f.endCondition !== "throughAll") fail("invalid_feature", "Invalid extrusion end condition");
+      for (const key of ["x", "y", "z"] as const) if (f[key] !== undefined && (typeof f[key] !== "number" || !Number.isFinite(f[key]) || Math.abs(f[key] as number) > 1000)) fail("invalid_feature", `Extrusion ${key} must be finite within +/-1000 mm`);
+      break;
     case "revolve":
       keys(f, [...common, "profileId", "axis", "angleDegrees"]); identity(f.profileId);
       if (f.axis !== "Z" || f.angleDegrees !== 360) fail("unsupported_operation", "Only a full 360 degree revolve about Z is supported");
@@ -104,10 +142,57 @@ function parseFeature(value: unknown): PartFeature {
   }
   identity(f.id);
   if (typeof f.name !== "string" || !f.name.trim() || f.name !== f.name.trim() || f.name.length > 100 || /[\u0000-\u001f]/.test(f.name)) fail("invalid_feature", "Name must contain 1–100 visible characters without surrounding whitespace");
-  if ((f.kind === "rectangle" || f.kind === "circle" || f.kind === "polygon") && f.plane !== "XY") fail("unsupported_operation", "Only the XY reference plane is supported; extrusion is along +Z");
-  return Object.freeze(f.kind === "polygon"
-    ? { ...f, vertices: Object.freeze((f.vertices as readonly (readonly [number, number])[]).map(vertex => Object.freeze([...vertex]))) }
-    : { ...f }) as unknown as PartFeature;
+  if (f.kind === "rectangle" || f.kind === "circle" || f.kind === "polygon") {
+    if (f.plane !== "XY" && f.plane !== "XZ" && f.plane !== "YZ") fail("unsupported_operation", "Unsupported principal workplane");
+    if (f.kind !== "polygon" && f.origin !== undefined && (!Array.isArray(f.origin) || f.origin.length !== 2 || f.origin.some(v => typeof v !== "number" || !Number.isFinite(v) || Math.abs(v) > 1000))) fail("invalid_feature", "Local origin must be finite within +/-1000 mm");
+    if (f.offset !== undefined && (typeof f.offset !== "number" || !Number.isFinite(f.offset) || Math.abs(f.offset) > 1000)) fail("invalid_feature", "Workplane offset must be finite within +/-1000 mm");
+    if (f.support !== undefined) {
+      keys(f.support, ["kind", "featureId", "side"]);
+      if (f.support.kind !== "extrusionCap" || (f.support.side !== "start" && f.support.side !== "end")) fail("invalid_feature", "Only named extrusion start/end cap support is valid");
+      identity(f.support.featureId);
+    }
+    if (f.sketchIntent !== undefined) {
+      keys(f.sketchIntent, ["constraints"]);
+      const constraints = f.sketchIntent.constraints;
+      if (!Array.isArray(constraints) || constraints.length > 64) fail("invalid_feature", "Invalid sketch constraint count");
+      const seen = new Set<string>();
+      for (const raw of constraints) {
+        if (!raw || typeof raw !== "object") fail("invalid_feature", "Invalid sketch constraint");
+        const c = raw as Record<string, unknown>;
+        const vertex = c.kind === "fixedPoint" || (c.kind === "dimension" && (c.target === "vertexX" || c.target === "vertexY"));
+        keys(c, c.kind === "dimension" ? ["id", "kind", "target", "value", ...(vertex ? ["vertex"] : [])]
+          : c.kind === "fixedPoint" ? ["id", "kind", "vertex", ...(Object.hasOwn(c, "point") ? ["point"] : [])] : c.kind === "horizontal" || c.kind === "vertical" ? ["id", "kind", "edge"] : ["id", "kind"]);
+        identity(c.id);
+        if (seen.has(c.id)) fail("invalid_feature", "Duplicate sketch constraint identity");
+        seen.add(c.id);
+        if (c.kind === "dimension") {
+          if (typeof c.value !== "number" || !Number.isFinite(c.value) || Math.abs(c.value) > 1000 || !["width", "height", "diameter", "innerDiameter", "centerX", "centerY", "vertexX", "vertexY"].includes(c.target as string)) fail("invalid_feature", "Invalid sketch dimension");
+          if (["width", "height", "diameter", "innerDiameter"].includes(c.target as string)) dimension(c.value);
+        } else if (!["origin", "fixedProfile", "fixedPoint", "horizontal", "vertical"].includes(c.kind as string)) fail("invalid_feature", "Unsupported sketch constraint");
+        if (c.vertex !== undefined && (!Number.isInteger(c.vertex) || (c.vertex as number) < 0 || (c.vertex as number) >= (f.kind === "polygon" ? (f.vertices as unknown[]).length : 0))) fail("invalid_feature", "Invalid sketch vertex");
+        if (c.edge !== undefined && (!Number.isInteger(c.edge) || (c.edge as number) < 0 || (c.edge as number) >= (f.kind === "polygon" ? (f.vertices as unknown[]).length : 0))) fail("invalid_feature", "Invalid sketch edge");
+        if (c.kind === "fixedPoint" && c.point !== undefined && (!Array.isArray(c.point) || c.point.length !== 2 || c.point.some(v => typeof v !== "number" || !Number.isFinite(v) || Math.abs(v) > 1000))) fail("invalid_feature", "Fixed point must be a finite XY coordinate within +/-1000 mm");
+        if (f.kind === "polygon" ? (c.kind === "fixedProfile" || (c.kind === "dimension" && !["vertexX", "vertexY"].includes(c.target as string)))
+          : (c.kind === "fixedPoint" || c.kind === "horizontal" || c.kind === "vertical" || (c.kind === "dimension" && !["centerX", "centerY", ...(f.kind === "circle" ? ["diameter", ...(f.innerDiameter !== undefined ? ["innerDiameter"] : [])] : ["width", "height"])].includes(c.target as string)))) fail("invalid_feature", "Sketch constraint target does not belong to profile");
+        if (f.kind === "circle" && c.kind === "dimension" && c.target === "innerDiameter" && c.value !== f.innerDiameter) fail("invalid_feature", "Driving inner diameter conflicts with geometry");
+      }
+    }
+  }
+  const parsed = { ...f };
+  if (f.kind === "rectangle" || f.kind === "circle" || f.kind === "polygon") {
+    if (f.kind !== "polygon" && f.origin) parsed.origin = Object.freeze([...(f.origin as number[])]);
+    if (f.support) {
+      const support = f.support as { kind: "extrusionCap"; featureId: string; side: "start" | "end" };
+      parsed.support = Object.freeze({ kind: support.kind, featureId: support.featureId, side: support.side });
+    }
+    if (f.sketchIntent) parsed.sketchIntent = Object.freeze({ constraints: Object.freeze((f.sketchIntent as SketchIntent).constraints.map(c => Object.freeze(c.kind === "fixedPoint" && c.point ? { ...c, point: Object.freeze([...c.point]) } : { ...c }))) });
+  }
+  if (f.kind === "polygon") parsed.vertices = Object.freeze((f.vertices as readonly (readonly [number, number])[]).map(vertex => Object.freeze([...vertex])));
+  if (f.kind === "rectangle" || f.kind === "circle" || f.kind === "polygon") {
+    try { assertProfileConstraints(parsed as unknown as ProfileFeature); }
+    catch (error) { fail("invalid_feature", error instanceof Error ? error.message : "Invalid sketch constraints"); }
+  }
+  return Object.freeze(parsed) as unknown as PartFeature;
 }
 
 /** Signed clearance from a hole center to the finished outer boundary. */
@@ -126,7 +211,43 @@ function finishingClearance(x: number, y: number, width: number, height: number,
     (x + y - d) / Math.SQRT2, (width - x + y - d) / Math.SQRT2,
     (width - x + height - y - d) / Math.SQRT2, (x + height - y - d) / Math.SQRT2);
 }
+export function isOrderedSource(features: readonly PartFeature[]): boolean {
+  return features.filter(f => f.kind === "rectangle" || f.kind === "circle" || f.kind === "polygon").length > 1
+    || features.some(f => (f.kind === "extrude" && (f.operation !== undefined || f.targetBodyId !== undefined || f.x !== undefined || f.y !== undefined || f.z !== undefined || f.direction !== undefined || f.endCondition !== undefined))
+      || ((f.kind === "rectangle" || f.kind === "circle" || f.kind === "polygon") && (f.plane !== "XY" || f.offset !== undefined || f.support !== undefined || (f.kind !== "polygon" && f.origin !== undefined))));
+}
+function validateOrderedSequence(features: readonly PartFeature[]): void {
+  if (features.length > MODELING_LIMITS.maxFeatures) fail("invalid_source", "Feature count exceeds limit");
+  const ids = new Set<string>();
+  const profiles = new Map<string, ProfileFeature>();
+  const earlier = new Map<string, PartFeature>();
+  let body: ExtrudeFeature | undefined;
+  for (const f of features) {
+    if (ids.has(f.id)) fail("invalid_feature", `Duplicate feature identity ${f.id}`);
+    ids.add(f.id);
+    if (f.kind === "rectangle" || f.kind === "circle" || f.kind === "polygon") {
+      if (f.support) {
+        const parent = earlier.get(f.support.featureId);
+        if (!parent) fail("dependency_failure", `${f.id}: missing or forward extrusion cap ${f.support.featureId}`);
+        if (parent.kind !== "extrude" || parent.operation === "cut" || parent.endCondition === "throughAll") fail("dependency_failure", `${f.id}: ${f.support.featureId} is not a solid extrusion cap`);
+        const parentProfile = profiles.get(parent.profileId)!;
+        if (parentProfile.support) fail("unsupported_operation", `${f.id}: nested extrusion cap support ${f.support.featureId} is not supported`);
+        if (f.plane !== parentProfile.plane) fail("unsupported_operation", `${f.id}: cap ${f.support.featureId} requires matching parent plane ${parentProfile.plane}`);
+      }
+      profiles.set(f.id, f); earlier.set(f.id, f); continue;
+    }
+    if (f.kind !== "extrude") fail("unsupported_operation", `${f.id}: ordered source supports only profiles and extrusions; legacy holes, patterns and terminal finishing remain on the single-body path`);
+    if (!profiles.has(f.profileId)) fail("dependency_failure", `${f.id}: missing or forward profile ${f.profileId}`);
+    if (!body) {
+      if (f.targetBodyId !== undefined || f.operation !== undefined) fail("dependency_failure", `${f.id}: first extrusion cannot target ${f.targetBodyId ?? "a body"}`);
+    } else if (f.targetBodyId !== body.id || !f.operation) fail("dependency_failure", `${f.id}: expected preceding body ${body.id}, received ${f.targetBodyId ?? "none"}`);
+    if (f.endCondition === "throughAll" && f.operation !== "cut") fail("unsupported_operation", `${f.id}: throughAll requires a cut on an existing body`);
+    earlier.set(f.id, f);
+    body = f;
+  }
+}
 function validateSequence(features: readonly PartFeature[]): void {
+  if (isOrderedSource(features)) return validateOrderedSequence(features);
   if (features.length > MODELING_LIMITS.maxFeatures) fail("invalid_source", "Feature count exceeds limit");
   const ids = new Set<string>();
   let profile: ProfileFeature | undefined;
@@ -167,6 +288,7 @@ function validateSequence(features: readonly PartFeature[]): void {
       for (const instance of instances) {
         const r = instance.diameter / 2 + MODELING_LIMITS.minWall;
         if (profile.kind === "rectangle" ? instance.x < r || instance.y < r || instance.x > profile.width - r || instance.y > profile.height - r : Math.hypot(instance.x, instance.y) + r > profile.diameter / 2) fail("invalid_feature", "Hole must remain inside the profile with positive wall thickness");
+        if (profile.kind === "circle" && profile.innerDiameter !== undefined && Math.hypot(instance.x, instance.y) - r < profile.innerDiameter / 2) fail("invalid_feature", "Hole overlaps the annular opening or violates its inner wall");
         if (holes.some(h => Math.hypot(h.x - instance.x, h.y - instance.y) < (h.diameter + instance.diameter) / 2 + MODELING_LIMITS.minWall)) fail("invalid_feature", "Holes must not overlap or touch");
         holes.push(instance);
       }
@@ -177,10 +299,18 @@ function validateSequence(features: readonly PartFeature[]): void {
 function line(feature: PartFeature): string {
   // Fixed field order makes serialization independent of caller object order.
   const { kind, id, name } = feature;
-  const parameters = kind === "rectangle" ? { id, name, plane: feature.plane, width: feature.width, height: feature.height }
-    : kind === "circle" ? { id, name, plane: feature.plane, diameter: feature.diameter }
-    : kind === "polygon" ? { id, name, plane: feature.plane, vertices: feature.vertices }
-    : kind === "extrude" ? { id, name, profileId: feature.profileId, distance: feature.distance }
+  const placement = (f: ProfileFeature) => ({ ...(f.offset !== undefined ? { offset: f.offset } : {}),
+    ...(f.support !== undefined ? { support: { kind: f.support.kind, featureId: f.support.featureId, side: f.support.side } } : {}),
+    ...(f.sketchIntent !== undefined ? { sketchIntent: { constraints: f.sketchIntent.constraints } } : {}) });
+  const parameters = kind === "rectangle" ? { id, name, plane: feature.plane, ...placement(feature), ...(feature.origin !== undefined ? { origin: feature.origin } : {}), width: feature.width, height: feature.height }
+    : kind === "circle" ? { id, name, plane: feature.plane, ...placement(feature), ...(feature.origin !== undefined ? { origin: feature.origin } : {}), diameter: feature.diameter, ...(feature.innerDiameter !== undefined ? { innerDiameter: feature.innerDiameter } : {}) }
+    : kind === "polygon" ? { id, name, plane: feature.plane, ...placement(feature), vertices: feature.vertices }
+    : kind === "extrude" ? { id, name, profileId: feature.profileId, distance: feature.distance,
+      ...(feature.targetBodyId !== undefined ? { targetBodyId: feature.targetBodyId } : {}),
+      ...(feature.operation !== undefined ? { operation: feature.operation } : {}),
+      ...(feature.direction !== undefined ? { direction: feature.direction } : {}),
+      ...(feature.endCondition !== undefined ? { endCondition: feature.endCondition } : {}),
+      ...(feature.x !== undefined ? { x: feature.x } : {}), ...(feature.y !== undefined ? { y: feature.y } : {}), ...(feature.z !== undefined ? { z: feature.z } : {}) }
     : kind === "revolve" ? { id, name, profileId: feature.profileId, axis: feature.axis, angleDegrees: feature.angleDegrees }
     : kind === "linearPattern" ? { id, name, bodyId: feature.bodyId, sourceHoleId: feature.sourceHoleId, count: feature.count, spacingX: feature.spacingX, spacingY: feature.spacingY }
     : kind === "fillet" ? { id, name, bodyId: feature.bodyId, edgeSet: feature.edgeSet, radius: feature.radius }

@@ -6,29 +6,41 @@ import type { FixtureReviewMeasurement, FixtureReviewPoint } from "../fixture";
 import { clearReviewMeasurementOverlay, updateReviewMeasurementOverlay } from "../components/reviewMeasurement";
 import { applyCameraAction, recordCameraPose, rememberCamera, restoreCamera, ViewControls, type ViewHost } from "../components/ViewControls";
 import { meshBounds, type CameraPreset } from "../geometry/view";
+import type { SurvivingCap } from "./capFaces";
 
-/** Ray hits are display-frame millimetres, matching the shared overlay's frame. */
-export function reviewMeshPointAt(raycaster: Three.Raycaster, camera: Three.Camera, mesh: Three.Mesh, bounds: DOMRect, x: number, y: number): FixtureReviewPoint | null {
+export function resolveCapFacePick(candidates: readonly SurvivingCap[], faceIndex: number | null): SurvivingCap | {reason:string} {
+  const matches=Number.isSafeInteger(faceIndex)&&faceIndex!==null&&faceIndex>=0?candidates.filter(cap=>cap.triangleIndices.includes(faceIndex)):[];
+  return matches.length===1?matches[0]:{reason:matches.length?"Ambiguous named cap at this triangle":"No surviving named cap at this triangle"};
+}
+
+/** Three's indexed BufferGeometry faceIndex is the ordinal in the original triangle array. */
+export function reviewMeshHitAt(raycaster: Three.Raycaster, camera: Three.Camera, mesh: Three.Mesh, bounds: DOMRect, x: number, y: number): Three.Intersection | null {
   if (!(bounds.width > 0 && bounds.height > 0)) return null;
   const pointer = new Vector2(((x - bounds.left) / bounds.width) * 2 - 1, -((y - bounds.top) / bounds.height) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
-  const hit = raycaster.intersectObject(mesh, false)[0];
+  return raycaster.intersectObject(mesh, false)[0]??null;
+}
+
+/** Ray hits are display-frame millimetres, matching the shared overlay's frame. */
+export function reviewMeshPointAt(raycaster: Three.Raycaster, camera: Three.Camera, mesh: Three.Mesh, bounds: DOMRect, x: number, y: number): FixtureReviewPoint | null {
+  const hit = reviewMeshHitAt(raycaster,camera,mesh,bounds,x,y);
   return hit ? [hit.point.x, hit.point.y, hit.point.z] : null;
 }
 
 /** A review-only projection of the evaluated Manifold triangles, not CAD authority. */
 export interface FeatureRendererStatus { revisionId:string;state:"initializing"|"ready"|"failed"|"unavailable";reason?:string; }
-export default function FeatureMeshViewport({ geometry, revisionId, viewKey, measurement={phase:"idle"}, onMeasurementPoint, onMeasurementHover, onMeasurementCancel, onRendererStatus }: {
+export default function FeatureMeshViewport({ geometry, revisionId, viewKey, measurement={phase:"idle"}, onMeasurementPoint, onMeasurementHover, onMeasurementCancel, onRendererStatus, onFacePick }: {
   geometry: FeatureEvaluation; revisionId: string; viewKey?: string; measurement?: FixtureReviewMeasurement;
   onMeasurementPoint?: (point:FixtureReviewPoint)=>void; onMeasurementHover?: (point:FixtureReviewPoint|null)=>void; onMeasurementCancel?:()=>void;
   onRendererStatus?:(status:FeatureRendererStatus)=>void;
+  onFacePick?:(faceIndex:number|null)=>void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
   const pickingReady=useRef(false);
-  const interaction=useRef({measurement,onMeasurementPoint,onMeasurementHover,onMeasurementCancel});
-  interaction.current={measurement,onMeasurementPoint,onMeasurementHover,onMeasurementCancel};
+  const interaction=useRef({measurement,onMeasurementPoint,onMeasurementHover,onMeasurementCancel,onFacePick});
+  interaction.current={measurement,onMeasurementPoint,onMeasurementHover,onMeasurementCancel,onFacePick};
   const updateOverlay=useRef<(value:FixtureReviewMeasurement)=>void>(()=>{});
   useEffect(()=>{updateOverlay.current(measurement);},[measurement]);
   useEffect(() => {
@@ -95,7 +107,7 @@ export default function FeatureMeshViewport({ geometry, revisionId, viewKey, mea
         const keyboardPick=()=>{const rect=renderer.domElement.getBoundingClientRect();for(const y of [0.5,0.4,0.6,0.3,0.7])for(const x of [0.5,0.4,0.6,0.3,0.7]){const point=pick(rect.left+rect.width*x,rect.top+rect.height*y);if(point)return point;}return null;};
         let down={x:0,y:0};
         const pointerDown=(event:PointerEvent)=>{down={x:event.clientX,y:event.clientY};if(interaction.current.measurement.phase!=="idle")renderer.domElement.focus();};
-        const click=(event:MouseEvent)=>{if(Math.hypot(event.clientX-down.x,event.clientY-down.y)>4)return;const phase=interaction.current.measurement.phase;if(phase!=="armed"&&phase!=="endpoint-a")return;const point=pick(event.clientX,event.clientY);if(point)interaction.current.onMeasurementPoint?.(point);};
+        const click=(event:MouseEvent)=>{if(Math.hypot(event.clientX-down.x,event.clientY-down.y)>4)return;const phase=interaction.current.measurement.phase;if(phase==="armed"||phase==="endpoint-a"){const point=pick(event.clientX,event.clientY);if(point)interaction.current.onMeasurementPoint?.(point);return;}if(phase!=="idle"||!pickingReady.current)return;const hit=reviewMeshHitAt(raycaster,camera,mesh,renderer.domElement.getBoundingClientRect(),event.clientX,event.clientY);interaction.current.onFacePick?.(hit?.faceIndex??null);};
         const move=(event:PointerEvent)=>{if(interaction.current.measurement.phase==="endpoint-a")interaction.current.onMeasurementHover?.(pick(event.clientX,event.clientY));};
         const keydown=(event:KeyboardEvent)=>{const phase=interaction.current.measurement.phase;if(event.key==="Escape"&&phase!=="idle"){event.preventDefault();interaction.current.onMeasurementCancel?.();}else if((event.key==="Enter"||event.key===" ")&&(phase==="armed"||phase==="endpoint-a")){event.preventDefault();const point=keyboardPick();if(point)interaction.current.onMeasurementPoint?.(point);}};
         renderer.domElement.tabIndex=0;renderer.domElement.setAttribute("aria-label","Feature review mesh; when measuring press Enter or Space to pick a visible mesh point, Escape to cancel");
