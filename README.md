@@ -17,7 +17,7 @@ MVI describes the delivery stage and canonical doctrine, not a separate launch m
 
 ## Runtime boundary
 
-Piton's current product is the browser-local TypeScript application. No Python runtime, environment, backend, package, or process is required. The tracked repository contains no executable Python application or external exact-CAD adapter. `pnpm start` launches the complete current application; there is no separate server or worker service to start.
+Piton's CAD authority is the browser-local TypeScript application. No Python runtime, environment, backend, package, or process is required for manual modeling. The tracked repository contains no executable Python application or external exact-CAD adapter. `pnpm start` launches the manual browser application. Optional agent conversation uses the TypeScript application host and a separately pinned, restricted Hermes ACP runtime; see [`server/chat/RUNNING.md`](server/chat/RUNNING.md) and [`runtime/README.md`](runtime/README.md). The agent cannot mutate CAD or fabrication-release state.
 
 Historical evidence may describe the retired Python/build123d implementation. Those records are preserved only as history and are not current source, installation instructions, runtime capability, or product authority. See [`docs/migration-inventory.md`](docs/migration-inventory.md) for the tracked-estate and historical-evidence boundary.
 

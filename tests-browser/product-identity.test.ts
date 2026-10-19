@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const VERIFY_CHAIN = "pnpm typecheck && pnpm test && pnpm build && pnpm test:e2e && pnpm test:production";
+const VERIFY_CHAIN = "pnpm typecheck && pnpm test && pnpm build && pnpm build:chat && pnpm test:e2e && pnpm test:production";
 
 function read(path: string): string {
   return readFileSync(path, "utf8");

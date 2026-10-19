@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { WorkspaceProject } from '../workspace';
 import { ChatClient, type Availability, type ChatMessage } from './client';
+import { RuntimeSettings } from './RuntimeSettings';
 import { freezeContext, type FrozenContext, type SelectionReference } from './context';
 import './chat.css';
 
@@ -14,6 +15,14 @@ export function ConversationPanel({ project, documentId, revisionId, selection, 
   const [attachments,setAttachments] = useState<SelectionReference[]>([]), [sentContext,setSentContext] = useState<FrozenContext | null>(null);
   const [partial,setPartial] = useState(''), [runId,setRunId] = useState('');
   const [remoteRunning,setRemoteRunning] = useState(false);
+  const [runtimeOpen,setRuntimeOpen] = useState('');
+  async function refreshRuntimeAvailability() {
+    const generation = connectionGeneration.current;
+    try {
+      const value = await client.availability();
+      if (mounted.current && generation === connectionGeneration.current) setAvailability(value);
+    } catch { /* Settings response remains authoritative; availability is not fabricated on failure. */ }
+  }
   async function reconnect(signal?: AbortSignal) {
     const generation = ++connectionGeneration.current;
     setAvailability(null);setStatus('Connecting…'); setError('');
@@ -27,7 +36,7 @@ export function ConversationPanel({ project, documentId, revisionId, selection, 
   }
   useEffect(() => {
     mounted.current = true; const controller = new AbortController(); void reconnect(controller.signal);
-    return () => { mounted.current = false; controller.abort(); stream.current?.abort(); };
+    return () => { mounted.current = false; controller.abort(); stream.current?.abort(); connectionGeneration.current++; };
   }, [project.id, client]);
   async function send() {
     if (operation.current || !prompt.trim() || !availability?.available || blocked || remoteRunning) return;
@@ -78,7 +87,7 @@ export function ConversationPanel({ project, documentId, revisionId, selection, 
     <header><h3>Nick Mercer</h3><span role="status" aria-label="Agent connection status">{status}</span></header>
     <p className="chat-scope">Project conversation · {project.name}<br/>{documentId ? `Current tab: ${project.documents.find(d => d.id === documentId)?.name}` : 'No active tab — project context only'}</p>
     <p className="chat-scope">Read-only conversation. No modeling or workstation tools granted.</p>
-    {availability?.runtime && <details><summary>Runtime</summary><p>{availability.runtime.provider ?? 'Provider unreported'} · {availability.runtime.model ?? 'Model unreported'}</p><p>Capabilities: {availability.capabilities.join(', ') || 'None'}</p></details>}
+    <details key={project.id} className="chat-runtime" onToggle={event => setRuntimeOpen(event.currentTarget.open ? project.id : '')}><summary>Agent runtime settings</summary>{runtimeOpen === project.id && <RuntimeSettings client={client} authenticated={availability !== null} onRuntimeResponse={() => void refreshRuntimeAvailability()}/>}</details>
     <div className="chat-transcript" role="log" aria-label="Conversation history" aria-live="polite">{messages.map((message,index) => <article key={index} className={`chat-turn chat-${message.role}`}><strong>{message.role === 'user' ? 'You' : 'Nick'}</strong><p>{message.content}</p></article>)}{partial && <article className="chat-turn"><strong>Nick · {busy ? 'streaming' : 'incomplete'}</strong><p>{partial}</p></article>}{!messages.length && !partial && <p>No conversation yet. Ask about this project, with or without an open Part.</p>}</div>
     <div className="chat-attachments"><section className="r7-tree-details" aria-label="Model selection details"><h4>Selected context</h4><p>{selectionLabel ? `${selectionLabel} · ${projectionMode ?? 'current'}` : selection.length ? selection.map(ref => ref.label).join(', ') : 'No selected reference in this projection.'}</p>{selectionDetail&&<p>{selectionDetail}</p>}{unavailableReason&&<p>{unavailableReason}</p>}</section>
       <button type="button" disabled={!selection.length || busy} onClick={() => setAttachments(current => [...current,...selection.filter(ref => !current.some(old => old.documentId === ref.documentId && old.nodeId === ref.nodeId))].slice(0,16))}>Attach selected reference</button>

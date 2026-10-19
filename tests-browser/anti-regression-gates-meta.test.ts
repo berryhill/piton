@@ -16,7 +16,7 @@ const EXPECTED_GATE_TITLES = [
   /anti-regression gate 6: no UI control enables fabrication release, machine actuation, approval, or exact export/,
 ] as const;
 
-const EXPECTED_VERIFY = "pnpm typecheck && pnpm test && pnpm build && pnpm test:e2e && pnpm test:production";
+const EXPECTED_VERIFY = "pnpm typecheck && pnpm test && pnpm build && pnpm build:chat && pnpm test:e2e && pnpm test:production";
 
 describe("anti-regression gates permanence", () => {
   it("keeps the gate spec tracked at tests-browser/e2e/anti-regression-gates.spec.ts with all six expected gate titles", () => {

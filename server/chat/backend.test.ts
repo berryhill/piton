@@ -38,7 +38,7 @@ async function waitForProjectCleanup(stateDirectory: string, id = projectId) {
   }, { timeout: 1000, interval: 5 });
 }
 
-async function fixture(verifier?: BackendOptions['verifyConversationIsolation'], mode: 'complete' | 'interrupt-once' | 'wait' = 'complete', answer = 'mock answer') {
+async function fixture(verifier?: BackendOptions['verifyConversationIsolation'], mode: 'complete' | 'interrupt-once' | 'wait' = 'complete', answer = 'mock answer', runtimeManagement?: BackendOptions['runtimeManagement']) {
   const calls: { path: string; host: string | undefined; origin: string | undefined }[] = [];
   const inputs: string[] = []; let sessions = 0; let turns = 0;
   const upstream = await listen(createServer(async (req, res) => {
@@ -67,6 +67,7 @@ async function fixture(verifier?: BackendOptions['verifyConversationIsolation'],
     origin: base, stateDirectory, allowLocalBootstrap: true,
     env: { PITON_HERMES_UPSTREAM: upstream, API_SERVER_KEY: `synthetic-${randomUUID()}` },
     verifyConversationIsolation: verifier,
+    runtimeManagement,
   });
   const publicServer = createServer(backend.handler);
   servers.push(publicServer);
@@ -87,6 +88,27 @@ async function fixture(verifier?: BackendOptions['verifyConversationIsolation'],
 }
 
 describe('backend confinement and bridge routing', () => {
+  it('authenticates runtime settings and tests without accepting executable or privilege overrides', async () => {
+    const snapshot = { runtime: 'hermes', mode: 'conversation-only', model: 'test-model' };
+    const management = {
+      snapshot: vi.fn(async () => snapshot),
+      save: vi.fn(async (_model: string) => snapshot),
+      test: vi.fn(async (_signal: AbortSignal) => ({ ok: true, message: 'Runtime responded', runtime: snapshot })),
+    };
+    const f = await fixture(undefined, 'complete', 'unused', management);
+    try {
+      expect((await f.call('runtime')).status).toBe(200);
+      expect((await f.call('runtime/settings', 'POST', { model: 'test-model' })).status).toBe(200);
+      expect(management.save).toHaveBeenCalledWith('test-model');
+      expect((await f.call('runtime/settings', 'POST', { model: 'test-model', executable: '/bin/sh' })).status).toBe(400);
+      expect((await f.call('runtime/test', 'POST', {})).status).toBe(200);
+      expect(management.test).toHaveBeenCalledTimes(1);
+      expect((await f.call('runtime/test', 'POST', {}, { 'x-piton-csrf': 'invalid' })).status).toBe(403);
+      expect(management.test).toHaveBeenCalledTimes(1);
+      const anonymous = await fetch(f.base + '/api/chat/runtime');
+      expect(anonymous.status).toBe(401);
+    } finally { await f.backend.shutdown(); }
+  });
   it('rejects an impossible single UTF-8 record without changing the published ledger', async () => {
     const directory = await mkdtemp(join(process.cwd(), '.piton-chat-test-')); directories.push(directory);
     const ledger = new ConversationLedger(directory);

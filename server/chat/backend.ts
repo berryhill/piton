@@ -45,6 +45,12 @@ type Capability =
   | 'release_authority'
   | 'workstation_tool';
 
+export interface RuntimeManagement {
+  snapshot(): Promise<unknown>;
+  save(model: string): Promise<unknown>;
+  test(signal: AbortSignal): Promise<unknown>;
+}
+
 export type BackendOptions = {
   /** Exact secure browser origin (https:// or http://127.0.0.1 / localhost). */
   origin: string;
@@ -60,6 +66,7 @@ export type BackendOptions = {
   timeoutMs?: number;
   /** Independent server-owned runtime policy verifier; absent/false/throw denies. */
   verifyConversationIsolation?: () => Promise<boolean>;
+  runtimeManagement?: RuntimeManagement;
 };
 
 export type BackendSnapshot = {
@@ -800,6 +807,33 @@ export function createBackendService(options: BackendOptions): BackendService {
     catch { jsonResponse(res, 400, { error: 'invalid_request' }); return; }
     if (url.origin !== options.origin) { jsonResponse(res, 400, { error: 'invalid_request' }); return; }
     try {
+      if (url.pathname === '/api/chat/runtime' || url.pathname.startsWith('/api/chat/runtime/')) {
+        await requireAuthAndCsrf(req);
+        if (url.search || !options.runtimeManagement) throw unavailable();
+        if (req.method === 'GET' && url.pathname === '/api/chat/runtime') {
+          jsonResponse(res, 200, await options.runtimeManagement.snapshot()); return;
+        }
+        if (req.method !== 'POST' || (req.headers['content-type'] ?? '').split(';')[0].trim() !== 'application/json') throw badRequest();
+        let value: unknown;
+        try { value = JSON.parse(await readBody(req, 4096)); } catch { throw badRequest(); }
+        if (!value || typeof value !== 'object' || Array.isArray(value)) throw badRequest();
+        const body = value as Record<string, unknown>;
+        if (url.pathname === '/api/chat/runtime/settings') {
+          if (Object.keys(body).length !== 1 || typeof body.model !== 'string' || body.model.length > 256) throw badRequest();
+          const saved = await options.runtimeManagement.save(body.model);
+          cachedRuntime = null; cachedRuntimeAt = 0;
+          jsonResponse(res, 200, saved); return;
+        }
+        if (url.pathname === '/api/chat/runtime/test' && Object.keys(body).length === 0) {
+          const controller = new AbortController();
+          const abort = () => controller.abort();
+          req.once('aborted', abort); res.once('close', abort);
+          try { jsonResponse(res, 200, await options.runtimeManagement.test(controller.signal)); }
+          finally { req.off('aborted', abort); res.off('close', abort); }
+          return;
+        }
+        throw badRequest();
+      }
       if (req.method === 'GET' && url.pathname === '/api/chat/bootstrap') { await bootstrap(req, res); return; }
       if (req.method === 'POST' && url.pathname === '/api/chat/projects') { await enrollProject(req, res); return; }
       if (req.method === 'GET' && url.pathname === '/api/chat/availability') { await availability(req, res); return; }

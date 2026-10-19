@@ -19,6 +19,7 @@ const applicationSourceFiles = [
   "assembly.ts",
   "change-request.ts",
   "chat/ConversationPanel.tsx",
+  "chat/RuntimeSettings.tsx",
   "chat/chat.css",
   "chat/client.ts",
   "chat/context.ts",
@@ -111,7 +112,7 @@ describe("browser-only repository estate", () => {
 
     expect(readme).toContain("No Python runtime, environment, backend, package, or process is required");
     expect(readme).toContain("The tracked repository contains no executable Python application or external exact-CAD adapter");
-    expect(readme).toContain("`pnpm start` launches the complete current application");
+    expect(readme).toContain("`pnpm start` launches the manual browser application");
   });
 
   it("runs only the browser verification job in CI", () => {
