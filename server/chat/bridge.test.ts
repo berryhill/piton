@@ -1,10 +1,11 @@
 // Local HTTP Hermes mock is TEST-ONLY; it is never a runtime fallback.
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createServer, request as httpRequest, type Server } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createChatHandler, type ChatOptions } from './bridge.js';
+import { SessionStore } from './store.js';
 
 const projectId = '11111111-1111-4111-8111-111111111111';
 const documentId = '22222222-2222-4222-8222-222222222222';
@@ -131,7 +132,12 @@ describe('native scoped Hermes conversations', () => {
     expect((await (await f.request('history?' + query)).json()).messages).toEqual([
       { role: 'user', content: 'Explain this part' }, { role: 'assistant', content: 'Test-only answer' },
     ]);
-    await (await f.request('conversation', { ...scope, message: 'continue' })).text();
+    const store = new SessionStore(f.options.storeDirectory);
+    const key = store.key('alice', projectId, documentId);
+    await vi.waitFor(async () => expect(await store.lockState(key)).toBe('absent'));
+    const continuation = await f.request('conversation', { ...scope, message: 'continue' });
+    expect(continuation.status).toBe(200);
+    expect(await continuation.text()).toContain('assistant.completed');
     expect(f.calls.filter(c => c.url.endsWith('/chat/stream'))[1].url).toContain('/test_compacted_1/');
   });
   it('persists across handler restart and isolates principals and documents', async () => {
