@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { mkdir, open, rename, lstat, unlink } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { AcpRuntime, type AcpRuntimeOptions } from './acp-runtime.js';
+import { AcpRuntime, type AcpRuntimeOptions, type AcpDiscovery } from './acp-runtime.js';
 import type { RuntimeManagement } from './backend.js';
 
 export type AcpServiceOptions = Pick<AcpRuntimeOptions, 'executable' | 'argv' | 'cwd' | 'env' | 'attestRestrictedRuntime'> & {
@@ -87,15 +87,24 @@ export async function startAcpService(options: AcpServiceOptions): Promise<AcpSe
   let closing = false;
   let version: string | undefined;
   let lastReason: string | undefined;
+  let discoveryCache: { value: AcpDiscovery; at: number } | undefined;
+  let discoveryPending: Promise<AcpDiscovery> | undefined;
   const checked = async () => {
     if (closing || await options.attestRestrictedRuntime() !== true) throw Error('policy_unverified');
     return runtime();
   };
   const discover = async () => {
-    const discovery = await (await checked()).discover();
-    version = discovery.version ?? undefined;
-    if (!options.models.some(m => discovery.models.some(d => d.id === m.id))) throw Error('model_unavailable');
-    return discovery;
+    const transport = await checked(); // Source identity is rechecked even for cached metadata.
+    if (discoveryCache && Date.now() - discoveryCache.at < 15_000) return discoveryCache.value;
+    if (!discoveryPending) {
+      discoveryPending = transport.discover().then(discovery => {
+        version = discovery.version ?? undefined;
+        if (!options.models.some(m => discovery.models.some(d => d.id === m.id))) throw Error('model_unavailable');
+        discoveryCache = { value: discovery, at: Date.now() };
+        return discovery;
+      }).finally(() => { discoveryPending = undefined; });
+    }
+    return discoveryPending;
   };
   const snapshot = async () => {
     let status: 'unconfigured' | 'ready' | 'failed' | 'running' = 'ready';

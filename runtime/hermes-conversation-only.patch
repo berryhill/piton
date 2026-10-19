@@ -401,6 +401,16 @@ index bdd11a7a97..a3f534c8c6 100644
 +    from agent.conversation_policy import current_policy
 +    if current_policy() is not None:
 +        return []
+diff --git a/hermes_cli/model_switch.py b/hermes_cli/model_switch.py
+index e019505746..ff9c58e3f8 100644
+--- a/hermes_cli/model_switch.py
++++ b/hermes_cli/model_switch.py
+@@ -1411,0 +1412,2 @@ def _validate_switch(st: _Switch) -> Optional[ModelSwitchResult]:
++    from agent.codex_headers import is_official_codex_base_url
++    native_codex = validate_as.strip().lower() == "openai-codex" and is_official_codex_base_url(st.base_url)
+@@ -1414 +1416 @@ def _validate_switch(st: _Switch) -> Optional[ModelSwitchResult]:
+-        if pdef is not None and pdef.source == "user-config":
++        if pdef is not None and pdef.source == "user-config" and not native_codex:
 diff --git a/model_tools.py b/model_tools.py
 index 4193fb2210..76ba133935 100644
 --- a/model_tools.py
@@ -547,6 +557,36 @@ index 0000000000..c96d0d4655
 +    state = manager.create_session()
 +    assert state.conversation_policy is None
 +    assert state.agent.model == "test-model"
+diff --git a/tests/hermes_cli/test_codex_native_model_switch.py b/tests/hermes_cli/test_codex_native_model_switch.py
+new file mode 100644
+index 0000000000..bec485cce0
+--- /dev/null
++++ b/tests/hermes_cli/test_codex_native_model_switch.py
+@@ -0,0 +1,24 @@
++"""Native Codex endpoints must not be validated as custom /models APIs."""
++from types import SimpleNamespace
++import pytest
++from hermes_cli import model_switch, models_validate
++
++
++@pytest.mark.parametrize('url,expected', [
++    ('https://chatgpt.com/backend-api/codex', 'openai-codex'),
++    ('https://proxy.example/v1', 'custom:openai-codex'),
++    ('https://chatgpt.com.evil.example/backend-api/codex', 'custom:openai-codex'),
++])
++def test_native_catalog_selection_preserves_custom_endpoint_validation(monkeypatch, url, expected):
++    monkeypatch.setattr(model_switch, 'resolve_provider_full', lambda *a, **k: SimpleNamespace(source='user-config'))
++    seen = []
++    def validate(model, provider, **kwargs):
++        seen.append(provider)
++        return {'accepted': True, 'persist': True, 'recognized': False}
++    monkeypatch.setattr(models_validate, 'validate_requested_model', validate)
++    state = model_switch._Switch('gpt-hidden', 'openai-codex', 'gpt-current', url,
++        'synthetic', False, 'openai-codex', {}, [], new_model='gpt-hidden',
++        target_provider='openai-codex', api_key='synthetic', base_url=url,
++        api_mode='codex_responses')
++    assert model_switch._validate_switch(state) is None
++    assert seen == [expected]
 diff --git a/tools/mcp_tool_agent.py b/tools/mcp_tool_agent.py
 index 5e8af44da0..2193283fd7 100644
 --- a/tools/mcp_tool_agent.py

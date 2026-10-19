@@ -77,6 +77,12 @@ describe('private ACP normalization with inert peer', () => {
     const f = await setup('normal', async () => false);
     expect(await f.service.verifyIsolation()).toBe(false);
     expect((await f.request('/v1/models')).status).toBe(503);
+    let sourceVerified = true;
+    const cached = await setup('normal', async () => sourceVerified);
+    expect(await cached.service.verifyIsolation()).toBe(true);
+    sourceVerified = false;
+    expect(await cached.service.verifyIsolation()).toBe(false);
+    expect((await cached.request('/v1/models')).status).toBe(503);
   });
   it('rejects incomplete output, cancels on disconnect and invalidates on model change', async () => {
     const f = await setup('empty');
