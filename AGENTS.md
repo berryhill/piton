@@ -20,6 +20,14 @@ Canonical MVI doctrine: `docs/mvi-doctrine.md`. Where any plan or document disag
 - The repository contains no Python application or external exact-CAD adapter.
 - Workers may realize review geometry and emit evidence but may not mutate authored revisions, review dispositions, approvals, or release state.
 
+## Part-creation acceptance routing
+
+For Part creation, sketch/feature actions, agent modeling integration, geometry verification or completion reporting, read `.hermes/README.md`, `.hermes/part-creation-happy-path-hard-acceptance.md`, `.hermes/solidworks-part-actions.md`, `.hermes/part-creation-cases.json` and `.hermes/part-creation-negative-tests.md` in full before defining acceptance or changing behavior.
+
+The agent must produce the requested Part in the application through admitted browser-owned actions. A meaningful description, code block or external mesh is not Part creation. Human-control proof and real-agent action proof are separate lanes; report unavailable capability and unexercised stages instead of weakening a case.
+
+These files are explicit acceptance targets, not auto-loaded rules or runtime capability grants. They do not change safety/authority gates, enable tools in conversation-only sessions, or prove that an existing worker loaded them. `.hermes/audit-baseline.md` records pinned findings, not standing current-runtime facts.
+
 ## Required implementation loop
 
 Every repository change follows `.otoxan/flows/piton-implementation-loop-v1.md`.
