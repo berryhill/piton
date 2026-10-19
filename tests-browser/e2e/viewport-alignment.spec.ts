@@ -29,18 +29,29 @@ async function emptyPart(page:Page,name:string){
 async function oneViewport(page:Page,mode:"empty"|"sketch"|"solid"){
   const body=page.getByTestId("workbench-viewport-body"),slot=page.getByTestId("workbench-command-slot");
   await expect(body).toHaveCount(1);
-  const renderer=body.locator(mode==="empty"?'[data-testid="empty-project-viewport"]':mode==="sketch"?'[data-testid="sketch-workplane"]':'[data-testid="feature-mesh-viewport"]');
+  await expect(slot).toHaveCount(1);
+  await expect(page.locator(".r7-document-panel")).toHaveCount(1);
+  const rendererSelector=mode==="empty"?'[data-testid="empty-project-viewport"]':mode==="sketch"?'[data-testid="sketch-workplane"]':'[data-testid="feature-mesh-viewport"]';
+  const renderer=body.locator(rendererSelector);
   await expect(renderer).toBeVisible();
   await expect(body.locator('.r7-empty-viewport:visible,.r7-sketch-workplane:visible')).toHaveCount(1);
   if(mode!=="empty")await expect(page.getByTestId("empty-project-viewport")).toHaveCount(0);
-  const b=(await body.boundingBox())!,panel=(await page.locator(".r7-document-panel").boundingBox())!,s=(await slot.boundingBox())!,r=(await renderer.boundingBox())!;
+  // History loading can change command-slot height between protocol round trips.
+  // Measure all related bounds in one DOM turn, preserving the same geometry assertions.
+  const {b,panel,s,r,tabs}=await body.evaluate((node,selector)=>{
+    const doc=node.ownerDocument;
+    const rect=(element:Element)=>{const box=element.getBoundingClientRect();return {x:box.x,y:box.y,width:box.width,height:box.height};};
+    return {b:rect(node),panel:rect(doc.querySelector(".r7-document-panel")!),
+      s:rect(doc.querySelector('[data-testid="workbench-command-slot"]')!),r:rect(node.querySelector(selector)!),
+      tabs:[...doc.querySelectorAll('[aria-label="Part commands"] [role="tab"]')].map(tab=>({name:tab.textContent?.trim(),...rect(tab)}))};
+  },rendererSelector);
   expect(b.height).toBeGreaterThan(panel.height*0.6);
   expect(s.y+s.height).toBeLessThanOrEqual(b.y+1);
   expect(r.x).toBeGreaterThanOrEqual(b.x-1);expect(r.x+r.width).toBeLessThanOrEqual(b.x+b.width+1);
   expect(r.y).toBeGreaterThanOrEqual(b.y-1);expect(r.y+r.height).toBeLessThanOrEqual(b.y+b.height+1);
   for(const name of ["Sketch","Features","Inspect"]){
     const tab=commands(page).getByRole("tab",{name,exact:true});await expect(tab).toBeVisible();
-    const t=(await tab.boundingBox())!;expect(t.y).toBeGreaterThanOrEqual(s.y-1);expect(t.y+t.height).toBeLessThanOrEqual(s.y+s.height+1);
+    const t=tabs.find(item=>item.name===name)!;expect(t.y).toBeGreaterThanOrEqual(s.y-1);expect(t.y+t.height).toBeLessThanOrEqual(s.y+s.height+1);
   }
 }
 for(const viewport of [{width:1920,height:1080},{width:1280,height:720},{width:390,height:844}]){

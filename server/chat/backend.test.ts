@@ -207,6 +207,7 @@ describe('backend confinement and bridge routing', () => {
     try {
       expect((await f.call('conversation', 'POST', { projectId, message: 'failed turn' })).status).toBe(503);
       expect(failed).toBe(true);
+      await waitForProjectCleanup(f.stateDirectory);
       expect(await (await f.call('history?projectId=' + projectId)).json()).toMatchObject({ status: 'interrupted', blocked: true });
       expect(await (await f.call('stop', 'POST', { projectId })).json()).toEqual({ stopped: false, upstreamCancellationConfirmed: false });
       expect((await f.call('recover', 'POST', { projectId })).status).toBe(200);
@@ -237,6 +238,7 @@ describe('backend confinement and bridge routing', () => {
       expect(failed).toBe(true);
       expect(stream).toContain('event: error');
       expect(stream).not.toContain('event: assistant.completed');
+      await waitForProjectCleanup(f.stateDirectory);
       const history = await (await f.call('history?projectId=' + projectId)).json();
       expect(history).toMatchObject({ status: 'interrupted', blocked: true, recoveryRequired: true });
       expect(history.messages).toEqual(boundary === 'assistant ledger append' ? [{ role: 'user', content: input.message }] :
@@ -286,7 +288,7 @@ describe('backend confinement and bridge routing', () => {
       expect(history.messages.at(-1)).toEqual({ role: 'assistant', content: 'mock answer' });
       expect(f.inputs).toHaveLength(51);
     } finally { vi.mocked(rename).mockImplementation(fs.rename); await f.backend.shutdown(); }
-  });
+  }, 60_000); // Fifty-one fsynced turns test custody/rollover, not storage throughput.
   it.each(['projectId', 'documentId', 'runId', 'requestId', 'legacy'])('rejects a completed receipt with mismatched %s and preserves archive evidence', async field => {
     const f = await fixture(async () => true);
     try {
@@ -332,6 +334,7 @@ describe('backend confinement and bridge routing', () => {
       });
       expect(await (await f.call('conversation', 'POST', { projectId, message: 'same question' })).text()).toContain('event: error');
       expect(failed).toBe(true);
+      await waitForProjectCleanup(f.stateDirectory);
       expect((await f.call('recover', 'POST', { projectId })).status).toBe(200);
       expect(await (await f.call('history?projectId=' + projectId)).json()).toMatchObject({ status: 'idle', messages: [
         { role: 'user', content: 'same question' }, { role: 'assistant', content: 'mock answer' }, { role: 'user', content: 'same question' },
@@ -351,6 +354,7 @@ describe('backend confinement and bridge routing', () => {
         return fs.rename(source, target);
       });
       expect(await (await f.call('conversation', 'POST', { projectId, message: 'completed despite local failure' })).text()).toContain('event: error');
+      await waitForProjectCleanup(f.stateDirectory);
       expect(await (await f.call('history?projectId=' + projectId)).json()).toMatchObject({ status: 'interrupted', blocked: true, recoveryRequired: true });
       expect(await (await f.call('stop', 'POST', { projectId })).json()).toMatchObject({ stopped: false });
       vi.mocked(rename).mockImplementation(fs.rename);
