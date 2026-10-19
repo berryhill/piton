@@ -13,3 +13,8 @@
 .piton-chat .chat-attachments li { display: flex; align-items: center; justify-content: space-between; gap: 4px; font-size: 12px; }
 .piton-chat pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto; font-size: 11px; }
 .piton-chat .chat-error { color: #ffb8a9; overflow-wrap: anywhere; }
+.piton-chat .chat-runtime { border: 1px solid #294252; border-radius: 6px; padding: 6px 10px; font-size: 12px; }
+.piton-chat .chat-runtime summary { cursor: pointer; font-weight: 600; }
+.piton-chat .chat-runtime-settings { display: grid; gap: 6px; padding: 8px 0 2px; }
+.piton-chat .chat-runtime-settings p { margin: 0; overflow-wrap: anywhere; }
+.piton-chat .chat-runtime-settings select { min-width: 0; width: 100%; max-width: 360px; }

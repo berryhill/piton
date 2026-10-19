@@ -2,10 +2,12 @@ export type ChatMessage = { role: 'user' | 'assistant'; content: string };
 export type History = { messages: ChatMessage[]; blocked: boolean; status: string };
 export type Availability = { available: boolean; profile: string; capabilities: string[]; runtime?: { model?: string; provider?: string } };
 export type StreamEvent = { name: string; data: Record<string, unknown> };
+export type RuntimeSnapshot = { runtime: 'hermes'; profile: 'nick-mercer'; transport: 'acp'; mode: 'conversation-only'; status: 'unconfigured' | 'ready' | 'failed' | 'running'; model: string; models: Array<{ id: string; label: string }>; version?: string; reason?: string; policyVerified: boolean };
+export type RuntimeTestResult = { ok: boolean; message: string; runtime: RuntimeSnapshot };
 export class ChatClient {
   private csrf = '';
   private async request(path: string, body?: unknown, signal?: AbortSignal) {
-    const timeout = AbortSignal.timeout(path === 'conversation' ? 180_000 : 20_000);
+    const timeout = AbortSignal.timeout(path === 'conversation' || path === 'runtime/test' ? 180_000 : 20_000);
     signal = signal ? AbortSignal.any([signal, timeout]) : timeout;
     const response = await fetch(`/api/chat/${path}`, { method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', redirect: 'error', signal, headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(this.csrf ? { 'X-Piton-CSRF': this.csrf } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
     if (response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() === 'text/html') {
@@ -33,6 +35,10 @@ export class ChatClient {
   }
   async stop(projectId: string) { return (await this.request('stop', { projectId })).json() as Promise<{ stopped: boolean }>; }
   async recover(projectId: string) { await this.request('recover', { projectId }); }
+  async availability(signal?: AbortSignal): Promise<Availability> { return (await this.request('availability', undefined, signal)).json() as Promise<Availability>; }
+  async runtime(signal?: AbortSignal): Promise<RuntimeSnapshot> { return (await this.request('runtime', undefined, signal)).json() as Promise<RuntimeSnapshot>; }
+  async saveRuntimeModel(model: string, signal?: AbortSignal): Promise<RuntimeSnapshot> { return (await this.request('runtime/settings', { model }, signal)).json() as Promise<RuntimeSnapshot>; }
+  async testRuntime(signal?: AbortSignal): Promise<RuntimeTestResult> { return (await this.request('runtime/test', {}, signal)).json() as Promise<RuntimeTestResult>; }
   async send(input: {projectId: string; message: string; context: string; requestId: string; documentId: string | null}, event: (event: StreamEvent) => void, signal: AbortSignal) {
     const response = await this.request('conversation', input, signal);
     if (!response.headers.get('content-type')?.startsWith('text/event-stream') || !response.body) throw new Error('invalid_stream');

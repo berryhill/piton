@@ -1,0 +1,601 @@
+diff --git a/acp_adapter/commands.py b/acp_adapter/commands.py
+index 5a79309d92..87ce5402a2 100644
+--- a/acp_adapter/commands.py
++++ b/acp_adapter/commands.py
+@@ -89,0 +90,2 @@ class SlashCommandsMixin:
++        if getattr(self, "conversation_policy", None) is not None:
++            raise PermissionError("Slash commands unavailable in conversation-only mode")
+diff --git a/acp_adapter/entry.py b/acp_adapter/entry.py
+index 13dcbcbcc4..44c26af2aa 100644
+--- a/acp_adapter/entry.py
++++ b/acp_adapter/entry.py
+@@ -90,0 +91,2 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
++    parser.add_argument("--conversation-only", action="store_true",
++                        help="Run ACP with no tools, memory, plugins or project context")
+@@ -182,2 +184,5 @@ def main(argv: list[str] | None = None) -> None:
+-    import acp
+-    from .server import HermesACPAgent
++    from agent.conversation_policy import CONVERSATION_ONLY, policy_scope
++    policy = CONVERSATION_ONLY if args.conversation_only else None
++    with policy_scope(policy):
++        import acp
++        from .server import HermesACPAgent
+@@ -191 +196 @@ def main(argv: list[str] | None = None) -> None:
+-    if os.environ.get("HERMES_ACP_SKIP_CONFIGURED_MCP", "").strip() != "1":
++    if policy is None and os.environ.get("HERMES_ACP_SKIP_CONFIGURED_MCP", "").strip() != "1":
+@@ -199 +204,2 @@ def main(argv: list[str] | None = None) -> None:
+-    agent = HermesACPAgent()
++    with policy_scope(policy):
++        agent = HermesACPAgent(conversation_policy=policy)
+@@ -201 +207,2 @@ def main(argv: list[str] | None = None) -> None:
+-        asyncio.run(acp.run_agent(agent, use_unstable_protocol=True))
++        with policy_scope(policy):
++            asyncio.run(acp.run_agent(agent, use_unstable_protocol=True))
+diff --git a/acp_adapter/server.py b/acp_adapter/server.py
+index f7daaa8d94..2fb85d75b1 100644
+--- a/acp_adapter/server.py
++++ b/acp_adapter/server.py
+@@ -248 +248 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
+-    def __init__(self, session_manager: SessionManager | None = None):
++    def __init__(self, session_manager: SessionManager | None = None, conversation_policy=None):
+@@ -250 +250,4 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
+-        self.session_manager = session_manager or SessionManager()
++        self.conversation_policy = conversation_policy
++        self.session_manager = session_manager or SessionManager(conversation_policy=conversation_policy)
++        if conversation_policy is not None and getattr(self.session_manager, "conversation_policy", None) != conversation_policy:
++            raise PermissionError("ACP server policy mismatch")
+@@ -336 +338,0 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
+-        state.model = new_model
+@@ -342 +344 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
+-        state.agent = self.session_manager._make_agent(
++        replacement = self.session_manager._make_agent(
+@@ -345,0 +348,4 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
++        if self.conversation_policy is not None:
++            from agent.conversation_policy import require_policy
++            require_policy(replacement, self.conversation_policy)
++        state.agent, state.model = replacement, new_model
+@@ -413,0 +420,4 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
++        if self.conversation_policy is not None:
++            if mcp_servers:
++                raise PermissionError("MCP servers unavailable in conversation-only mode")
++            return
+@@ -457,0 +468,2 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
++        if self.conversation_policy is not None:
++            return
+@@ -557,0 +570,2 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
++        if self.conversation_policy is not None:
++            self.session_manager._check_state(state)
+@@ -577,5 +591,5 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
+-        return {
+-            "models": self._build_model_state(state),
+-            "modes": self._session_modes(state),
+-            "field_meta": self._provenance_meta(state.session_id, getattr(state.agent, "session_id", state.session_id)),
+-        }
++        meta = (self._provenance_meta(state.session_id, getattr(state.agent, "session_id", state.session_id))
++                if self.conversation_policy is None else None)
++        if self.conversation_policy is not None:
++            meta = {**(meta or {}), "conversationPolicy": self.conversation_policy.metadata(state.session_id)}
++        return {"models": self._build_model_state(state), "modes": self._session_modes(state), "field_meta": meta}
+@@ -588,0 +603,2 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
++        if self.conversation_policy is not None and mcp_servers:
++            raise PermissionError("MCP servers unavailable in conversation-only mode")
+@@ -595,0 +612,2 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
++        if self.conversation_policy is not None and mcp_servers:
++            raise PermissionError("MCP servers unavailable in conversation-only mode")
+@@ -605,0 +624,2 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
++        if self.conversation_policy is not None and mcp_servers:
++            raise PermissionError("MCP servers unavailable in conversation-only mode")
+@@ -607,0 +628,2 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
++            if self.conversation_policy is not None:
++                raise PermissionError("Unknown or legacy session unavailable in conversation-only mode")
+@@ -632,0 +655,2 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
++        if self.conversation_policy is not None and mcp_servers:
++            raise PermissionError("MCP servers unavailable in conversation-only mode")
+@@ -634,0 +659,2 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
++            if self.conversation_policy is not None:
++                raise PermissionError("Unknown or legacy session unavailable in conversation-only mode")
+@@ -773,4 +799,8 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
+-                return agent.run_conversation(
+-                    user_message=user_content, conversation_history=state.history, task_id=session_id,
+-                    persist_user_message=user_text or "[Image attachment]",
+-                )
++                from agent.conversation_policy import policy_scope, require_policy
++                with policy_scope(state.conversation_policy):
++                    if state.conversation_policy is not None:
++                        require_policy(agent, state.conversation_policy)
++                    return agent.run_conversation(
++                        user_message=user_content, conversation_history=state.history, task_id=session_id,
++                        persist_user_message=user_text or "[Image attachment]",
++                    )
+@@ -777,0 +808,3 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
++                if self.conversation_policy is not None:
++                    logger.error("Restricted ACP request failed (%s)", type(e).__name__)
++                    return {"final_response": "", "messages": state.history, "error": "runtime_failed"}
+@@ -786,0 +820,2 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
++        if self.conversation_policy is not None:
++            self.session_manager._check_state(state)
+@@ -797,0 +833,2 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
++            if self.conversation_policy is not None:
++                raise PermissionError("Slash commands unavailable in conversation-only mode")
+@@ -813 +850,4 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
+-        logger.info("Prompt on session %s: %s", session_id, user_text[:100])
++        if self.conversation_policy is None:
++            logger.info("Prompt on session %s: %s", session_id, user_text[:100])
++        else:
++            logger.info("Conversation-only prompt on session %s", session_id)
+@@ -958,2 +998,8 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
+-            _old, requested_provider, resolved_model = await asyncio.to_thread(
+-                self._switch_model, state, model_id, keep_endpoint=True)
++            def switch():
++                from agent.conversation_policy import policy_scope, require_policy
++                with policy_scope(self.conversation_policy):
++                    result = self._switch_model(state, model_id, keep_endpoint=True)
++                    if self.conversation_policy is not None:
++                        require_policy(state.agent, self.conversation_policy)
++                    return result
++            _old, requested_provider, resolved_model = await asyncio.to_thread(switch)
+@@ -968,0 +1015,2 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
++        if self.conversation_policy is not None:
++            raise PermissionError("Mode changes unavailable in conversation-only mode")
+@@ -984,0 +1033,2 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
++        if self.conversation_policy is not None:
++            raise PermissionError("Config changes unavailable in conversation-only mode")
+diff --git a/acp_adapter/session.py b/acp_adapter/session.py
+index e1af050255..ee9bc0c85f 100644
+--- a/acp_adapter/session.py
++++ b/acp_adapter/session.py
+@@ -22,0 +23 @@ from typing import Any, Dict, List, Optional
++from agent.conversation_policy import ConversationPolicy, policy_scope, require_policy
+@@ -136,0 +138 @@ class SessionState:
++    conversation_policy: ConversationPolicy | None = None
+@@ -157 +159 @@ class SessionManager:
+-    def __init__(self, agent_factory=None, db=None):
++    def __init__(self, agent_factory=None, db=None, conversation_policy: ConversationPolicy | None = None):
+@@ -162,0 +165 @@ class SessionManager:
++        self.conversation_policy = conversation_policy
+@@ -171 +174,2 @@ class SessionManager:
+-        agent = self._make_agent(session_id=session_id, cwd=cwd)
++        with policy_scope(self.conversation_policy):
++            agent = self._make_agent(session_id=session_id, cwd=cwd)
+@@ -181 +185,10 @@ class SessionManager:
+-        return state if state is not None else self._restore(session_id)
++        if state is not None:
++            self._check_state(state)
++            return state
++        return self._restore(session_id)
++
++    def _check_state(self, state: SessionState) -> None:
++        if self.conversation_policy is not None:
++            if state.conversation_policy != self.conversation_policy:
++                raise PermissionError("ACP session policy mismatch")
++            require_policy(state.agent, self.conversation_policy)
+@@ -190 +203,2 @@ class SessionManager:
+-        agent = self._make_agent(session_id=new_id, cwd=cwd, model=original.model or None)
++        with policy_scope(self.conversation_policy):
++            agent = self._make_agent(session_id=new_id, cwd=cwd, model=original.model or None)
+@@ -199 +213 @@ class SessionManager:
+-        db = self._get_db()
++        db = self._get_db() if self.conversation_policy is None else None
+@@ -262 +276,3 @@ class SessionManager:
+-        state = SessionState(session_id=session_id, agent=agent, cwd=cwd, model=model,
++        if self.conversation_policy is not None:
++            require_policy(agent, self.conversation_policy)
++        state = SessionState(session_id=session_id, agent=agent, conversation_policy=self.conversation_policy, cwd=cwd, model=model,
+@@ -276,0 +293,2 @@ class SessionManager:
++        if self.conversation_policy is not None:
++            return None  # The application owns durable, principal-scoped transcript custody.
+@@ -337,0 +356,2 @@ class SessionManager:
++        if self.conversation_policy is not None:
++            return None  # No import of legacy/unmarked sessions into a restricted process.
+@@ -378 +398,2 @@ class SessionManager:
+-            return self._agent_factory()
++            with policy_scope(self.conversation_policy):
++                return self._agent_factory()
+@@ -395 +416 @@ class SessionManager:
+-        ]
++        ] if self.conversation_policy is None else []
+@@ -398 +419,2 @@ class SessionManager:
+-            "enabled_toolsets": _expand_acp_enabled_toolsets(["hermes-acp"], mcp_server_names=configured_mcp_servers),
++            "enabled_toolsets": _expand_acp_enabled_toolsets(["hermes-acp"], mcp_server_names=configured_mcp_servers)
++                                if self.conversation_policy is None else [],
+@@ -400,0 +423,2 @@ class SessionManager:
++        if self.conversation_policy is not None:
++            kwargs.update(skip_context_files=True, skip_memory=True, skip_background_review=True, save_trajectories=False)
+@@ -419,6 +443,6 @@ class SessionManager:
+-        try:
+-            from hermes_cli.mcp_startup import ensure_mcp_discovery_before_agent_build
+-
+-            ensure_mcp_discovery_before_agent_build(logger=logger, thread_name="acp-mcp-discovery")
+-        except Exception:
+-            logger.debug("ACP: bounded MCP discovery wait failed", exc_info=True)
++        if self.conversation_policy is None:
++            try:
++                from hermes_cli.mcp_startup import ensure_mcp_discovery_before_agent_build
++                ensure_mcp_discovery_before_agent_build(logger=logger, thread_name="acp-mcp-discovery")
++            except Exception:
++                logger.debug("ACP: bounded MCP discovery wait failed", exc_info=True)
+@@ -426 +450,2 @@ class SessionManager:
+-        agent = AIAgent(**kwargs)
++        with policy_scope(self.conversation_policy):
++            agent = AIAgent(**kwargs)
+diff --git a/agent/agent_init.py b/agent/agent_init.py
+index e62cf5179b..bad0d6b290 100644
+--- a/agent/agent_init.py
++++ b/agent/agent_init.py
+@@ -1045,0 +1046,5 @@ def _load_tools(agent, enabled_toolsets, disabled_toolsets):
++    if agent.conversation_policy is not None:
++        agent.tools = []
++        agent.valid_tool_names = set()
++        agent._kanban_worker_guidance = ""
++        return
+@@ -1742,0 +1748,3 @@ def _select_context_engine(_agent_cfg):
++    from agent.conversation_policy import current_policy
++    if current_policy() is not None:
++        return None
+@@ -1927,0 +1936,3 @@ def _inject_context_engine_tools(agent):
++    if agent.conversation_policy is not None:
++        agent._context_engine_tool_names = set()
++        return
+@@ -2221,0 +2233,8 @@ def init_agent(
++    from agent.conversation_policy import current_policy, require_direct_inference
++    agent.conversation_policy = current_policy()
++    if agent.conversation_policy is not None:
++        enabled_toolsets, disabled_toolsets = [], []
++        skip_context_files, load_soul_identity = True, False
++        skip_memory, skip_background_review = True, True
++        checkpoints_enabled = False
++        agent._skip_mcp_refresh = True
+@@ -2259,0 +2279,2 @@ def init_agent(
++    if agent.conversation_policy is not None:
++        require_direct_inference(agent)
+@@ -2279,0 +2301,2 @@ def init_agent(
++    if agent.conversation_policy is not None:
++        require_direct_inference(agent)
+@@ -2294 +2317,8 @@ def init_agent(
+-    _init_memory(agent, _agent_cfg, skip_memory, platform)
++    if agent.conversation_policy is not None:
++        agent._memory_store = None
++        agent._memory_manager = None
++        agent._memory_enabled = agent._user_profile_enabled = False
++        agent._turns_since_memory = agent._iters_since_skill = 0
++        agent._memory_nudge_interval = 0
++    else:
++        _init_memory(agent, _agent_cfg, skip_memory, platform)
+diff --git a/agent/conversation_loop.py b/agent/conversation_loop.py
+index 6739c096e4..90bb891d2c 100644
+--- a/agent/conversation_loop.py
++++ b/agent/conversation_loop.py
+@@ -1506,0 +1507,3 @@ def _run_conversation_turn(
++    if getattr(agent, "conversation_policy", None) is not None:
++        from agent.conversation_policy import require_policy
++        require_policy(agent, agent.conversation_policy)
+diff --git a/agent/conversation_policy.py b/agent/conversation_policy.py
+new file mode 100644
+index 0000000000..b02c099a8c
+--- /dev/null
++++ b/agent/conversation_policy.py
+@@ -0,0 +1,56 @@
++"""Process-selected, agent-bound conversation capability policy.
++
++The ContextVar carries the immutable restriction across construction and execution;
++agent.policy is the durable session binding. Neither toolset names nor client RPC
++parameters can turn this policy off.
++"""
++from contextlib import contextmanager
++from contextvars import ContextVar
++from dataclasses import dataclass
++
++
++@dataclass(frozen=True)
++class ConversationPolicy:
++    mode: str = "conversation-only"
++    version: int = 1
++
++    def metadata(self, session_id: str) -> dict:
++        return {"version": self.version, "mode": self.mode, "sessionId": session_id,
++                "tools": [], "memory": False, "contextFiles": False,
++                "plugins": False, "modelingWrites": False}
++
++
++CONVERSATION_ONLY = ConversationPolicy()
++DIRECT_INFERENCE_MODES = frozenset({"chat_completions", "codex_responses", "anthropic_messages", "bedrock_converse"})
++_active_policy: ContextVar[ConversationPolicy | None] = ContextVar("conversation_policy", default=None)
++
++
++def current_policy() -> ConversationPolicy | None:
++    return _active_policy.get()
++
++
++@contextmanager
++def policy_scope(policy: ConversationPolicy | None):
++    token = _active_policy.set(policy)
++    try:
++        yield
++    finally:
++        _active_policy.reset(token)
++
++
++def require_policy(agent, expected: ConversationPolicy):
++    """Fail closed if an agent or its tool snapshot drifted from its session policy."""
++    if getattr(agent, "conversation_policy", None) != expected:
++        raise PermissionError("Conversation policy mismatch")
++    if expected is not None:
++        require_direct_inference(agent)
++    if expected is not None and (agent.tools != [] or agent.valid_tool_names != set()
++                                 or agent._memory_manager is not None or agent._memory_store is not None
++                                 or not agent.skip_context_files or not agent.skip_background_review):
++        raise PermissionError("Conversation-only agent capabilities changed")
++
++
++def require_direct_inference(agent):
++    """Nested agent runtimes have their own tools and cannot inherit this boundary."""
++    if getattr(agent, "api_mode", None) not in DIRECT_INFERENCE_MODES or getattr(agent, "provider", "") in {"copilot-acp", "moa"}:
++        raise PermissionError("Conversation-only mode requires a direct inference transport")
+diff --git a/agent/system_prompt.py b/agent/system_prompt.py
+index 3778515924..be91c0790a 100644
+--- a/agent/system_prompt.py
++++ b/agent/system_prompt.py
+@@ -612,0 +613,2 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None)
++    if getattr(agent, "conversation_policy", None) is not None:
++        return {"stable": DEFAULT_AGENT_IDENTITY, "context": "", "volatile": ""}
+diff --git a/agent/tool_executor.py b/agent/tool_executor.py
+index 3fc5f6b8b5..23490924a3 100644
+--- a/agent/tool_executor.py
++++ b/agent/tool_executor.py
+@@ -1407,0 +1408,2 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
++    if getattr(agent, "conversation_policy", None) is not None:
++        raise PermissionError("Tools are unavailable in conversation-only mode")
+@@ -1665,0 +1668,2 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
++    if getattr(agent, "conversation_policy", None) is not None:
++        raise PermissionError("Tools are unavailable in conversation-only mode")
+@@ -1724,0 +1729,2 @@ def execute_tool_calls_segmented(agent, assistant_message, messages: list, effec
++    if getattr(agent, "conversation_policy", None) is not None:
++        raise PermissionError("Tools are unavailable in conversation-only mode")
+diff --git a/agent/turn_api_request.py b/agent/turn_api_request.py
+index f218023921..56dfea8a4c 100644
+--- a/agent/turn_api_request.py
++++ b/agent/turn_api_request.py
+@@ -99,0 +100,5 @@ def build_api_request(
++    if getattr(agent, "conversation_policy", None) is not None:
++        from agent.conversation_policy import require_policy
++        require_policy(agent, agent.conversation_policy)
++        if tools_for_api:
++            raise PermissionError("Tools are unavailable in conversation-only mode")
+@@ -137,0 +143,6 @@ def build_api_request(
++    if getattr(agent, "conversation_policy", None) is not None:
++        for payload in (api_kwargs, api_kwargs.get("extra_body", {})):
++            if isinstance(payload, dict) and (payload.get("tools") or payload.get("functions")):
++                raise PermissionError("Provider tools are unavailable in conversation-only mode")
++        # Neither configured middleware nor debug dump hooks may observe a restricted turn.
++        return ApiRequestBuild("fallthrough", api_messages, None, [], api_kwargs, dict(api_kwargs), [])
+diff --git a/agent/turn_context.py b/agent/turn_context.py
+index 27fe703a9b..ce49a7c9ac 100644
+--- a/agent/turn_context.py
++++ b/agent/turn_context.py
+@@ -156,0 +157,2 @@ def _maybe_title_session_at_turn_start(agent: Any, messages: List[Any]) -> None:
++    if getattr(agent, "conversation_policy", None) is not None:
++        return
+diff --git a/agent/turn_tool_validation.py b/agent/turn_tool_validation.py
+index db3e89334e..474b37f6b2 100644
+--- a/agent/turn_tool_validation.py
++++ b/agent/turn_tool_validation.py
+@@ -80,0 +81,5 @@ def validate_tool_calls(
++    if getattr(agent, "conversation_policy", None) is not None:
++        append_message(messages, agent._build_assistant_message(assistant_message, finish_reason))
++        _append_tool_error_results(messages, tool_calls,
++                                   lambda tc: "Tools are unavailable in conversation-only mode")
++        return ToolValidationVerdict(action="continue", result=None, mixed_invalid_batch=False)
+diff --git a/hermes_cli/lifecycle.py b/hermes_cli/lifecycle.py
+index bdd11a7a97..a3f534c8c6 100644
+--- a/hermes_cli/lifecycle.py
++++ b/hermes_cli/lifecycle.py
+@@ -27,0 +28,3 @@ def invoke_hook(hook_name: str, **kwargs: Any) -> List[Any]:
++    from agent.conversation_policy import current_policy
++    if current_policy() is not None:
++        return []
+@@ -33,0 +37,3 @@ def has_hook(hook_name: str) -> bool:
++    from agent.conversation_policy import current_policy
++    if current_policy() is not None:
++        return False
+@@ -48,0 +55,3 @@ def finalize_session(**kwargs: Any) -> List[Any]:
++    from agent.conversation_policy import current_policy
++    if current_policy() is not None:
++        return []
+diff --git a/hermes_cli/model_switch.py b/hermes_cli/model_switch.py
+index e019505746..ff9c58e3f8 100644
+--- a/hermes_cli/model_switch.py
++++ b/hermes_cli/model_switch.py
+@@ -1411,0 +1412,2 @@ def _validate_switch(st: _Switch) -> Optional[ModelSwitchResult]:
++    from agent.codex_headers import is_official_codex_base_url
++    native_codex = validate_as.strip().lower() == "openai-codex" and is_official_codex_base_url(st.base_url)
+@@ -1414 +1416 @@ def _validate_switch(st: _Switch) -> Optional[ModelSwitchResult]:
+-        if pdef is not None and pdef.source == "user-config":
++        if pdef is not None and pdef.source == "user-config" and not native_codex:
+diff --git a/model_tools.py b/model_tools.py
+index 4193fb2210..76ba133935 100644
+--- a/model_tools.py
++++ b/model_tools.py
+@@ -160 +160,3 @@ try:  # plugin tool discovery (user/project/pip plugins)
+-    discover_plugins()
++    from agent.conversation_policy import current_policy
++    if current_policy() is None:
++        discover_plugins()
+@@ -220,0 +223,3 @@ def get_tool_definitions(enabled_toolsets: Optional[List[str]] = None, disabled_
++    from agent.conversation_policy import current_policy
++    if current_policy() is not None:
++        return []
+@@ -873,0 +879,3 @@ def handle_function_call(
++    from agent.conversation_policy import current_policy
++    if current_policy() is not None:
++        return tool_error("Tools are unavailable in conversation-only mode")
+diff --git a/tests/acp_adapter/test_conversation_only.py b/tests/acp_adapter/test_conversation_only.py
+new file mode 100644
+index 0000000000..c96d0d4655
+--- /dev/null
++++ b/tests/acp_adapter/test_conversation_only.py
+@@ -0,0 +1,123 @@
++"""Restricted ACP construction and dispatch invariants with real runtime imports."""
++import asyncio
++import json
++import threading
++from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
++from types import SimpleNamespace
++
++import pytest
++
++from acp_adapter.entry import _parse_args
++from acp_adapter.server import HermesACPAgent
++from acp_adapter.session import SessionManager
++from agent.conversation_policy import CONVERSATION_ONLY, current_policy
++
++
++def test_restricted_session_construction_and_dispatch(monkeypatch, tmp_path, request):
++    from hermes_cli import config, runtime_provider
++    from agent import prompt_builder, agent_init, system_prompt
++    from hermes_cli import plugins
++    from model_tools import handle_function_call
++    from tools.registry import registry
++    from agent.tool_executor import execute_tool_calls_sequential
++
++    assert _parse_args(["--conversation-only"]).conversation_only
++    assert not _parse_args([]).conversation_only
++    calls = []
++    class Provider(BaseHTTPRequestHandler):
++        def log_message(self, format, *args):
++            pass
++        def do_POST(self):
++            value = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
++            calls.append(value)
++            payload = json.dumps({"id": "synthetic", "created": 0, "model": "test-model", "object": "chat.completion",
++                "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "synthetic reply"}}],
++                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}).encode()
++            self.send_response(200)
++            self.send_header('Content-Type', 'application/json')
++            self.send_header('Content-Length', str(len(payload)))
++            self.end_headers()
++            self.wfile.write(payload)
++    http_provider = ThreadingHTTPServer(('127.0.0.1', 0), Provider)
++    threading.Thread(target=http_provider.serve_forever, daemon=True).start()
++    request.addfinalizer(lambda: (http_provider.shutdown(), http_provider.server_close()))
++    monkeypatch.setattr(config, "load_config", lambda: {"model": {"default": "test-model"}, "mcp_servers": {"unsafe": {}}, "context": {"engine": "unsafe-plugin"}})
++    monkeypatch.setattr(runtime_provider, "resolve_runtime_provider", lambda **kw: {
++        "provider": "openai", "api_mode": "chat_completions", "api_key": "dummy-test-key", "base_url": f"http://127.0.0.1:{http_provider.server_port}/v1"})
++    monkeypatch.setattr(prompt_builder, "_read_context_file", lambda *a, **kw: pytest.fail("context read"))
++    monkeypatch.setattr(plugins, "discover_plugins", lambda *a, **kw: pytest.fail("plugin discovery"))
++    monkeypatch.setattr(agent_init, "_init_memory", lambda *a, **kw: pytest.fail("memory initialized"))
++    monkeypatch.setattr(system_prompt, "_frozen_plugin_prompt_sections", lambda *a, **kw: pytest.fail("plugin prompt"))
++    monkeypatch.setattr(registry, "dispatch", lambda *a, **kw: pytest.fail("tool dispatched"))
++    manager = SessionManager(conversation_policy=CONVERSATION_ONLY)
++    server = HermesACPAgent(session_manager=manager, conversation_policy=CONVERSATION_ONLY)
++    state = manager.create_session(cwd=str(tmp_path))
++    assert state.conversation_policy == state.agent.conversation_policy == CONVERSATION_ONLY
++    assert current_policy() is None
++    assert state.agent.tools == [] and state.agent.valid_tool_names == set()
++    assert state.agent._memory_manager is None and state.agent._memory_store is None
++    assert manager._get_db() is None and state.agent._session_db is None
++    assert state.agent._memory_nudge_interval == 0
++
++    state.agent._disable_streaming = True
++    from agent.conversation_policy import policy_scope, require_policy
++    with policy_scope(CONVERSATION_ONLY):
++        result = state.agent.run_conversation("synthetic question", task_id=state.session_id)
++    inference_calls = [call for call in calls if "messages" in call]
++    assert result["final_response"] == "synthetic reply" and len(inference_calls) == 1
++    assert all(not call.get("tools") and not call.get("functions") for call in calls)
++    with pytest.raises(PermissionError):
++        execute_tool_calls_sequential(state.agent, SimpleNamespace(tool_calls=[]), [], state.session_id)
++    # A direct dispatch still cannot call a registered handler from a restricted turn.
++    with policy_scope(CONVERSATION_ONLY):
++        assert "unavailable" in handle_function_call("terminal", {"command": "true"})
++    from tools.mcp_tool_agent import refresh_agent_mcp_tools, restore_agent_tool_prefix
++    state.agent.tools = [{"function": {"name": "terminal"}}]
++    assert refresh_agent_mcp_tools(state.agent) == set()
++    assert not restore_agent_tool_prefix(state.agent, ["terminal"])
++    assert state.agent.tools == []
++    for mode, provider in [("codex_app_server", "openai-codex"), ("chat_completions", "copilot-acp")]:
++        old_mode, old_provider = state.agent.api_mode, state.agent.provider
++        state.agent.api_mode, state.agent.provider = mode, provider
++        with pytest.raises(PermissionError):
++            require_policy(state.agent, CONVERSATION_ONLY)
++        state.agent.api_mode, state.agent.provider = old_mode, old_provider
++    state.agent.tools = [{"function": {"name": "terminal"}}]
++    with pytest.raises(PermissionError):
++        manager.get_session(state.session_id)
++    state.agent.tools = []
++    assert manager.get_session(state.session_id) is state
++    assert manager.get_session("legacy-unmarked-id") is None
++    async def check():
++        with pytest.raises(PermissionError):
++            await server.new_session(str(tmp_path), mcp_servers=[object()])
++        with pytest.raises(PermissionError):
++            await server.resume_session(str(tmp_path), "legacy-unmarked-id")
++        with pytest.raises(PermissionError):
++            await server.set_config_option("x", state.session_id, "y")
++        fields = await server._session_response_fields(state)
++        assert fields["field_meta"]["conversationPolicy"] == CONVERSATION_ONLY.metadata(state.session_id)
++        from acp.schema import TextContentBlock
++        reply = await server.prompt([TextContentBlock(type="text", text="synthetic ACP question")], state.session_id)
++        assert reply.stop_reason == "end_turn"
++        assert len([call for call in calls if "messages" in call]) == 2
++        def switch(_state, _model, **kwargs):
++            assert current_policy() == CONVERSATION_ONLY
++            return "openai", "openai", "test-model"
++        monkeypatch.setattr(server, "_switch_model", switch)
++        await server.set_session_model("test-model", state.session_id)
++        require_policy(state.agent, CONVERSATION_ONLY)
++    asyncio.run(check())
++    for mode, provider in [("codex_app_server", "openai-codex"), ("chat_completions", "copilot-acp")]:
++        with monkeypatch.context() as scoped:
++            scoped.setattr(runtime_provider, "resolve_runtime_provider", lambda **kw: {
++                "provider": provider, "api_mode": mode, "api_key": "dummy-test-key", "base_url": f"http://127.0.0.1:{http_provider.server_port}/v1"})
++            with pytest.raises(PermissionError, match="direct inference"):
++                manager.create_session(cwd=str(tmp_path))
++
++
++def test_default_session_policy_unchanged():
++    manager = SessionManager(agent_factory=lambda: SimpleNamespace(model="test-model"))
++    state = manager.create_session()
++    assert state.conversation_policy is None
++    assert state.agent.model == "test-model"
+diff --git a/tests/hermes_cli/test_codex_native_model_switch.py b/tests/hermes_cli/test_codex_native_model_switch.py
+new file mode 100644
+index 0000000000..bec485cce0
+--- /dev/null
++++ b/tests/hermes_cli/test_codex_native_model_switch.py
+@@ -0,0 +1,24 @@
++"""Native Codex endpoints must not be validated as custom /models APIs."""
++from types import SimpleNamespace
++import pytest
++from hermes_cli import model_switch, models_validate
++
++
++@pytest.mark.parametrize('url,expected', [
++    ('https://chatgpt.com/backend-api/codex', 'openai-codex'),
++    ('https://proxy.example/v1', 'custom:openai-codex'),
++    ('https://chatgpt.com.evil.example/backend-api/codex', 'custom:openai-codex'),
++])
++def test_native_catalog_selection_preserves_custom_endpoint_validation(monkeypatch, url, expected):
++    monkeypatch.setattr(model_switch, 'resolve_provider_full', lambda *a, **k: SimpleNamespace(source='user-config'))
++    seen = []
++    def validate(model, provider, **kwargs):
++        seen.append(provider)
++        return {'accepted': True, 'persist': True, 'recognized': False}
++    monkeypatch.setattr(models_validate, 'validate_requested_model', validate)
++    state = model_switch._Switch('gpt-hidden', 'openai-codex', 'gpt-current', url,
++        'synthetic', False, 'openai-codex', {}, [], new_model='gpt-hidden',
++        target_provider='openai-codex', api_key='synthetic', base_url=url,
++        api_mode='codex_responses')
++    assert model_switch._validate_switch(state) is None
++    assert seen == [expected]
+diff --git a/tools/mcp_tool_agent.py b/tools/mcp_tool_agent.py
+index 5e8af44da0..2193283fd7 100644
+--- a/tools/mcp_tool_agent.py
++++ b/tools/mcp_tool_agent.py
+@@ -103,0 +104,3 @@ def refresh_agent_mcp_tools(
++    if getattr(agent, "conversation_policy", None) is not None:
++        agent.tools, agent.valid_tool_names = [], set()
++        return set()
+@@ -158,0 +162,3 @@ def restore_agent_tool_prefix(agent, saved_names: list) -> bool:
++    if getattr(agent, "conversation_policy", None) is not None:
++        agent.tools, agent.valid_tool_names = [], set()
++        return False
